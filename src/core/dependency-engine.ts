@@ -15,12 +15,25 @@ export interface NextActionItem {
 export interface NextActionEvaluation {
   item: NextActionItem
   isNextAction: boolean
-  blockedReason: Array<"completed" | "canceled" | "not-started" | "dependency-unmet">
+  blockedReason: Array<
+    | "completed"
+    | "canceled"
+    | "not-started"
+    | "dependency-unmet"
+    | "has-open-children"
+    | "ancestor-dependency-unmet"
+  >
 }
 
 interface DependencyCycleContext {
   componentByTaskId: Map<DbId, number>
   componentSizeById: Map<number, number>
+}
+
+interface SubtaskContext {
+  statusByTaskId: Map<DbId, string>
+  childTaskIdsByParentId: Map<DbId, DbId[]>
+  parentTaskIdByTaskId: Map<DbId, DbId | null>
 }
 
 export async function collectNextActions(
@@ -30,9 +43,10 @@ export async function collectNextActions(
   const taskBlocks = await queryTaskBlocks(schema.tagAlias)
   const taskMap = buildTaskMap(taskBlocks)
   const cycleContext = buildDependencyCycleContext(taskBlocks, taskMap, schema)
+  const subtaskContext = buildSubtaskContext(taskBlocks, schema)
 
   const evaluations = taskBlocks.map((block) => {
-    return evaluateNextAction(block, taskMap, schema, now, cycleContext)
+    return evaluateNextAction(block, taskMap, schema, now, cycleContext, subtaskContext)
   })
 
   return evaluations
@@ -47,6 +61,7 @@ export function evaluateNextAction(
   schema: TaskSchemaDefinition,
   now: Date = new Date(),
   cycleContext: DependencyCycleContext | null = null,
+  subtaskContext: SubtaskContext | null = null,
 ): NextActionEvaluation {
   const taskRef = findTaskTagRef(block, schema.tagAlias)
   const status = getTaskStatus(taskRef?.data, schema)
@@ -62,6 +77,14 @@ export function evaluateNextAction(
     blockedReason.push("not-started")
   }
 
+  if (hasOpenSubtask(block, schema, subtaskContext)) {
+    blockedReason.push("has-open-children")
+  }
+
+  if (hasAncestorDependencyUnmet(block, taskMap, schema, cycleContext, subtaskContext)) {
+    blockedReason.push("ancestor-dependency-unmet")
+  }
+
   if (!isDependencySatisfied(
     block,
     values.dependsOn,
@@ -69,6 +92,7 @@ export function evaluateNextAction(
     taskMap,
     schema,
     cycleContext,
+    subtaskContext,
   )) {
     blockedReason.push("dependency-unmet")
   }
@@ -103,6 +127,62 @@ function buildTaskMap(blocks: Block[]): Map<DbId, Block> {
   return map
 }
 
+function buildSubtaskContext(
+  taskBlocks: Block[],
+  schema: TaskSchemaDefinition,
+): SubtaskContext | null {
+  if (taskBlocks.length === 0) {
+    return null
+  }
+
+  const statusByTaskId = new Map<DbId, string>()
+  const childTaskIdsByParentId = new Map<DbId, DbId[]>()
+  const parentTaskIdByTaskId = new Map<DbId, DbId | null>()
+
+  for (const block of taskBlocks) {
+    const liveBlock = getLiveTaskBlock(block)
+    const taskRef = findTaskTagRef(liveBlock, schema.tagAlias)
+    if (taskRef == null) {
+      continue
+    }
+
+    const taskId = getMirrorId(liveBlock.id)
+    statusByTaskId.set(taskId, getTaskStatus(taskRef.data, schema))
+    parentTaskIdByTaskId.set(taskId, null)
+  }
+
+  for (const block of taskBlocks) {
+    const liveBlock = getLiveTaskBlock(block)
+    const taskId = getMirrorId(liveBlock.id)
+    const childTaskIds: DbId[] = []
+
+    for (const childId of liveBlock.children.map((item) => getMirrorId(item))) {
+      if (childId === taskId) {
+        continue
+      }
+      if (!statusByTaskId.has(childId)) {
+        continue
+      }
+      if (!childTaskIds.includes(childId)) {
+        childTaskIds.push(childId)
+      }
+    }
+
+    childTaskIdsByParentId.set(taskId, childTaskIds)
+
+    const parentId = liveBlock.parent != null ? getMirrorId(liveBlock.parent) : null
+    if (parentId != null && parentId !== taskId && statusByTaskId.has(parentId)) {
+      parentTaskIdByTaskId.set(taskId, parentId)
+    }
+  }
+
+  return {
+    statusByTaskId,
+    childTaskIdsByParentId,
+    parentTaskIdByTaskId,
+  }
+}
+
 function isDependencySatisfied(
   sourceBlock: Block,
   dependsOn: DbId[],
@@ -110,6 +190,7 @@ function isDependencySatisfied(
   taskMap: Map<DbId, Block>,
   schema: TaskSchemaDefinition,
   cycleContext: DependencyCycleContext | null,
+  subtaskContext: SubtaskContext | null,
 ): boolean {
   if (dependsOn.length === 0) {
     return true
@@ -146,8 +227,12 @@ function isDependencySatisfied(
     }
 
     const dependencyRef = findTaskTagRef(dependencyTask, schema.tagAlias)
-    const dependencyStatus = getTaskStatus(dependencyRef?.data, schema)
-    return [isDoneStatus(dependencyStatus, schema)]
+    const dependencyStatus = subtaskContext?.statusByTaskId.get(dependencyTaskId) ??
+      getTaskStatus(dependencyRef?.data, schema)
+    return [
+      isDoneStatus(dependencyStatus, schema) &&
+      !hasOpenSubtaskByTaskId(dependencyTaskId, schema, subtaskContext),
+    ]
   })
 
   if (completionList.length === 0) {
@@ -157,6 +242,98 @@ function isDependencySatisfied(
   return mode === "ANY"
     ? completionList.some((value) => value)
     : completionList.every((value) => value)
+}
+
+function hasOpenSubtask(
+  sourceBlock: Block,
+  schema: TaskSchemaDefinition,
+  subtaskContext: SubtaskContext | null,
+): boolean {
+  return hasOpenSubtaskByTaskId(getMirrorId(sourceBlock.id), schema, subtaskContext)
+}
+
+function hasOpenSubtaskByTaskId(
+  taskId: DbId,
+  schema: TaskSchemaDefinition,
+  subtaskContext: SubtaskContext | null,
+): boolean {
+  if (subtaskContext == null) {
+    return false
+  }
+
+  const directChildren = subtaskContext.childTaskIdsByParentId.get(taskId) ?? []
+  if (directChildren.length === 0) {
+    return false
+  }
+
+  const queue = [...directChildren]
+  const visited = new Set<DbId>()
+
+  while (queue.length > 0) {
+    const childTaskId = queue.shift() as DbId
+    if (visited.has(childTaskId)) {
+      continue
+    }
+    visited.add(childTaskId)
+
+    const status = subtaskContext.statusByTaskId.get(childTaskId)
+    if (status != null && !isDoneStatus(status, schema) && !isCanceledStatus(status)) {
+      return true
+    }
+
+    const grandChildren = subtaskContext.childTaskIdsByParentId.get(childTaskId) ?? []
+    for (const grandChildId of grandChildren) {
+      if (!visited.has(grandChildId)) {
+        queue.push(grandChildId)
+      }
+    }
+  }
+
+  return false
+}
+
+function hasAncestorDependencyUnmet(
+  sourceBlock: Block,
+  taskMap: Map<DbId, Block>,
+  schema: TaskSchemaDefinition,
+  cycleContext: DependencyCycleContext | null,
+  subtaskContext: SubtaskContext | null,
+): boolean {
+  if (subtaskContext == null) {
+    return false
+  }
+
+  const sourceTaskId = getMirrorId(sourceBlock.id)
+  const visited = new Set<DbId>([sourceTaskId])
+  let ancestorTaskId = subtaskContext.parentTaskIdByTaskId.get(sourceTaskId) ?? null
+
+  while (ancestorTaskId != null) {
+    if (visited.has(ancestorTaskId)) {
+      break
+    }
+    visited.add(ancestorTaskId)
+
+    const ancestorBlock = taskMap.get(ancestorTaskId) ?? orca.state.blocks[ancestorTaskId]
+    if (ancestorBlock != null) {
+      const ancestorRef = findTaskTagRef(ancestorBlock, schema.tagAlias)
+      const ancestorValues = getTaskPropertiesFromRef(ancestorRef?.data, schema)
+      if (!isDependencySatisfied(
+        ancestorBlock,
+        ancestorValues.dependsOn,
+        ancestorValues.dependsMode,
+        taskMap,
+        schema,
+        cycleContext,
+        subtaskContext,
+      )) {
+        return true
+      }
+    }
+
+    ancestorTaskId = subtaskContext.parentTaskIdByTaskId.get(ancestorTaskId) ?? null
+  }
+
+  return false
 }
 
 function isSelfDependencyByRefId(
