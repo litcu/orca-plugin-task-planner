@@ -55,7 +55,7 @@ export function evaluateNextAction(
     blockedReason.push("not-started")
   }
 
-  if (!isDependencySatisfied(values.dependsOn, values.dependsMode, taskMap, schema)) {
+  if (!isDependencySatisfied(block, values.dependsOn, values.dependsMode, taskMap, schema)) {
     blockedReason.push("dependency-unmet")
   }
 
@@ -90,6 +90,7 @@ function buildTaskMap(blocks: Block[]): Map<DbId, Block> {
 }
 
 function isDependencySatisfied(
+  sourceBlock: Block,
   dependsOn: DbId[],
   rawMode: string,
   taskMap: Map<DbId, Block>,
@@ -101,8 +102,11 @@ function isDependencySatisfied(
 
   const mode = normalizeDependsMode(rawMode)
   const completionList = dependsOn.map((dependencyId) => {
-    const targetId = getMirrorId(dependencyId)
-    const dependencyTask = taskMap.get(targetId)
+    const dependencyTask = resolveDependencyTask(
+      sourceBlock,
+      dependencyId,
+      taskMap,
+    )
 
     if (dependencyTask == null) {
       return false
@@ -116,6 +120,28 @@ function isDependencySatisfied(
   return mode === "ANY"
     ? completionList.some((value) => value)
     : completionList.every((value) => value)
+}
+
+function resolveDependencyTask(
+  sourceBlock: Block,
+  dependencyId: DbId,
+  taskMap: Map<DbId, Block>,
+): Block | null {
+  // 兼容直接存块 ID 的情况。
+  const targetId = getMirrorId(dependencyId)
+  const taskByBlockId = taskMap.get(targetId) ?? taskMap.get(dependencyId)
+  if (taskByBlockId != null) {
+    return taskByBlockId
+  }
+
+  // 兼容 BlockRefs 存 ref ID 的情况：先在当前块 refs 里反查到目标块。
+  const ref = sourceBlock.refs.find((item) => item.id === dependencyId)
+  if (ref == null) {
+    return null
+  }
+
+  const taskByRef = taskMap.get(getMirrorId(ref.to)) ?? taskMap.get(ref.to)
+  return taskByRef ?? null
 }
 
 function normalizeDependsMode(mode: string): DependencyMode {

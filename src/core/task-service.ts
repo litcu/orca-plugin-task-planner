@@ -109,6 +109,7 @@ async function initializeTaskTag(
 ) {
   const propertyNames = schema.propertyNames
   const [todoStatus] = schema.statusChoices
+  const [defaultDependsMode] = schema.dependencyModeChoices
 
   // 首次转任务时只写入 A-01 约定字段，避免残留旧字段。
   await orca.commands.invokeEditorCommand(
@@ -122,7 +123,7 @@ async function initializeTaskTag(
       { name: propertyNames.endTime, value: null },
       {
         name: propertyNames.dependsMode,
-        value: schema.dependencyModeChoices[0],
+        value: defaultDependsMode,
       },
     ],
   )

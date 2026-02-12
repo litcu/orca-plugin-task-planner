@@ -15,6 +15,9 @@ const PROP_TYPE = {
   TEXT_CHOICES: 6,
 } as const
 
+const DEFAULT_SCORE = 50
+const DEFAULT_DEPENDENCY_DELAY = 0
+
 interface TaskSchemaPropertyNames {
   status: string
   startTime: string
@@ -177,6 +180,9 @@ function buildTaskTagProperties(
   existingProperties: BlockProperty[] | undefined,
 ): BlockProperty[] {
   const names = schema.propertyNames
+  const [defaultStatus] = schema.statusChoices
+  const [defaultDependsMode] = schema.dependencyModeChoices
+  const tagScope = schema.tagAlias
   const findProperty = (name: string) => {
     return existingProperties?.find((property) => property.name === name)
   }
@@ -191,6 +197,8 @@ function buildTaskTagProperties(
       typeArgs: {
         subType: "single",
         choices: schema.statusChoices,
+        defaultEnabled: true,
+        default: defaultStatus,
       },
       pos: findPos(names.status),
     },
@@ -209,21 +217,36 @@ function buildTaskTagProperties(
     {
       name: names.importance,
       type: PROP_TYPE.NUMBER,
+      typeArgs: {
+        defaultEnabled: true,
+        default: DEFAULT_SCORE,
+      },
       pos: findPos(names.importance),
     },
     {
       name: names.urgency,
       type: PROP_TYPE.NUMBER,
+      typeArgs: {
+        defaultEnabled: true,
+        default: DEFAULT_SCORE,
+      },
       pos: findPos(names.urgency),
     },
     {
       name: names.effort,
       type: PROP_TYPE.NUMBER,
+      typeArgs: {
+        defaultEnabled: true,
+        default: DEFAULT_SCORE,
+      },
       pos: findPos(names.effort),
     },
     {
       name: names.dependsOn,
       type: PROP_TYPE.BLOCK_REFS,
+      typeArgs: {
+        scope: tagScope,
+      },
       pos: findPos(names.dependsOn),
     },
     {
@@ -232,12 +255,18 @@ function buildTaskTagProperties(
       typeArgs: {
         subType: "single",
         choices: schema.dependencyModeChoices,
+        defaultEnabled: true,
+        default: defaultDependsMode,
       },
       pos: findPos(names.dependsMode),
     },
     {
       name: names.dependencyDelay,
       type: PROP_TYPE.NUMBER,
+      typeArgs: {
+        defaultEnabled: true,
+        default: DEFAULT_DEPENDENCY_DELAY,
+      },
       pos: findPos(names.dependencyDelay),
     },
     {

@@ -1,5 +1,6 @@
-import type { DbId } from "../orca.d.ts"
+import type { Block, DbId } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "../core/task-schema"
+import { getMirrorId } from "../core/block-utils"
 import {
   buildTaskFieldLabels,
   getTaskPropertiesFromRef,
@@ -33,6 +34,8 @@ const popupState: PopupState = {
   options: null,
   visible: false,
 }
+
+const TAG_REF_TYPE = 2
 
 export type { OpenTaskPropertyPopupOptions }
 
@@ -111,11 +114,19 @@ function TaskPropertyPopupView(props: {
 
   const block = orca.state.blocks[props.blockId]
   const taskRef = block?.refs.find(
-    (ref) => ref.type === 2 && ref.alias === props.schema.tagAlias,
+    (ref) => ref.type === TAG_REF_TYPE && ref.alias === props.schema.tagAlias,
   )
   const initialValues = React.useMemo(() => {
     return getTaskPropertiesFromRef(taskRef?.data, props.schema)
-  }, [taskRef, props.schema])
+  }, [block, taskRef, props.schema])
+
+  const initialDependsOnForEditor = React.useMemo(() => {
+    return normalizeDependsOnForSelect(
+      block,
+      initialValues.dependsOn,
+      props.schema.propertyNames.dependsOn,
+    )
+  }, [block, initialValues.dependsOn, props.schema.propertyNames.dependsOn])
 
   const [statusValue, setStatusValue] = React.useState(initialValues.status)
   const [startTimeValue, setStartTimeValue] = React.useState<Date | null>(
@@ -137,7 +148,7 @@ function TaskPropertyPopupView(props: {
     clampScore(initialValues.urgency),
   )
   const [dependsOnValues, setDependsOnValues] = React.useState<DbId[]>(
-    initialValues.dependsOn,
+    initialDependsOnForEditor,
   )
   const [dependsModeValue, setDependsModeValue] = React.useState(
     initialValues.dependsMode,
@@ -170,7 +181,7 @@ function TaskPropertyPopupView(props: {
     setUrgencyText(initialValues.urgency == null ? "" : String(initialValues.urgency))
     setImportanceValue(clampScore(initialValues.importance))
     setUrgencyValue(clampScore(initialValues.urgency))
-    setDependsOnValues(initialValues.dependsOn)
+    setDependsOnValues(initialDependsOnForEditor)
     setDependsModeValue(initialValues.dependsMode)
     setDependencyDelayText(
       initialValues.dependencyDelay == null
@@ -179,7 +190,7 @@ function TaskPropertyPopupView(props: {
     )
     setEditingDateField(null)
     setErrorText("")
-  }, [props.blockId, initialValues])
+  }, [props.blockId, initialValues, initialDependsOnForEditor])
 
   const hasDependencies = dependsOnValues.length > 0
   const selectedDateValue =
@@ -248,23 +259,26 @@ function TaskPropertyPopupView(props: {
     setErrorText("")
 
     try {
+      const payload = toRefDataForSave(
+        {
+          status: statusValue,
+          startTime: startTimeValue,
+          endTime: endTimeValue,
+          importance: importanceInRange,
+          urgency: urgencyInRange,
+          dependsOn: dependsOnValues,
+          dependsMode: hasDependencies ? dependsModeValue : "ALL",
+          dependencyDelay: hasDependencies ? dependencyDelay.value : null,
+        },
+        props.schema,
+      )
+
       await orca.commands.invokeEditorCommand(
-        "core.editor.setRefData",
+        "core.editor.insertTag",
         null,
-        taskRef,
-        toRefDataForSave(
-          {
-            status: statusValue,
-            startTime: startTimeValue,
-            endTime: endTimeValue,
-            importance: importanceInRange,
-            urgency: urgencyInRange,
-            dependsOn: dependsOnValues,
-            dependsMode: hasDependencies ? dependsModeValue : "ALL",
-            dependencyDelay: hasDependencies ? dependencyDelay.value : null,
-          },
-          props.schema,
-        ),
+        props.blockId,
+        props.schema.tagAlias,
+        payload,
       )
 
       props.onClose()
@@ -507,14 +521,17 @@ function TaskPropertyPopupView(props: {
       renderFormRow(
         labels.dependsOn,
         React.createElement(BlockSelect, {
-          mode: "ref",
+          mode: "block",
+          scope: props.schema.tagAlias,
           selected: dependsOnValues,
+          multiSelection: true,
           width: "100%",
           menuContainer: popupMenuContainerRef,
           onChange: (selected: string[]) => {
             const normalized = selected
               .map((item) => Number(item))
               .filter((item) => !Number.isNaN(item))
+
             setDependsOnValues(normalized)
             if (normalized.length === 0) {
               setDependsModeValue("ALL")
@@ -630,6 +647,31 @@ function clampScore(value: number | null): number {
   }
 
   return Math.round(value)
+}
+
+function normalizeDependsOnForSelect(
+  sourceBlock: Block | undefined,
+  dependsOn: DbId[],
+  dependsOnPropertyName: string,
+): DbId[] {
+  const normalized: DbId[] = []
+
+  for (const value of dependsOn) {
+    const matchedRef = sourceBlock?.refs.find((ref) => {
+      return (
+        ref.type === TAG_REF_TYPE &&
+        ref.alias === dependsOnPropertyName &&
+        ref.id === value
+      )
+    })
+
+    const targetId = getMirrorId(matchedRef?.to ?? value)
+    if (!normalized.includes(targetId)) {
+      normalized.push(targetId)
+    }
+  }
+
+  return normalized
 }
 
 function toScoreInRange(value: number | null): number | null {
