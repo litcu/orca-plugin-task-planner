@@ -14,19 +14,18 @@ export function setupNextActionsEntry(
   schema: TaskSchemaDefinition,
 ): NextActionsEntryHandle {
   const panelType = `${pluginName}.taskViewsPanel`
+  const legacyPanelTypes = [`${pluginName}.nextActionsPanel`, `${pluginName}.allTasksPanel`]
   const dynamicOpenTaskViewsCommandId = `${pluginName}.openTaskViewsPanel`
-  const dynamicOpenNextActionsCommandId = `${pluginName}.openNextActionsPanel`
-  const dynamicOpenAllTasksCommandId = `${pluginName}.openAllTasksPanel`
   const fixedOpenTaskViewsCommandId = "mylifeorganized.openTaskViewsPanel"
-  const fixedOpenNextActionsCommandId = "mylifeorganized.openNextActionsPanel"
-  const fixedOpenAllTasksCommandId = "mylifeorganized.openAllTasksPanel"
+  const legacyOpenCommandIds = [
+    `${pluginName}.openNextActionsPanel`,
+    `${pluginName}.openAllTasksPanel`,
+    "mylifeorganized.openNextActionsPanel",
+    "mylifeorganized.openAllTasksPanel",
+  ]
   const openCommandIds = [
     dynamicOpenTaskViewsCommandId,
-    dynamicOpenNextActionsCommandId,
-    dynamicOpenAllTasksCommandId,
     fixedOpenTaskViewsCommandId,
-    fixedOpenNextActionsCommandId,
-    fixedOpenAllTasksCommandId,
   ].filter((id, index, list) => list.indexOf(id) === index)
 
   // 通过闭包注入 schema，保证面板渲染时始终使用当前任务字段定义。
@@ -36,6 +35,12 @@ export function setupNextActionsEntry(
       ...panelProps,
       schema,
     })
+  }
+
+  for (const legacyPanelType of legacyPanelTypes) {
+    if (legacyPanelType !== panelType && orca.state.panelRenderers[legacyPanelType] != null) {
+      orca.panels.unregisterPanel(legacyPanelType)
+    }
   }
 
   if (orca.state.panelRenderers[panelType] == null) {
@@ -52,26 +57,12 @@ export function setupNextActionsEntry(
     "next-actions",
     "打开任务视图面板（Open Task Views）",
   )
-  registerOpenCommand(
-    dynamicOpenNextActionsCommandId,
-    "next-actions",
-    "打开 Next Actions 视图（Open Next Actions）",
-  )
-  registerOpenCommand(
-    fixedOpenNextActionsCommandId,
-    "next-actions",
-    "打开 Next Actions 视图（Open Next Actions）",
-  )
-  registerOpenCommand(
-    dynamicOpenAllTasksCommandId,
-    "all-tasks",
-    "打开全量任务列表视图（Open All Tasks）",
-  )
-  registerOpenCommand(
-    fixedOpenAllTasksCommandId,
-    "all-tasks",
-    "打开全量任务列表视图（Open All Tasks）",
-  )
+
+  for (const legacyCommandId of legacyOpenCommandIds) {
+    if (orca.state.commands[legacyCommandId] != null) {
+      orca.commands.unregisterCommand(legacyCommandId)
+    }
+  }
 
   return {
     panelType,
@@ -85,8 +76,22 @@ export function setupNextActionsEntry(
         orca.commands.unregisterCommand(commandId)
       }
 
+      for (const legacyCommandId of legacyOpenCommandIds) {
+        if (orca.state.commands[legacyCommandId] == null) {
+          continue
+        }
+
+        orca.commands.unregisterCommand(legacyCommandId)
+      }
+
       if (orca.state.panelRenderers[panelType] != null) {
         orca.panels.unregisterPanel(panelType)
+      }
+
+      for (const legacyPanelType of legacyPanelTypes) {
+        if (legacyPanelType !== panelType && orca.state.panelRenderers[legacyPanelType] != null) {
+          orca.panels.unregisterPanel(legacyPanelType)
+        }
       }
     },
   }
@@ -97,7 +102,7 @@ export function setupNextActionsEntry(
     label: string,
   ) {
     if (orca.state.commands[commandId] != null) {
-      return
+      orca.commands.unregisterCommand(commandId)
     }
 
     orca.commands.registerCommand(

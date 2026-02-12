@@ -13,6 +13,8 @@ interface TaskViewsPanelProps extends PanelProps {
   schema: TaskSchemaDefinition
 }
 
+const TASK_VIEWS_CONTENT_WIDTH = "min(760px, 100%)"
+
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
   const Segmented = orca.components.Segmented
@@ -41,28 +43,37 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       "div",
       {
         style: {
-          padding: "12px 12px 0 12px",
+          padding: "12px 12px 8px 12px",
           boxSizing: "border-box",
         },
       },
-      React.createElement(Segmented, {
-        selected: tab,
-        options: [
-          {
-            value: "next-actions",
-            label: isChinese ? "Next Actions" : "Next Actions",
+      React.createElement(
+        "div",
+        {
+          style: {
+            width: TASK_VIEWS_CONTENT_WIDTH,
+            margin: "0 auto",
           },
-          {
-            value: "all-tasks",
-            label: isChinese ? "全量任务" : "All Tasks",
-          },
-        ],
-        onChange: (value: string) => {
-          if (value === "next-actions" || value === "all-tasks") {
-            setPreferredTaskViewsTab(value)
-          }
         },
-      }),
+        React.createElement(Segmented, {
+          selected: tab,
+          options: [
+            {
+              value: "next-actions",
+              label: isChinese ? "Next Actions" : "Next Actions",
+            },
+            {
+              value: "all-tasks",
+              label: isChinese ? "全量任务" : "All Tasks",
+            },
+          ],
+          onChange: (value: string) => {
+            if (value === "next-actions" || value === "all-tasks") {
+              setPreferredTaskViewsTab(value)
+            }
+          },
+        }),
+      ),
     ),
     React.createElement(
       "div",
@@ -70,17 +81,32 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         style: {
           flex: 1,
           minHeight: 0,
+          padding: "0 12px 12px 12px",
+          boxSizing: "border-box",
+          display: "flex",
+          justifyContent: "center",
         },
       },
-      tab === "next-actions"
-        ? React.createElement(NextActionsPanel, {
-            ...props,
-            schema: props.schema,
-          })
-        : React.createElement(AllTasksPanel, {
-            ...props,
-            schema: props.schema,
-          }),
+      React.createElement(
+        "div",
+        {
+          style: {
+            width: TASK_VIEWS_CONTENT_WIDTH,
+            minWidth: 0,
+            minHeight: 0,
+            height: "100%",
+          },
+        },
+        tab === "next-actions"
+          ? React.createElement(NextActionsPanel, {
+              ...props,
+              schema: props.schema,
+            })
+          : React.createElement(AllTasksPanel, {
+              ...props,
+              schema: props.schema,
+            }),
+      ),
     ),
   )
 }

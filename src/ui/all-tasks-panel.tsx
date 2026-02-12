@@ -6,6 +6,7 @@ import {
 } from "../core/all-tasks-engine"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 import { openTaskPropertyPopup } from "./task-property-panel"
+import { TaskListRow } from "./task-list-row"
 
 interface AllTasksPanelProps extends PanelProps {
   schema: TaskSchemaDefinition
@@ -30,6 +31,7 @@ export function AllTasksPanel(props: AllTasksPanelProps) {
   const [statusFilter, setStatusFilter] = React.useState("all")
   const [keyword, setKeyword] = React.useState("")
   const [updatingIds, setUpdatingIds] = React.useState<Set<DbId>>(new Set())
+  const [collapsedIds, setCollapsedIds] = React.useState<Set<DbId>>(new Set())
 
   const loadItems = React.useCallback(async () => {
     setLoading(true)
@@ -109,6 +111,18 @@ export function AllTasksPanel(props: AllTasksPanelProps) {
     [isChinese, loadItems, props.schema],
   )
 
+  const toggleCollapsed = React.useCallback((blockId: DbId) => {
+    setCollapsedIds((prev: Set<DbId>) => {
+      const next = new Set(prev)
+      if (next.has(blockId)) {
+        next.delete(blockId)
+      } else {
+        next.add(blockId)
+      }
+      return next
+    })
+  }, [])
+
   const statusOptions = React.useMemo(() => {
     return [
       {
@@ -144,96 +158,49 @@ export function AllTasksPanel(props: AllTasksPanelProps) {
     return filterTreeWithContext(tree, matchesItem)
   }, [matchesItem, tree])
   const visibleCount = React.useMemo(() => {
-    return countTreeNodes(filteredTree)
-  }, [filteredTree])
-
-  const renderTaskRow = React.useCallback(
-    (item: AllTaskItem, depth: number, contextOnly: boolean) => {
-      const isUpdating = updatingIds.has(item.blockId)
-
-      return React.createElement(
-        "div",
-        {
-          key: item.blockId,
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "6px 8px",
-            paddingLeft: `${8 + depth * 18}px`,
-            border: "1px solid var(--orca-color-border)",
-            borderRadius: "6px",
-            background: "var(--orca-color-bg-2)",
-            opacity: contextOnly ? 0.7 : 1,
-          },
-        },
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation()
-              void toggleTaskStatus(item.blockId)
-            },
-            disabled: loading || isUpdating,
-            title: isChinese ? "切换任务状态" : "Toggle task status",
-            style: {
-              width: "22px",
-              height: "22px",
-              borderRadius: "999px",
-              border: "1px solid var(--orca-color-border)",
-              background: "var(--orca-color-bg)",
-              color: resolveStatusColor(item.status, props.schema),
-              cursor: loading || isUpdating ? "not-allowed" : "pointer",
-              flexShrink: 0,
-            },
-          },
-          resolveStatusGlyph(item.status, props.schema),
-        ),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            onClick: () => openTaskProperty(item.blockId),
-            style: {
-              border: "none",
-              background: "transparent",
-              color: "var(--orca-color-text)",
-              textAlign: "left",
-              cursor: "pointer",
-              padding: 0,
-              flex: 1,
-              fontSize: "13px",
-            },
-          },
-          item.text,
-        ),
-        React.createElement(
-          "div",
-          {
-            style: {
-              fontSize: "11px",
-              color: "var(--orca-color-text-2)",
-              whiteSpace: "nowrap",
-            },
-          },
-          item.status,
-        ),
-      )
-    },
-    [isChinese, loading, openTaskProperty, props.schema, toggleTaskStatus, updatingIds],
-  )
+    return countVisibleTreeNodes(filteredTree, collapsedIds)
+  }, [collapsedIds, filteredTree])
 
   const renderTreeRows = React.useCallback(
     (nodes: TaskTreeNode[], depth: number): React.ReactNode[] => {
       return nodes.flatMap((node) => {
-        return [
-          renderTaskRow(node.item, depth, node.contextOnly),
-          ...renderTreeRows(node.children, depth + 1),
-        ]
+        const hasChildren = node.children.length > 0
+        const collapsed = hasChildren && collapsedIds.has(node.item.blockId)
+        const row = React.createElement(TaskListRow, {
+          key: node.item.blockId,
+          item: node.item,
+          schema: props.schema,
+          isChinese,
+          depth,
+          contextOnly: node.contextOnly,
+          loading,
+          updating: updatingIds.has(node.item.blockId),
+          showCollapseToggle: hasChildren,
+          collapsed,
+          onToggleCollapse: hasChildren
+            ? () => toggleCollapsed(node.item.blockId)
+            : undefined,
+          onToggleStatus: () => toggleTaskStatus(node.item.blockId),
+          onOpen: () => openTaskProperty(node.item.blockId),
+        })
+
+        if (!hasChildren || collapsed) {
+          return [row]
+        }
+
+        return [row, ...renderTreeRows(node.children, depth + 1)]
       })
     },
-    [renderTaskRow],
+    [
+      collapsedIds,
+      isChinese,
+      loading,
+      openTaskProperty,
+      props.schema,
+      toggleCollapsed,
+      toggleTaskStatus,
+      updatingIds,
+    ],
   )
 
   return React.createElement(
@@ -241,6 +208,8 @@ export function AllTasksPanel(props: AllTasksPanelProps) {
     {
       style: {
         height: "100%",
+        width: "100%",
+        minWidth: 0,
         display: "flex",
         flexDirection: "column",
         padding: "12px",
@@ -364,8 +333,11 @@ export function AllTasksPanel(props: AllTasksPanelProps) {
           {
             style: {
               overflow: "auto",
+              width: "100%",
+              minWidth: 0,
               display: "flex",
               flexDirection: "column",
+              alignItems: "stretch",
               gap: "6px",
             },
           },
@@ -484,9 +456,13 @@ function filterTreeWithContext(
     .filter((item): item is TaskTreeNode => item != null)
 }
 
-function countTreeNodes(nodes: TaskTreeNode[]): number {
+function countVisibleTreeNodes(nodes: TaskTreeNode[], collapsedIds: Set<DbId>): number {
   return nodes.reduce((total, node) => {
-    return total + 1 + countTreeNodes(node.children)
+    const childrenCount = collapsedIds.has(node.item.blockId)
+      ? 0
+      : countVisibleTreeNodes(node.children, collapsedIds)
+
+    return total + 1 + childrenCount
   }, 0)
 }
 
@@ -499,31 +475,4 @@ function visitTree(nodes: TaskTreeNode[], visited: Set<DbId>) {
     visited.add(node.item.blockId)
     visitTree(node.children, visited)
   }
-}
-
-function resolveStatusGlyph(status: string, schema: TaskSchemaDefinition): string {
-  const [todoStatus, doingStatus, doneStatus] = schema.statusChoices
-  if (status === doneStatus) {
-    return "✓"
-  }
-  if (status === doingStatus) {
-    return "◐"
-  }
-  if (status === todoStatus) {
-    return "○"
-  }
-
-  return "○"
-}
-
-function resolveStatusColor(status: string, schema: TaskSchemaDefinition): string {
-  const [, doingStatus, doneStatus] = schema.statusChoices
-  if (status === doneStatus) {
-    return "var(--orca-color-text-green)"
-  }
-  if (status === doingStatus) {
-    return "var(--orca-color-text-yellow)"
-  }
-
-  return "var(--orca-color-text-2)"
 }

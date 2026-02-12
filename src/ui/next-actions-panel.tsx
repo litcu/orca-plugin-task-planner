@@ -1,7 +1,9 @@
 import type { DbId, PanelProps } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 import { collectNextActions, type NextActionItem } from "../core/dependency-engine"
+import { cycleTaskStatusInView } from "../core/all-tasks-engine"
 import { openTaskPropertyPopup } from "./task-property-panel"
+import { TaskListRow } from "./task-list-row"
 
 interface NextActionsPanelProps extends PanelProps {
   schema: TaskSchemaDefinition
@@ -15,6 +17,7 @@ export function NextActionsPanel(props: NextActionsPanelProps) {
   const [loading, setLoading] = React.useState(true)
   const [items, setItems] = React.useState<NextActionItem[]>([])
   const [errorText, setErrorText] = React.useState("")
+  const [updatingIds, setUpdatingIds] = React.useState<Set<DbId>>(new Set())
 
   const loadItems = React.useCallback(async () => {
     setLoading(true)
@@ -66,11 +69,39 @@ export function NextActionsPanel(props: NextActionsPanelProps) {
     [props.schema],
   )
 
+  const toggleTaskStatus = React.useCallback(
+    async (blockId: DbId) => {
+      setUpdatingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(blockId)
+        return next
+      })
+
+      try {
+        await cycleTaskStatusInView(blockId, props.schema)
+        setErrorText("")
+        await loadItems()
+      } catch (error) {
+        console.error(error)
+        setErrorText(isChinese ? "切换任务状态失败" : "Failed to toggle task status")
+      } finally {
+        setUpdatingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(blockId)
+          return next
+        })
+      }
+    },
+    [isChinese, loadItems, props.schema],
+  )
+
   return React.createElement(
     "div",
     {
       style: {
         height: "100%",
+        width: "100%",
+        minWidth: 0,
         display: "flex",
         flexDirection: "column",
         padding: "12px",
@@ -153,50 +184,29 @@ export function NextActionsPanel(props: NextActionsPanelProps) {
           {
             style: {
               overflow: "auto",
+              width: "100%",
+              minWidth: 0,
               display: "flex",
               flexDirection: "column",
-              gap: "4px",
+              alignItems: "stretch",
+              gap: "6px",
             },
           },
           items.map((item: NextActionItem) => {
-            return React.createElement(
-              "button",
-              {
-                type: "button",
-                key: item.blockId,
-                onClick: () => openTaskProperty(item.blockId),
-                style: {
-                  textAlign: "left",
-                  border: "1px solid var(--orca-color-border)",
-                  background: "var(--orca-color-bg-2)",
-                  color: "var(--orca-color-text)",
-                  borderRadius: "6px",
-                  padding: "8px",
-                  cursor: "pointer",
-                },
-              },
-              React.createElement(
-                "div",
-                {
-                  style: {
-                    fontSize: "13px",
-                    fontWeight: 500,
-                    marginBottom: "2px",
-                  },
-                },
-                item.text,
-              ),
-              React.createElement(
-                "div",
-                {
-                  style: {
-                    fontSize: "11px",
-                    color: "var(--orca-color-text-2)",
-                  },
-                },
-                item.status,
-              ),
-            )
+            return React.createElement(TaskListRow, {
+              key: item.blockId,
+              item,
+              schema: props.schema,
+              isChinese,
+              depth: 0,
+              contextOnly: false,
+              loading,
+              updating: updatingIds.has(item.blockId),
+              showCollapseToggle: false,
+              collapsed: false,
+              onToggleStatus: () => toggleTaskStatus(item.blockId),
+              onOpen: () => openTaskProperty(item.blockId),
+            })
           }),
         )
       : null,
