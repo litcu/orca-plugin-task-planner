@@ -594,6 +594,7 @@ function TaskPropertyPopupView(props: {
               } else {
                 setEndTimeValue(next)
               }
+              setEditingDateField(null)
             },
             onClose: () => setEditingDateField(null),
           })
