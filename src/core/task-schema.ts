@@ -81,6 +81,7 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
 export interface EnsureTaskSchemaResult {
   taskTagId: DbId
   schemaLocale: TaskSchemaLocale
+  schema: TaskSchemaDefinition
   isNewTag: boolean
 }
 
@@ -141,6 +142,7 @@ export async function ensureTaskTagSchema(
   return {
     taskTagId: taskBlock.id,
     schemaLocale: targetSchema.locale,
+    schema: targetSchema,
     isNewTag,
   }
 }
