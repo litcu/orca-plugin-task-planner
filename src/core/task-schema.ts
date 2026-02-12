@@ -63,7 +63,7 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
     propertyNames: {
       status: "状态",
       startTime: "开始时间",
-      endTime: "截至时间",
+      endTime: "结束时间",
       importance: "重要性",
       urgency: "紧急度",
       effort: "工作量",

@@ -1,5 +1,5 @@
 import type { Block, DbId, TagMenuCommand } from "../orca.d.ts"
-import { TASK_TAG_ALIAS } from "./task-schema"
+import { TASK_TAG_ALIAS, getTaskSchemaByLocale } from "./task-schema"
 import {
   closeTaskPropertyPopup,
   disposeTaskPropertyPopup,
@@ -17,6 +17,7 @@ export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
   const tagName = tagAlias.toLowerCase()
   const menuCommandId = `${pluginName}.openTaskPropertyPopupFromTagMenu`
   const openCommandId = `${pluginName}.openTaskPropertyPopup`
+  const schema = getTaskSchemaByLocale(orca.state.locale)
 
   const clickListener = (event: MouseEvent) => {
     const target = event.target
@@ -49,6 +50,7 @@ export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
 
     openTaskPropertyPopup({
       blockId,
+      schema,
       triggerSource: "tag-click",
     })
   }
@@ -65,6 +67,7 @@ export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
 
         openTaskPropertyPopup({
           blockId,
+          schema,
           triggerSource: "tag-menu",
         })
       },

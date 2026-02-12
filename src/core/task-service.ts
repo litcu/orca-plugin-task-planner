@@ -139,7 +139,7 @@ async function cycleTaskTagStatus(
   const currentStartTime = getRefPropertyValue(taskTagRef.data, propertyNames.startTime)
   const currentEndTime = getRefPropertyValue(taskTagRef.data, propertyNames.endTime)
   const dependsModeValue = getDependencyModeValue(taskTagRef.data, schema)
-  const [, doingStatus, doneStatus] = schema.statusChoices
+  const [, doingStatus] = schema.statusChoices
 
   await orca.commands.invokeEditorCommand(
     "core.editor.insertTag",
@@ -151,12 +151,15 @@ async function cycleTaskTagStatus(
       {
         name: propertyNames.startTime,
         type: DATE_TIME_PROP_TYPE,
-        value: nextStatus === doingStatus ? new Date() : currentStartTime,
+        value:
+          nextStatus === doingStatus && currentStartTime == null
+            ? new Date()
+            : currentStartTime,
       },
       {
         name: propertyNames.endTime,
         type: DATE_TIME_PROP_TYPE,
-        value: nextStatus === doneStatus ? new Date() : currentEndTime,
+        value: currentEndTime,
       },
       {
         name: propertyNames.dependsMode,
