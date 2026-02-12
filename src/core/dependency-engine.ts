@@ -100,26 +100,55 @@ function isDependencySatisfied(
     return true
   }
 
+  const sourceBlockInState =
+    orca.state.blocks[getMirrorId(sourceBlock.id)] ?? sourceBlock
   const mode = normalizeDependsMode(rawMode)
-  const completionList = dependsOn.map((dependencyId) => {
+  const sourceTaskId = getMirrorId(sourceBlockInState.id)
+  const completionList = dependsOn.flatMap((dependencyId) => {
+    if (isSelfDependencyByRefId(sourceBlockInState, dependencyId, sourceTaskId)) {
+      return []
+    }
+
     const dependencyTask = resolveDependencyTask(
-      sourceBlock,
+      sourceBlockInState,
       dependencyId,
       taskMap,
     )
 
     if (dependencyTask == null) {
-      return false
+      return [false]
+    }
+
+    // 自依赖无效：忽略该条依赖，避免任务被永久阻塞。
+    if (getMirrorId(dependencyTask.id) === sourceTaskId) {
+      return []
     }
 
     const dependencyRef = findTaskTagRef(dependencyTask, schema.tagAlias)
     const dependencyStatus = getTaskStatus(dependencyRef?.data, schema)
-    return isDoneStatus(dependencyStatus, schema)
+    return [isDoneStatus(dependencyStatus, schema)]
   })
+
+  if (completionList.length === 0) {
+    return true
+  }
 
   return mode === "ANY"
     ? completionList.some((value) => value)
     : completionList.every((value) => value)
+}
+
+function isSelfDependencyByRefId(
+  sourceBlock: Block,
+  dependencyId: DbId,
+  sourceTaskId: DbId,
+): boolean {
+  const matchedRef = sourceBlock.refs.find((item) => item.id === dependencyId)
+  if (matchedRef == null) {
+    return false
+  }
+
+  return getMirrorId(matchedRef.to) === sourceTaskId
 }
 
 function resolveDependencyTask(
@@ -127,21 +156,19 @@ function resolveDependencyTask(
   dependencyId: DbId,
   taskMap: Map<DbId, Block>,
 ): Block | null {
-  // 兼容直接存块 ID 的情况。
+  // 优先按 ref ID 解析：dependsOn 常见存储是 ref ID，避免与块 ID 偶发冲突误判。
+  const ref = sourceBlock.refs.find((item) => item.id === dependencyId)
+  if (ref != null) {
+    const taskByRef = taskMap.get(getMirrorId(ref.to)) ?? taskMap.get(ref.to)
+    if (taskByRef != null) {
+      return taskByRef
+    }
+  }
+
+  // 回退兼容直接存块 ID 的情况。
   const targetId = getMirrorId(dependencyId)
   const taskByBlockId = taskMap.get(targetId) ?? taskMap.get(dependencyId)
-  if (taskByBlockId != null) {
-    return taskByBlockId
-  }
-
-  // 兼容 BlockRefs 存 ref ID 的情况：先在当前块 refs 里反查到目标块。
-  const ref = sourceBlock.refs.find((item) => item.id === dependencyId)
-  if (ref == null) {
-    return null
-  }
-
-  const taskByRef = taskMap.get(getMirrorId(ref.to)) ?? taskMap.get(ref.to)
-  return taskByRef ?? null
+  return taskByBlockId ?? null
 }
 
 function normalizeDependsMode(mode: string): DependencyMode {

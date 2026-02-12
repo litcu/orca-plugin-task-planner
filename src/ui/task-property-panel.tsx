@@ -531,6 +531,8 @@ function TaskPropertyPopupView(props: {
             const normalized = selected
               .map((item) => Number(item))
               .filter((item) => !Number.isNaN(item))
+              .map((item) => getMirrorId(item))
+              .filter((item, index, all) => all.indexOf(item) === index)
 
             setDependsOnValues(normalized)
             if (normalized.length === 0) {
