@@ -38,7 +38,6 @@ export type { OpenTaskPropertyPopupOptions }
 
 export function openTaskPropertyPopup(options: OpenTaskPropertyPopupOptions) {
   ensureRoot()
-
   popupState.options = options
   popupState.visible = true
   renderCurrent()
@@ -131,6 +130,12 @@ function TaskPropertyPopupView(props: {
   const [urgencyText, setUrgencyText] = React.useState(
     initialValues.urgency == null ? "" : String(initialValues.urgency),
   )
+  const [importanceValue, setImportanceValue] = React.useState(
+    clampScore(initialValues.importance),
+  )
+  const [urgencyValue, setUrgencyValue] = React.useState(
+    clampScore(initialValues.urgency),
+  )
   const [dependsOnValues, setDependsOnValues] = React.useState<DbId[]>(
     initialValues.dependsOn,
   )
@@ -142,20 +147,18 @@ function TaskPropertyPopupView(props: {
       ? ""
       : String(initialValues.dependencyDelay),
   )
-  const [errorText, setErrorText] = React.useState("")
-  const [saving, setSaving] = React.useState(false)
-
-  const [importanceValue, setImportanceValue] = React.useState(
-    clampScore(initialValues.importance),
-  )
-  const [urgencyValue, setUrgencyValue] = React.useState(
-    clampScore(initialValues.urgency),
-  )
-
   const [editingDateField, setEditingDateField] = React.useState<
     "start" | "end" | null
   >(null)
+  const [errorText, setErrorText] = React.useState("")
+  const [saving, setSaving] = React.useState(false)
+
   const dateAnchorRef = React.useRef<HTMLButtonElement | null>(null)
+  // 下拉与日期弹层统一挂到 body，避免被弹窗滚动容器裁剪后“不可见但已打开”。
+  const popupMenuContainerRef = React.useRef<HTMLElement | null>(null)
+  if (popupMenuContainerRef.current == null) {
+    popupMenuContainerRef.current = document.body
+  }
 
   React.useEffect(() => {
     setStatusValue(initialValues.status)
@@ -174,18 +177,32 @@ function TaskPropertyPopupView(props: {
         ? ""
         : String(initialValues.dependencyDelay),
     )
-    setErrorText("")
     setEditingDateField(null)
+    setErrorText("")
   }, [props.blockId, initialValues])
+
+  const hasDependencies = dependsOnValues.length > 0
+  const selectedDateValue =
+    editingDateField === "start"
+      ? startTimeValue
+      : editingDateField === "end"
+        ? endTimeValue
+        : null
 
   const statusOptions = props.schema.statusChoices.map((item) => ({
     value: item,
     label: item,
   }))
-  const dependsModeOptions = props.schema.dependencyModeChoices.map((item) => ({
-    value: item,
-    label: item,
-  }))
+
+  const dependsModeOptions = isChinese
+    ? [
+        { value: "ALL", label: "所有依赖任务完成" },
+        { value: "ANY", label: "任一依赖任务完成" },
+      ]
+    : [
+        { value: "ALL", label: "ALL" },
+        { value: "ANY", label: "ANY" },
+      ]
 
   const handleSave = async () => {
     if (taskRef == null) {
@@ -243,8 +260,8 @@ function TaskPropertyPopupView(props: {
             importance: importanceInRange,
             urgency: urgencyInRange,
             dependsOn: dependsOnValues,
-            dependsMode: dependsModeValue,
-            dependencyDelay: dependencyDelay.value,
+            dependsMode: hasDependencies ? dependsModeValue : "ALL",
+            dependencyDelay: hasDependencies ? dependencyDelay.value : null,
           },
           props.schema,
         ),
@@ -264,63 +281,64 @@ function TaskPropertyPopupView(props: {
     }
   }
 
-  const selectedDateValue =
-    editingDateField === "start"
-      ? startTimeValue
-      : editingDateField === "end"
-        ? endTimeValue
-        : null
+  // 统一“属性名 + 控件”同一行布局，保证视觉对齐与阅读顺序。
+  const rowLabelWidth = isChinese ? "88px" : "110px"
+  const rowStyle = {
+    display: "grid",
+    gridTemplateColumns: `${rowLabelWidth} minmax(0, 1fr)`,
+    columnGap: "10px",
+    alignItems: "center",
+    marginBottom: "8px",
+  }
+  const rowLabelStyle = {
+    fontSize: "12px",
+    color: "var(--orca-color-text-2)",
+    lineHeight: "30px",
+  }
 
-  const hasFloatingPicker = editingDateField != null && props.visible
+  const renderFormRow = (label: string, control: unknown) => {
+    return React.createElement(
+      "div",
+      { style: rowStyle },
+      React.createElement("div", { style: rowLabelStyle }, label),
+      React.createElement("div", { style: { minWidth: 0 } }, control),
+    )
+  }
 
-  const renderDateFieldRow = (
+  const renderTimeField = (
     key: "start" | "end",
     label: string,
     value: Date | null,
     setValue: (next: Date | null) => void,
   ) => {
-    return React.createElement(
-      "div",
-      {
-        style: { marginBottom: "12px" },
-        onClick: (event: MouseEvent) => {
-          event.stopPropagation()
-        },
-      },
+    return renderFormRow(
+      label,
       React.createElement(
         "div",
         {
           style: {
-            marginBottom: "6px",
-            fontSize: "13px",
-            color: "var(--orca-color-text-2)",
-          },
-        },
-        label,
-      ),
-      React.createElement(
-        "div",
-        {
-          style: {
-            display: "flex",
-            justifyContent: "space-between",
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) auto auto",
+            gap: "6px",
             alignItems: "center",
-            gap: "8px",
           },
         },
         React.createElement(
           "div",
           {
             style: {
-              flex: 1,
-              minHeight: "32px",
+              minHeight: "30px",
               display: "flex",
               alignItems: "center",
               padding: "0 10px",
               border: "1px solid var(--orca-color-border-1)",
               borderRadius: "6px",
-              color: "var(--orca-color-text-1)",
               background: "var(--orca-color-bg-2)",
+              color: "var(--orca-color-text-1)",
+              fontSize: "12px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
             },
           },
           value == null
@@ -331,8 +349,8 @@ function TaskPropertyPopupView(props: {
           Button,
           {
             variant: "outline",
+            style: { minWidth: "60px" },
             onClick: (event: MouseEvent) => {
-              event.stopPropagation()
               dateAnchorRef.current = event.currentTarget as HTMLButtonElement
               setEditingDateField(key)
             },
@@ -343,10 +361,8 @@ function TaskPropertyPopupView(props: {
           Button,
           {
             variant: "plain",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation()
-              setValue(null)
-            },
+            style: { minWidth: "60px" },
+            onClick: () => setValue(null),
           },
           isChinese ? "清空" : "Clear",
         ),
@@ -361,57 +377,51 @@ function TaskPropertyPopupView(props: {
     setValue: (next: number) => void,
     setText: (next: string) => void,
   ) => {
-    return React.createElement(
-      "div",
-      { style: { marginBottom: "12px" } },
+    return renderFormRow(
+      label,
       React.createElement(
         "div",
         {
           style: {
-            marginBottom: "6px",
-            fontSize: "13px",
-            color: "var(--orca-color-text-2)",
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) 76px",
+            gap: "8px",
+            alignItems: "center",
           },
         },
-        label,
-      ),
-      React.createElement("input", {
-        type: "range",
-        min: 0,
-        max: 100,
-        step: 1,
-        value,
-        style: {
-          width: "100%",
-          marginBottom: "8px",
-        },
-        onChange: (event: Event) => {
-          const target = event.target as HTMLInputElement
-          const next = Number(target.value)
-          if (Number.isNaN(next)) {
-            return
-          }
-          setValue(next)
-          setText(String(next))
-        },
-      }),
-      React.createElement(Input, {
-        value: text,
-        placeholder: isChinese ? "0-100" : "0-100",
-        onChange: (event: Event) => {
-          const target = event.target as HTMLInputElement
-          const nextText = target.value
-          setText(nextText)
-
-          const parsed = Number(nextText)
-          if (!Number.isNaN(parsed)) {
-            const inRange = toScoreInRange(parsed)
-            if (inRange != null) {
-              setValue(inRange)
+        React.createElement("input", {
+          type: "range",
+          min: 0,
+          max: 100,
+          step: 1,
+          value,
+          style: { width: "100%", margin: 0 },
+          onChange: (event: Event) => {
+            const next = Number((event.target as HTMLInputElement).value)
+            if (Number.isNaN(next)) {
+              return
             }
-          }
-        },
-      }),
+            setValue(next)
+            setText(String(next))
+          },
+        }),
+        React.createElement(Input, {
+          value: text,
+          placeholder: "0-100",
+          onChange: (event: Event) => {
+            const nextText = (event.target as HTMLInputElement).value
+            setText(nextText)
+
+            const parsed = Number(nextText)
+            if (!Number.isNaN(parsed)) {
+              const inRange = toScoreInRange(parsed)
+              if (inRange != null) {
+                setValue(inRange)
+              }
+            }
+          },
+        }),
+      ),
     )
   }
 
@@ -421,12 +431,12 @@ function TaskPropertyPopupView(props: {
       visible: props.visible,
       blurred: false,
       style: {
-        background: "rgba(0, 0, 0, 0.35)",
+        background: "rgba(0, 0, 0, 0.30)",
         backdropFilter: "none",
       },
       canClose: false,
       onClose: () => {
-        if (hasFloatingPicker) {
+        if (editingDateField != null) {
           setEditingDateField(null)
           return
         }
@@ -438,79 +448,48 @@ function TaskPropertyPopupView(props: {
         }
       },
     },
-    React.createElement(
-      "div",
-      {
+      React.createElement(
+        "div",
+        {
         style: {
-          width: "min(560px, calc(100vw - 48px))",
-          maxHeight: "calc(100vh - 64px)",
+          width: "calc(100vw - 40px)",
+          maxWidth: "520px",
+          minWidth: 0,
+          maxHeight: "calc(100vh - 56px)",
           overflow: "auto",
-          padding: "20px",
+          padding: "16px",
+          boxSizing: "border-box",
           background: "var(--orca-color-bg-1)",
           border: "1px solid var(--orca-color-border-1)",
-          borderRadius: "8px",
-          boxShadow: "none",
+          borderRadius: "10px",
         },
-        onClick: (event: MouseEvent) => {
-          event.stopPropagation()
-        },
+        onClick: (event: MouseEvent) => event.stopPropagation(),
       },
       React.createElement(
         "div",
         {
           style: {
-            fontSize: "18px",
+            fontSize: "17px",
             fontWeight: 600,
-            marginBottom: "16px",
+            marginBottom: "10px",
           },
         },
         labels.title,
       ),
-      React.createElement(
-        "div",
-        { style: { marginBottom: "12px" } },
-        React.createElement(
-          "div",
-          {
-            style: {
-              marginBottom: "6px",
-              fontSize: "13px",
-              color: "var(--orca-color-text-2)",
-            },
-          },
-          labels.status,
-        ),
+      renderFormRow(
+        labels.status,
         React.createElement(Select, {
           selected: [statusValue],
           options: statusOptions,
           onChange: (selected: string[]) => {
             setStatusValue(selected[0] ?? props.schema.statusChoices[0])
           },
+          menuContainer: popupMenuContainerRef,
           width: "100%",
         }),
       ),
-      renderDateFieldRow("start", labels.startTime, startTimeValue, setStartTimeValue),
-      renderDateFieldRow("end", labels.endTime, endTimeValue, setEndTimeValue),
-      hasFloatingPicker
-        ? React.createElement(DatePicker, {
-            mode: "datetime",
-            visible: true,
-            value: selectedDateValue ?? new Date(),
-            refElement: { current: dateAnchorRef.current },
-            onChange: (next: Date | [Date, Date]) => {
-              if (!(next instanceof Date)) {
-                return
-              }
-
-              if (editingDateField === "start") {
-                setStartTimeValue(next)
-              } else {
-                setEndTimeValue(next)
-              }
-            },
-            onClose: () => setEditingDateField(null),
-          })
-        : null,
+      renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
+      renderTimeField("end", labels.endTime, endTimeValue, setEndTimeValue),
       renderScoreField(
         labels.importance,
         importanceValue,
@@ -525,86 +504,82 @@ function TaskPropertyPopupView(props: {
         setUrgencyValue,
         setUrgencyText,
       ),
-      React.createElement(
-        "div",
-        { style: { marginBottom: "12px" } },
-        React.createElement(
-          "div",
-          {
-            style: {
-              marginBottom: "6px",
-              fontSize: "13px",
-              color: "var(--orca-color-text-2)",
-            },
-          },
-          labels.dependsOn,
-        ),
+      renderFormRow(
+        labels.dependsOn,
         React.createElement(BlockSelect, {
           mode: "ref",
           selected: dependsOnValues,
-          onChange: (selected: string[]) => {
-            setDependsOnValues(
-              selected
-                .map((item) => Number(item))
-                .filter((item) => !Number.isNaN(item)),
-            )
-          },
-        }),
-      ),
-      React.createElement(
-        "div",
-        { style: { marginBottom: "12px" } },
-        React.createElement(
-          "div",
-          {
-            style: {
-              marginBottom: "6px",
-              fontSize: "13px",
-              color: "var(--orca-color-text-2)",
-            },
-          },
-          labels.dependsMode,
-        ),
-        React.createElement(Select, {
-          selected: [dependsModeValue],
-          options: dependsModeOptions,
-          onChange: (selected: string[]) => {
-            setDependsModeValue(selected[0] ?? props.schema.dependencyModeChoices[0])
-          },
           width: "100%",
+          menuContainer: popupMenuContainerRef,
+          onChange: (selected: string[]) => {
+            const normalized = selected
+              .map((item) => Number(item))
+              .filter((item) => !Number.isNaN(item))
+            setDependsOnValues(normalized)
+            if (normalized.length === 0) {
+              setDependsModeValue("ALL")
+              setDependencyDelayText("")
+            }
+          },
         }),
       ),
-      React.createElement(
-        "div",
-        { style: { marginBottom: "12px" } },
-        React.createElement(
-          "div",
-          {
-            style: {
-              marginBottom: "6px",
-              fontSize: "13px",
-              color: "var(--orca-color-text-2)",
+      // 只有存在依赖任务时才展示依赖模式与依赖延迟，避免无效配置。
+      hasDependencies
+        ? React.createElement(
+            React.Fragment,
+            null,
+            renderFormRow(
+              labels.dependsMode,
+              React.createElement(Select, {
+                selected: [dependsModeValue],
+                options: dependsModeOptions,
+                onChange: (selected: string[]) => {
+                  setDependsModeValue(selected[0] ?? "ALL")
+                },
+                menuContainer: popupMenuContainerRef,
+                width: "100%",
+              }),
+            ),
+            renderFormRow(
+              labels.dependencyDelay,
+              React.createElement(Input, {
+                value: dependencyDelayText,
+                placeholder: isChinese ? "例如：24" : "e.g. 24",
+                onChange: (event: Event) => {
+                  setDependencyDelayText((event.target as HTMLInputElement).value)
+                },
+              }),
+            ),
+          )
+        : null,
+      editingDateField != null
+        ? React.createElement(DatePicker, {
+            mode: "datetime",
+            visible: true,
+            value: selectedDateValue ?? new Date(),
+            refElement: dateAnchorRef,
+            menuContainer: popupMenuContainerRef,
+            onChange: (next: Date | [Date, Date]) => {
+              if (!(next instanceof Date)) {
+                return
+              }
+              if (editingDateField === "start") {
+                setStartTimeValue(next)
+              } else {
+                setEndTimeValue(next)
+              }
             },
-          },
-          labels.dependencyDelay,
-        ),
-        React.createElement(Input, {
-          value: dependencyDelayText,
-          placeholder: isChinese ? "例如：24" : "e.g. 24",
-          onChange: (event: Event) => {
-            const target = event.target as HTMLInputElement
-            setDependencyDelayText(target.value)
-          },
-        }),
-      ),
+            onClose: () => setEditingDateField(null),
+          })
+        : null,
       errorText.trim() !== ""
         ? React.createElement(
             "div",
             {
               style: {
                 color: "var(--orca-color-text-red)",
-                marginBottom: "12px",
-                fontSize: "13px",
+                marginBottom: "10px",
+                fontSize: "12px",
               },
             },
             errorText,
@@ -612,7 +587,14 @@ function TaskPropertyPopupView(props: {
         : null,
       React.createElement(
         "div",
-        { style: { display: "flex", justifyContent: "flex-end", gap: "8px" } },
+        {
+          style: {
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "8px",
+            marginTop: "10px",
+          },
+        },
         React.createElement(
           Button,
           {
@@ -640,7 +622,6 @@ function clampScore(value: number | null): number {
   if (value == null || Number.isNaN(value)) {
     return 0
   }
-
   if (value < 0) {
     return 0
   }
@@ -655,7 +636,6 @@ function toScoreInRange(value: number | null): number | null {
   if (value == null) {
     return null
   }
-
   if (value < 0 || value > 100) {
     return null
   }
