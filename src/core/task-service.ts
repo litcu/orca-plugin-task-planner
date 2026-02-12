@@ -1,5 +1,6 @@
 import type { Block, BlockProperty, CursorData, DbId } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "./task-schema"
+import { getMirrorId } from "./block-utils"
 
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
@@ -363,19 +364,3 @@ function toDataAttributeName(propertyName: string): string {
   return propertyName.trim().replace(/\s+/g, "-").toLowerCase()
 }
 
-function getMirrorId(id: DbId): DbId {
-  const block = orca.state.blocks[id]
-  if (block == null) {
-    return id
-  }
-
-  const repr = block.properties?.find((item) => item.name === "_repr")?.value as
-    | { type?: string; mirroredId?: DbId }
-    | undefined
-
-  if (repr?.type === "mirror" && repr.mirroredId != null) {
-    return repr.mirroredId
-  }
-
-  return id
-}

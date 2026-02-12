@@ -1,5 +1,6 @@
 import type { Block, DbId, TagMenuCommand } from "../orca.d.ts"
 import { TASK_TAG_ALIAS, getTaskSchemaByLocale } from "./task-schema"
+import { getMirrorId } from "./block-utils"
 import {
   closeTaskPropertyPopup,
   disposeTaskPropertyPopup,
@@ -61,12 +62,29 @@ export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
     orca.commands.registerCommand(
       openCommandId,
       async (blockId?: DbId) => {
-        if (blockId == null) {
+        const targetBlockId = resolveCommandTargetBlockId(blockId)
+        if (targetBlockId == null) {
+          orca.notify(
+            "warn",
+            orca.state.locale === "zh-CN"
+              ? "未定位到任务块，请先将光标放在任务块中"
+              : "No task block found. Put cursor inside a task block first",
+          )
+          return
+        }
+
+        if (!hasTaskTagRef(targetBlockId, tagAlias)) {
+          orca.notify(
+            "warn",
+            orca.state.locale === "zh-CN"
+              ? "当前块不是任务，无法打开任务属性"
+              : "Current block is not a task",
+          )
           return
         }
 
         openTaskPropertyPopup({
-          blockId,
+          blockId: targetBlockId,
           schema,
           triggerSource: "tag-menu",
         })
@@ -114,6 +132,20 @@ export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
       disposeTaskPropertyPopup()
     },
   }
+}
+
+function resolveCommandTargetBlockId(explicitBlockId?: DbId): DbId | null {
+  if (explicitBlockId != null) {
+    return getMirrorId(explicitBlockId)
+  }
+
+  // 命令面板直接触发时通常没有参数，回退到当前编辑区光标所在块。
+  const cursor = orca.utils.getCursorDataFromSelection(window.getSelection())
+  if (cursor == null) {
+    return null
+  }
+
+  return getMirrorId(cursor.anchor.blockId)
 }
 
 function hasTaskTagRef(blockId: DbId, tagAlias: string): boolean {
