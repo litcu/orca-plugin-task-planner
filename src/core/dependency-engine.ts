@@ -18,15 +18,21 @@ export interface NextActionEvaluation {
   blockedReason: Array<"completed" | "canceled" | "not-started" | "dependency-unmet">
 }
 
+interface DependencyCycleContext {
+  componentByTaskId: Map<DbId, number>
+  componentSizeById: Map<number, number>
+}
+
 export async function collectNextActions(
   schema: TaskSchemaDefinition,
   now: Date = new Date(),
 ): Promise<NextActionItem[]> {
   const taskBlocks = await queryTaskBlocks(schema.tagAlias)
   const taskMap = buildTaskMap(taskBlocks)
+  const cycleContext = buildDependencyCycleContext(taskBlocks, taskMap, schema)
 
   const evaluations = taskBlocks.map((block) => {
-    return evaluateNextAction(block, taskMap, schema, now)
+    return evaluateNextAction(block, taskMap, schema, now, cycleContext)
   })
 
   return evaluations
@@ -40,6 +46,7 @@ export function evaluateNextAction(
   taskMap: Map<DbId, Block>,
   schema: TaskSchemaDefinition,
   now: Date = new Date(),
+  cycleContext: DependencyCycleContext | null = null,
 ): NextActionEvaluation {
   const taskRef = findTaskTagRef(block, schema.tagAlias)
   const status = getTaskStatus(taskRef?.data, schema)
@@ -55,7 +62,14 @@ export function evaluateNextAction(
     blockedReason.push("not-started")
   }
 
-  if (!isDependencySatisfied(block, values.dependsOn, values.dependsMode, taskMap, schema)) {
+  if (!isDependencySatisfied(
+    block,
+    values.dependsOn,
+    values.dependsMode,
+    taskMap,
+    schema,
+    cycleContext,
+  )) {
     blockedReason.push("dependency-unmet")
   }
 
@@ -95,6 +109,7 @@ function isDependencySatisfied(
   rawMode: string,
   taskMap: Map<DbId, Block>,
   schema: TaskSchemaDefinition,
+  cycleContext: DependencyCycleContext | null,
 ): boolean {
   if (dependsOn.length === 0) {
     return true
@@ -120,7 +135,13 @@ function isDependencySatisfied(
     }
 
     // 自依赖无效：忽略该条依赖，避免任务被永久阻塞。
-    if (getMirrorId(dependencyTask.id) === sourceTaskId) {
+    const dependencyTaskId = getMirrorId(dependencyTask.id)
+    if (dependencyTaskId === sourceTaskId) {
+      return []
+    }
+
+    // 循环依赖中的内部边不参与阻塞判定，避免 A<->B 等死锁。
+    if (isDependencyInCycle(sourceTaskId, dependencyTaskId, cycleContext)) {
       return []
     }
 
@@ -169,6 +190,131 @@ function resolveDependencyTask(
   const targetId = getMirrorId(dependencyId)
   const taskByBlockId = taskMap.get(targetId) ?? taskMap.get(dependencyId)
   return taskByBlockId ?? null
+}
+
+function buildDependencyCycleContext(
+  taskBlocks: Block[],
+  taskMap: Map<DbId, Block>,
+  schema: TaskSchemaDefinition,
+): DependencyCycleContext | null {
+  if (taskBlocks.length === 0) {
+    return null
+  }
+
+  const adjacency = new Map<DbId, DbId[]>()
+
+  for (const block of taskBlocks) {
+    const sourceBlock = getLiveTaskBlock(block)
+    const sourceId = getMirrorId(sourceBlock.id)
+    const taskRef = findTaskTagRef(sourceBlock, schema.tagAlias)
+    const values = getTaskPropertiesFromRef(taskRef?.data, schema)
+    const edges: DbId[] = []
+
+    for (const dependencyId of values.dependsOn) {
+      const dependencyTask = resolveDependencyTask(sourceBlock, dependencyId, taskMap)
+      if (dependencyTask == null) {
+        continue
+      }
+
+      const targetId = getMirrorId(dependencyTask.id)
+      if (!edges.includes(targetId)) {
+        edges.push(targetId)
+      }
+    }
+
+    adjacency.set(sourceId, edges)
+  }
+
+  // Tarjan SCC
+  const indexById = new Map<DbId, number>()
+  const lowById = new Map<DbId, number>()
+  const onStack = new Set<DbId>()
+  const stack: DbId[] = []
+  let index = 0
+  let componentId = 0
+  const componentByTaskId = new Map<DbId, number>()
+  const componentSizeById = new Map<number, number>()
+
+  const strongConnect = (taskId: DbId) => {
+    indexById.set(taskId, index)
+    lowById.set(taskId, index)
+    index += 1
+    stack.push(taskId)
+    onStack.add(taskId)
+
+    const neighbors = adjacency.get(taskId) ?? []
+    for (const neighbor of neighbors) {
+      if (!indexById.has(neighbor)) {
+        strongConnect(neighbor)
+        const nextLow = Math.min(
+          lowById.get(taskId) ?? Number.MAX_SAFE_INTEGER,
+          lowById.get(neighbor) ?? Number.MAX_SAFE_INTEGER,
+        )
+        lowById.set(taskId, nextLow)
+      } else if (onStack.has(neighbor)) {
+        const nextLow = Math.min(
+          lowById.get(taskId) ?? Number.MAX_SAFE_INTEGER,
+          indexById.get(neighbor) ?? Number.MAX_SAFE_INTEGER,
+        )
+        lowById.set(taskId, nextLow)
+      }
+    }
+
+    if (lowById.get(taskId) !== indexById.get(taskId)) {
+      return
+    }
+
+    let size = 0
+    while (stack.length > 0) {
+      const member = stack.pop() as DbId
+      onStack.delete(member)
+      componentByTaskId.set(member, componentId)
+      size += 1
+
+      if (member === taskId) {
+        break
+      }
+    }
+
+    componentSizeById.set(componentId, size)
+    componentId += 1
+  }
+
+  for (const taskId of adjacency.keys()) {
+    if (!indexById.has(taskId)) {
+      strongConnect(taskId)
+    }
+  }
+
+  return {
+    componentByTaskId,
+    componentSizeById,
+  }
+}
+
+function isDependencyInCycle(
+  sourceTaskId: DbId,
+  dependencyTaskId: DbId,
+  cycleContext: DependencyCycleContext | null,
+): boolean {
+  if (cycleContext == null) {
+    return false
+  }
+
+  const sourceComponent = cycleContext.componentByTaskId.get(sourceTaskId)
+  const dependencyComponent = cycleContext.componentByTaskId.get(dependencyTaskId)
+  if (sourceComponent == null || dependencyComponent == null) {
+    return false
+  }
+  if (sourceComponent !== dependencyComponent) {
+    return false
+  }
+
+  return (cycleContext.componentSizeById.get(sourceComponent) ?? 0) > 1
+}
+
+function getLiveTaskBlock(block: Block): Block {
+  return orca.state.blocks[getMirrorId(block.id)] ?? block
 }
 
 function normalizeDependsMode(mode: string): DependencyMode {
