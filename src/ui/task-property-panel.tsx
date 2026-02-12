@@ -36,6 +36,7 @@ const popupState: PopupState = {
 }
 
 const TAG_REF_TYPE = 2
+const REF_DATA_TYPE = 3
 
 export type { OpenTaskPropertyPopupOptions }
 
@@ -259,6 +260,12 @@ function TaskPropertyPopupView(props: {
     setErrorText("")
 
     try {
+      const sourceBlockId = getMirrorId(props.blockId)
+      const dependencyRefIds = await ensureDependencyRefIds(
+        sourceBlockId,
+        dependsOnValues,
+      )
+
       const payload = toRefDataForSave(
         {
           status: statusValue,
@@ -266,7 +273,7 @@ function TaskPropertyPopupView(props: {
           endTime: endTimeValue,
           importance: importanceInRange,
           urgency: urgencyInRange,
-          dependsOn: dependsOnValues,
+          dependsOn: dependencyRefIds,
           dependsMode: hasDependencies ? dependsModeValue : "ALL",
           dependencyDelay: hasDependencies ? dependencyDelay.value : null,
         },
@@ -276,7 +283,7 @@ function TaskPropertyPopupView(props: {
       await orca.commands.invokeEditorCommand(
         "core.editor.insertTag",
         null,
-        props.blockId,
+        sourceBlockId,
         props.schema.tagAlias,
         payload,
       )
@@ -654,19 +661,12 @@ function clampScore(value: number | null): number {
 function normalizeDependsOnForSelect(
   sourceBlock: Block | undefined,
   dependsOn: DbId[],
-  dependsOnPropertyName: string,
+  _dependsOnPropertyName: string,
 ): DbId[] {
   const normalized: DbId[] = []
 
   for (const value of dependsOn) {
-    const matchedRef = sourceBlock?.refs.find((ref) => {
-      return (
-        ref.type === TAG_REF_TYPE &&
-        ref.alias === dependsOnPropertyName &&
-        ref.id === value
-      )
-    })
-
+    const matchedRef = sourceBlock?.refs.find((ref) => ref.id === value)
     const targetId = getMirrorId(matchedRef?.to ?? value)
     if (!normalized.includes(targetId)) {
       normalized.push(targetId)
@@ -674,6 +674,39 @@ function normalizeDependsOnForSelect(
   }
 
   return normalized
+}
+
+async function ensureDependencyRefIds(
+  sourceBlockId: DbId,
+  targetTaskIds: DbId[],
+): Promise<DbId[]> {
+  const uniqueTargetIds = targetTaskIds
+    .map((item) => getMirrorId(item))
+    .filter((item, index, all) => all.indexOf(item) === index)
+
+  const resolvedRefIds: DbId[] = []
+  for (const targetTaskId of uniqueTargetIds) {
+    const sourceBlock = orca.state.blocks[sourceBlockId]
+    const existingRefId = sourceBlock?.refs.find((ref) => {
+      return ref.type === REF_DATA_TYPE && getMirrorId(ref.to) === targetTaskId
+    })?.id
+
+    if (existingRefId != null) {
+      resolvedRefIds.push(existingRefId)
+      continue
+    }
+
+    const createdRefId = (await orca.commands.invokeEditorCommand(
+      "core.editor.createRef",
+      null,
+      sourceBlockId,
+      targetTaskId,
+      REF_DATA_TYPE,
+    )) as DbId
+    resolvedRefIds.push(createdRefId)
+  }
+
+  return resolvedRefIds
 }
 
 function toScoreInRange(value: number | null): number | null {
