@@ -1,0 +1,6 @@
+[submodule "vendor/orca-plugin-template"]
+	path = vendor/orca-plugin-template
+	url = https://github.com/sethyuan/orca-plugin-template.git
+[submodule "vendor/orca-simple-task"]
+	path = vendor/orca-simple-task
+	url = https://github.com/sethyuan/orca-simple-task.git
