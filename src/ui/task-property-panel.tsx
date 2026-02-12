@@ -8,7 +8,7 @@ import {
   validateNumericField,
 } from "../core/task-properties"
 
-type PopupTriggerSource = "tag-click" | "tag-menu"
+type PopupTriggerSource = "tag-click" | "tag-menu" | "panel-view"
 
 type ReactRootLike = {
   render: (node: unknown) => void

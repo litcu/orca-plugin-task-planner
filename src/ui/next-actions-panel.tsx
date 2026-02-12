@@ -1,6 +1,7 @@
 import type { DbId, PanelProps } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 import { collectNextActions, type NextActionItem } from "../core/dependency-engine"
+import { openTaskPropertyPopup } from "./task-property-panel"
 
 interface NextActionsPanelProps extends PanelProps {
   schema: TaskSchemaDefinition
@@ -54,9 +55,16 @@ export function NextActionsPanel(props: NextActionsPanelProps) {
     }
   }, [loadItems])
 
-  const openTaskBlock = React.useCallback((blockId: DbId) => {
-    orca.nav.goTo("block", { blockId }, props.panelId)
-  }, [props.panelId])
+  const openTaskProperty = React.useCallback(
+    (blockId: DbId) => {
+      openTaskPropertyPopup({
+        blockId,
+        schema: props.schema,
+        triggerSource: "panel-view",
+      })
+    },
+    [props.schema],
+  )
 
   return React.createElement(
     "div",
@@ -156,7 +164,7 @@ export function NextActionsPanel(props: NextActionsPanelProps) {
               {
                 type: "button",
                 key: item.blockId,
-                onClick: () => openTaskBlock(item.blockId),
+                onClick: () => openTaskProperty(item.blockId),
                 style: {
                   textAlign: "left",
                   border: "1px solid var(--orca-color-border)",
@@ -186,7 +194,7 @@ export function NextActionsPanel(props: NextActionsPanelProps) {
                     color: "var(--orca-color-text-2)",
                   },
                 },
-                `#${item.blockId} · ${item.status}`,
+                item.status,
               ),
             )
           }),
