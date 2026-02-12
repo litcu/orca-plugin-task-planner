@@ -1,3 +1,4 @@
+import { ensureTaskTagSchema } from "./core/task-schema"
 import { setupL10N, t } from "./libs/l10n"
 import zhCN from "./translations/zhCN"
 
@@ -8,7 +9,14 @@ export async function load(_name: string) {
 
   setupL10N(orca.state.locale, { "zh-CN": zhCN })
 
-  console.log(t("插件已加载，开发脚手架可用"))
+  const schemaResult = await ensureTaskTagSchema(orca.state.locale)
+
+  console.log(
+    t("任务 schema 已初始化", {
+      locale: schemaResult.schemaLocale,
+      mode: "ALL",
+    }),
+  )
   console.log(`${pluginName} loaded.`)
 }
 
