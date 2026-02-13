@@ -366,9 +366,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const visibleCount = isAllTasksTab
     ? visibleAllTaskRows.length
     : flatVisibleItems.length
-  const currentStatusLabel =
-    statusOptions.find((option: { value: string; label: string }) => option.value === statusFilter)?.label ??
-    t("All statuses")
   const emptyText = tab === "next-actions"
     ? t("No actionable tasks")
     : tab === "all-tasks"
@@ -376,13 +373,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       : tab === "starred-tasks"
         ? t("No starred tasks")
         : t("No due soon tasks")
-  const panelAccentColor = tab === "next-actions"
-    ? "var(--orca-color-text-blue, #2563eb)"
-    : tab === "all-tasks"
-      ? "var(--orca-color-text-yellow, #b7791f)"
-      : tab === "starred-tasks"
-        ? "var(--orca-color-text-yellow, #d69e2e)"
-        : "var(--orca-color-text-orange, #dd6b20)"
   const panelAccentGlow = tab === "next-actions"
     ? "rgba(37, 99, 235, 0.18)"
     : tab === "all-tasks"
@@ -390,7 +380,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       : tab === "starred-tasks"
         ? "rgba(214, 158, 46, 0.18)"
         : "rgba(221, 107, 32, 0.18)"
-  const hasKeywordFilter = normalizedKeyword !== ""
   const countText = t("Showing ${count} items", { count: String(visibleCount) })
 
   return React.createElement(
@@ -402,8 +391,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         minWidth: 0,
         display: "flex",
         flexDirection: "column",
-        gap: "10px",
-        padding: "12px",
+        gap: "8px",
+        padding: "10px",
         boxSizing: "border-box",
         background:
           "radial-gradient(circle at 10% 0%, rgba(15, 23, 42, 0.05), transparent 46%), var(--orca-color-bg-1)",
@@ -416,10 +405,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         style: {
           display: "flex",
           flexDirection: "column",
-          gap: "10px",
+          gap: "8px",
           border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
-          borderRadius: "16px",
-          padding: "12px 14px",
+          borderRadius: "14px",
+          padding: "10px 12px",
           background:
             `radial-gradient(circle at 82% 20%, ${panelAccentGlow}, transparent 48%), ` +
             "linear-gradient(150deg, var(--orca-color-bg-1), var(--orca-color-bg-2))",
@@ -443,6 +432,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           {
             style: {
               minWidth: 0,
+              display: "flex",
+              alignItems: "baseline",
+              gap: "8px",
+              flexWrap: "wrap",
             },
           },
           React.createElement(
@@ -461,7 +454,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             "div",
             {
               style: {
-                marginTop: "4px",
                 fontSize: "12px",
                 color: "var(--orca-color-text-2)",
               },
@@ -495,83 +487,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             }
           },
           style: {
-            minWidth: "300px",
-            flex: "1 1 340px",
+            minWidth: "280px",
+            flex: "1 1 320px",
             maxWidth: "620px",
           },
         }),
-      ),
-      React.createElement(
-        "div",
-        {
-          style: {
-            width: "100%",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "8px",
-            alignItems: "center",
-          },
-        },
-        React.createElement(
-          "div",
-          {
-            style: {
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "4px 10px",
-              borderRadius: "999px",
-              background: "rgba(15, 23, 42, 0.06)",
-              color: "var(--orca-color-text-2)",
-              fontSize: "11px",
-              letterSpacing: "0.02em",
-            },
-          },
-          React.createElement("span", null, t("Status")),
-          React.createElement(
-            "span",
-            {
-              style: {
-                color: panelAccentColor,
-                fontWeight: 600,
-              },
-            },
-            currentStatusLabel,
-          ),
-        ),
-        hasKeywordFilter
-          ? React.createElement(
-              "div",
-              {
-                style: {
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "4px 10px",
-                  borderRadius: "999px",
-                  background: "rgba(15, 23, 42, 0.06)",
-                  color: "var(--orca-color-text-2)",
-                  fontSize: "11px",
-                  letterSpacing: "0.02em",
-                },
-              },
-              React.createElement("span", null, t("Filter by keyword")),
-              React.createElement(
-                "span",
-                {
-                  style: {
-                    color: "var(--orca-color-text-1, var(--orca-color-text))",
-                    fontWeight: 600,
-                    maxWidth: "180px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  },
-                },
-                keyword.trim(),
-              ),
-            )
-          : null,
       ),
     ),
     React.createElement(
@@ -580,11 +500,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         style: {
           display: "flex",
           flexWrap: "wrap",
-          gap: "10px",
+          gap: "8px",
           alignItems: "center",
           border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
-          borderRadius: "14px",
-          padding: "10px 12px",
+          borderRadius: "12px",
+          padding: "8px 10px",
           background:
             "linear-gradient(145deg, rgba(15, 23, 42, 0.03), var(--orca-color-bg-1) 45%, rgba(148, 163, 184, 0.1))",
         },
@@ -603,7 +523,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           setKeyword(target?.value ?? "")
         },
         style: {
-          minWidth: "220px",
+          minWidth: "180px",
           flex: 1,
         },
       }),
@@ -660,7 +580,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             ),
           )
         : null,
-      React.createElement("div", { style: { marginLeft: "auto" } }),
     ),
     React.createElement(
       "div",
@@ -673,7 +592,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             selectedTaskId == null
               ? "minmax(0, 1fr)"
               : "minmax(0, 1fr) minmax(360px, 460px)",
-          gap: "12px",
+          gap: "10px",
           alignItems: "stretch",
         },
       },
@@ -686,10 +605,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             display: "flex",
             flexDirection: "column",
             border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
-            borderRadius: "14px",
+            borderRadius: "12px",
             background:
               "radial-gradient(circle at 86% 8%, rgba(37, 99, 235, 0.08), transparent 45%), var(--orca-color-bg-1)",
-            padding: "10px",
+            padding: "8px",
             boxSizing: "border-box",
             overflow: "hidden",
           },
@@ -753,8 +672,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "stretch",
-                  gap: "8px",
-                  paddingRight: "2px",
+                  gap: "6px",
                 },
               },
               isAllTasksTab

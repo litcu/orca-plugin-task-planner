@@ -473,24 +473,21 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     ensureTaskPropertyPanelStyles()
   }, [])
 
-  type SectionTone = "blue" | "amber" | "slate"
-  const rowLabelWidth = isChinese ? "98px" : "126px"
+  const rowLabelWidth = isChinese ? "88px" : "110px"
   const panelBorderColor = "var(--orca-color-border-1, var(--orca-color-border))"
   const rowStyle = {
     display: "grid",
     gridTemplateColumns: `${rowLabelWidth} minmax(0, 1fr)`,
     columnGap: "12px",
     alignItems: "start",
-    marginBottom: "11px",
+    marginBottom: "8px",
   }
   const rowLabelStyle = {
-    fontSize: "11px",
-    fontWeight: 600,
+    fontSize: "12px",
+    fontWeight: 500,
     color: "var(--orca-color-text-2)",
-    letterSpacing: "0.04em",
-    lineHeight: "31px",
-    textTransform: "uppercase" as const,
-    paddingLeft: "2px",
+    letterSpacing: "0.01em",
+    lineHeight: "32px",
   }
   const controlWrapStyle = {
     minWidth: 0,
@@ -503,14 +500,13 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     alignItems: "center",
     padding: "0 11px",
     border: `1px solid ${panelBorderColor}`,
-    borderRadius: "9px",
-    background: "linear-gradient(140deg, var(--orca-color-bg-1), rgba(148, 163, 184, 0.12))",
+    borderRadius: "8px",
+    background: "var(--orca-color-bg-1)",
     color: "var(--orca-color-text-1, var(--orca-color-text))",
     fontSize: "12px",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.3)",
   }
   const hintTextStyle = {
     fontSize: "11px",
@@ -518,39 +514,11 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     whiteSpace: "nowrap" as const,
     letterSpacing: "0.01em",
   }
-  const sectionToneStyle: Record<SectionTone, {
-    borderColor: string
-    marker: string
-    markerShadow: string
-    background: string
-  }> = {
-    blue: {
-      borderColor: "rgba(37, 99, 235, 0.25)",
-      marker: "var(--orca-color-text-blue, #2563eb)",
-      markerShadow: "0 0 0 4px rgba(37, 99, 235, 0.16)",
-      background:
-        "radial-gradient(circle at 90% 10%, rgba(37, 99, 235, 0.16), transparent 45%), linear-gradient(155deg, var(--orca-color-bg-1), var(--orca-color-bg-2))",
-    },
-    amber: {
-      borderColor: "rgba(183, 121, 31, 0.26)",
-      marker: "var(--orca-color-text-yellow, #b7791f)",
-      markerShadow: "0 0 0 4px rgba(183, 121, 31, 0.15)",
-      background:
-        "radial-gradient(circle at 90% 10%, rgba(183, 121, 31, 0.18), transparent 45%), linear-gradient(155deg, var(--orca-color-bg-1), var(--orca-color-bg-2))",
-    },
-    slate: {
-      borderColor: "rgba(148, 163, 184, 0.35)",
-      marker: "var(--orca-color-text-2)",
-      markerShadow: "0 0 0 4px rgba(148, 163, 184, 0.15)",
-      background:
-        "radial-gradient(circle at 90% 10%, rgba(148, 163, 184, 0.15), transparent 46%), linear-gradient(155deg, var(--orca-color-bg-1), var(--orca-color-bg-2))",
-    },
-  }
-  const sectionBodyStyle = {
-    padding: "12px 12px 3px",
-    borderRadius: "12px",
+  const sectionStyle = {
     border: `1px solid ${panelBorderColor}`,
+    borderRadius: "10px",
     background: "var(--orca-color-bg-2)",
+    padding: "10px 10px 2px",
     boxSizing: "border-box" as const,
   }
   const inlineTimeFieldLayoutStyle = {
@@ -567,60 +535,13 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     alignItems: "center",
     width: "100%",
   }
-  const renderSection = (title: string, tone: SectionTone, ...children: unknown[]) => {
-    const toneStyle = sectionToneStyle[tone]
+  const renderSection = (...children: unknown[]) => {
     return React.createElement(
       "section",
       {
-        style: {
-          borderRadius: "14px",
-          border: `1px solid ${toneStyle.borderColor}`,
-          background: toneStyle.background,
-          boxShadow: "0 10px 22px rgba(15, 23, 42, 0.08)",
-          padding: "10px",
-          boxSizing: "border-box",
-          animationName: "mloTaskPropertySectionEnter",
-          animationDuration: "280ms",
-          animationTimingFunction: "cubic-bezier(.2,.8,.2,1)",
-          animationFillMode: "backwards",
-        },
+        style: sectionStyle,
       },
-      React.createElement(
-        "div",
-        {
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            marginBottom: "10px",
-            paddingLeft: "2px",
-          },
-        },
-        React.createElement("span", {
-          style: {
-            width: "7px",
-            height: "7px",
-            borderRadius: "999px",
-            background: toneStyle.marker,
-            boxShadow: toneStyle.markerShadow,
-            flexShrink: 0,
-          },
-        }),
-        React.createElement(
-          "span",
-          {
-            style: {
-              fontSize: "11px",
-              letterSpacing: "0.05em",
-              color: "var(--orca-color-text-2)",
-              fontWeight: 700,
-              textTransform: "uppercase",
-            },
-          },
-          title,
-        ),
-      ),
-      React.createElement("div", { style: sectionBodyStyle }, ...children),
+      ...children,
     )
   }
   const renderFormRow = (label: string, control: unknown) => {
@@ -753,12 +674,12 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   const activationBadgeStyle = {
     display: "inline-flex",
     alignItems: "center",
-    minHeight: "25px",
-    padding: "0 11px",
+    minHeight: "22px",
+    padding: "0 9px",
     borderRadius: "999px",
     fontSize: "11px",
     fontWeight: 600,
-    letterSpacing: "0.02em",
+    letterSpacing: "0.01em",
     border: `1px solid ${panelBorderColor}`,
     color:
       activationLoading || activationInfo == null
@@ -778,50 +699,42 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     height: "100%",
     overflow: "auto",
     border: `1px solid ${panelBorderColor}`,
-    borderRadius: "14px",
+    borderRadius: "12px",
     background:
       "radial-gradient(circle at 94% 6%, rgba(37, 99, 235, 0.13), transparent 40%), linear-gradient(165deg, var(--orca-color-bg-1), var(--orca-color-bg-2))",
-    boxShadow: "0 12px 28px rgba(15, 23, 42, 0.12)",
-    padding: "12px",
+    boxShadow: "0 10px 22px rgba(15, 23, 42, 0.1)",
+    padding: "10px",
     boxSizing: "border-box" as const,
     display: "flex",
     flexDirection: "column" as const,
-    gap: "12px",
+    gap: "8px",
     fontFamily: "\"Avenir Next\", \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
   }
   const headerRowStyle = {
     display: "flex",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
-    gap: "10px",
-    padding: "10px 10px 12px",
-    borderRadius: "12px",
-    border: `1px solid ${panelBorderColor}`,
-    background:
-      "radial-gradient(circle at 86% 16%, rgba(37, 99, 235, 0.14), transparent 46%), linear-gradient(150deg, var(--orca-color-bg-1), var(--orca-color-bg-2))",
+    gap: "8px",
+    padding: "0 2px 8px",
+    borderBottom: `1px solid ${panelBorderColor}`,
   }
   const titleStyle = {
-    fontSize: "16px",
-    fontWeight: 700,
+    fontSize: "14px",
+    fontWeight: 600,
     lineHeight: 1.2,
     letterSpacing: "0.01em",
     color: "var(--orca-color-text-1, var(--orca-color-text))",
-  }
-  const subtitleStyle = {
-    marginTop: "7px",
-    fontSize: "12px",
-    color: "var(--orca-color-text-2)",
     maxWidth: "100%",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
   }
   const iconButtonStyle = {
-    width: "28px",
-    height: "28px",
+    width: "26px",
+    height: "26px",
     padding: 0,
     border: `1px solid ${panelBorderColor}`,
-    borderRadius: "8px",
+    borderRadius: "7px",
     background: "rgba(15, 23, 42, 0.03)",
     cursor: "pointer",
     display: "inline-flex",
@@ -844,36 +757,15 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         {
           style: {
             display: "flex",
-            alignItems: "flex-start",
-            gap: "10px",
+            alignItems: "center",
+            gap: "8px",
             minWidth: 0,
             flex: 1,
+            flexWrap: "wrap",
           },
         },
-        React.createElement(
-          "div",
-          {
-            style: {
-              display: "flex",
-              flexDirection: "column",
-              minWidth: 0,
-            },
-          },
-          React.createElement(
-            "div",
-            {
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                flexWrap: "wrap",
-              },
-            },
-            React.createElement("div", { style: titleStyle }, labels.title),
-            React.createElement("span", { style: activationBadgeStyle }, activationBadgeText),
-          ),
-          React.createElement("div", { style: subtitleStyle, title: taskName }, taskName),
-        ),
+        React.createElement("div", { style: titleStyle, title: taskName }, taskName),
+        React.createElement("span", { style: activationBadgeStyle }, activationBadgeText),
         React.createElement(
           "button",
           {
@@ -882,8 +774,6 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
             title: starValue ? t("Starred") : t("Not starred"),
             style: {
               ...iconButtonStyle,
-              width: "30px",
-              height: "30px",
               background: starValue
                 ? "rgba(214, 158, 46, 0.16)"
                 : "rgba(15, 23, 42, 0.03)",
@@ -909,12 +799,6 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       })),
     ),
     renderSection(
-      t("Status / Star"),
-      "blue",
-      renderFormRow(
-        t("Task name"),
-        React.createElement("div", { style: readOnlyFieldStyle }, taskName),
-      ),
       renderFormRow(
         labels.status,
         React.createElement(Select, {
@@ -929,8 +813,6 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       ),
     ),
     renderSection(
-      t("Task Properties"),
-      "slate",
       renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
       renderTimeField("end", labels.endTime, endTimeValue, setEndTimeValue),
       renderScoreField(
@@ -956,8 +838,6 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       ),
     ),
     renderSection(
-      labels.repeatRule,
-      "amber",
       renderFormRow(
         labels.repeatRule,
         React.createElement(Select, {
@@ -1071,8 +951,6 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         : null,
     ),
     renderSection(
-      labels.dependsOn,
-      "slate",
       renderFormRow(
         labels.dependsOn,
         React.createElement(BlockSelect, {
@@ -1188,17 +1066,6 @@ function ensureTaskPropertyPanelStyles() {
   const styleEl = document.createElement("style")
   styleEl.id = styleId
   styleEl.textContent = `
-@keyframes mloTaskPropertySectionEnter {
-  0% {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .mlo-score-range {
   appearance: none;
   height: 3px;
