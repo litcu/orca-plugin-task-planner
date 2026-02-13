@@ -59,10 +59,12 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   const taskName = React.useMemo(() => {
     return resolveTaskName(block, props.schema.tagAlias, isChinese)
   }, [block, isChinese, props.schema.tagAlias])
+  const untitledTaskName = t("(Untitled task)")
   const initialRepeatEditor = React.useMemo(() => {
     return parseRepeatRuleToEditorState(initialValues.repeatRule)
   }, [initialValues.repeatRule])
 
+  const [taskNameText, setTaskNameText] = React.useState(taskName)
   const [statusValue, setStatusValue] = React.useState(initialValues.status)
   const [startTimeValue, setStartTimeValue] = React.useState<Date | null>(
     initialValues.startTime,
@@ -150,6 +152,9 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   }
 
   const hasDependencies = dependsOnValues.length > 0
+  const displayTaskName = taskNameText.trim() === ""
+    ? untitledTaskName
+    : taskNameText.trim()
   const selectedDateValue =
     editingDateField === "start"
       ? startTimeValue
@@ -160,6 +165,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         : null
   const initialSnapshot = React.useMemo(() => {
     return buildEditorSnapshot({
+      taskNameText: taskName,
       status: initialValues.status,
       startTime: initialValues.startTime,
       endTime: initialValues.endTime,
@@ -178,6 +184,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     })
   }, [
     initialDependsOnForEditor,
+    taskName,
     initialValues.dependencyDelay,
     initialValues.dependsMode,
     initialValues.endTime,
@@ -193,6 +200,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   ])
   const currentSnapshot = React.useMemo(() => {
     return buildEditorSnapshot({
+      taskNameText,
       status: statusValue,
       startTime: startTimeValue,
       endTime: endTimeValue,
@@ -221,11 +229,13 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     startTimeValue,
     starValue,
     statusValue,
+    taskNameText,
     taskLabelsValue,
     urgencyText,
   ])
 
   React.useEffect(() => {
+    setTaskNameText(taskName)
     setStatusValue(initialValues.status)
     setStartTimeValue(initialValues.startTime)
     setEndTimeValue(initialValues.endTime)
@@ -271,6 +281,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     initialRepeatEditor.endAtValue,
     initialRepeatEditor.weekdayValue,
     initialSnapshot,
+    taskName,
     initialValues,
     props.blockId,
   ])
@@ -444,6 +455,22 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
 
     try {
       const sourceBlockId = getMirrorId(props.blockId)
+      const normalizedTaskName = normalizeTaskName(taskNameText)
+      const currentTaskName = normalizeTaskName(taskName)
+      if (normalizedTaskName !== currentTaskName) {
+        await orca.commands.invokeEditorCommand(
+          "core.editor.setBlocksContent",
+          null,
+          [{
+            id: sourceBlockId,
+            content: [{
+              t: "t",
+              v: normalizedTaskName === "" ? untitledTaskName : normalizedTaskName,
+            }],
+          }],
+          false,
+        )
+      }
       const dependencyRefIds = await ensureDependencyRefIds(sourceBlockId, dependsOnValues)
       const normalizedTaskLabels = normalizeTaskLabelValues(taskLabelsValue)
       await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
@@ -827,7 +854,11 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
             flexWrap: "wrap",
           },
         },
-        React.createElement("div", { style: titleStyle, title: taskName }, taskName),
+        React.createElement(
+          "div",
+          { style: titleStyle, title: displayTaskName },
+          displayTaskName,
+        ),
         React.createElement("span", { style: activationBadgeStyle }, activationBadgeText),
         React.createElement(
           "button",
@@ -862,6 +893,17 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       })),
     ),
     renderSection(
+      renderFormRow(
+        t("Task name"),
+        React.createElement(Input, {
+          value: taskNameText,
+          placeholder: untitledTaskName,
+          onChange: (event: Event) => {
+            setTaskNameText((event.target as HTMLInputElement).value)
+          },
+          width: "100%",
+        }),
+      ),
       renderFormRow(
         labels.status,
         React.createElement(Select, {
@@ -1198,6 +1240,7 @@ function ensureTaskPropertyPanelStyles() {
 }
 
 interface TaskEditorSnapshotInput {
+  taskNameText: string
   status: string
   startTime: Date | null
   endTime: Date | null
@@ -1216,6 +1259,7 @@ interface TaskEditorSnapshotInput {
 
 function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {
   return JSON.stringify({
+    taskNameText: normalizeTaskName(input.taskNameText),
     status: input.status,
     startTime: input.startTime?.getTime() ?? null,
     endTime: input.endTime?.getTime() ?? null,
@@ -1231,6 +1275,10 @@ function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {
     dependsMode: input.hasDependencies ? input.dependsMode : "ALL",
     dependencyDelayText: input.hasDependencies ? input.dependencyDelayText.trim() : "",
   })
+}
+
+function normalizeTaskName(value: string): string {
+  return value.trim()
 }
 
 function resolveTaskName(

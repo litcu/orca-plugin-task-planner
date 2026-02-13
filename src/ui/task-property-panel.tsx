@@ -1,5 +1,9 @@
 import type { Block, BlockProperty, DbId } from "../orca.d.ts"
-import type { TaskSchemaDefinition } from "../core/task-schema"
+import {
+  DEFAULT_TASK_DEPENDENCY_DELAY,
+  DEFAULT_TASK_SCORE,
+  type TaskSchemaDefinition,
+} from "../core/task-schema"
 import { getMirrorId } from "../core/block-utils"
 import {
   buildTaskFieldLabels,
@@ -35,9 +39,11 @@ interface PopupState {
 }
 
 interface OpenTaskPropertyPopupOptions {
-  blockId: DbId
+  blockId?: DbId
   schema: TaskSchemaDefinition
   triggerSource: PopupTriggerSource
+  mode?: "edit" | "create"
+  onTaskCreated?: (blockId: DbId) => void
 }
 
 const popupState: PopupState = {
@@ -109,8 +115,10 @@ function renderCurrent() {
 }
 
 function TaskPropertyPopupView(props: {
-  blockId: DbId
+  blockId?: DbId
   schema: TaskSchemaDefinition
+  mode?: "edit" | "create"
+  onTaskCreated?: (blockId: DbId) => void
   visible: boolean
   onClose: () => void
   onDispose: () => void
@@ -125,14 +133,29 @@ function TaskPropertyPopupView(props: {
 
   const labels = buildTaskFieldLabels(orca.state.locale)
   const isChinese = orca.state.locale === "zh-CN"
-
-  const block = orca.state.blocks[props.blockId]
+  const isCreateMode = props.mode === "create"
+  const untitledTaskName = t("(Untitled task)")
+  const block = props.blockId == null ? undefined : orca.state.blocks[props.blockId]
   const taskRef = block?.refs.find(
     (ref) => ref.type === TAG_REF_TYPE && ref.alias === props.schema.tagAlias,
   )
   const initialValues = React.useMemo(() => {
     return getTaskPropertiesFromRef(taskRef?.data, props.schema)
   }, [block, taskRef, props.schema])
+  const editorInitialValues = React.useMemo(() => {
+    if (!isCreateMode) {
+      return initialValues
+    }
+
+    return {
+      ...initialValues,
+      importance: initialValues.importance ?? DEFAULT_TASK_SCORE,
+      urgency: initialValues.urgency ?? DEFAULT_TASK_SCORE,
+      effort: initialValues.effort ?? DEFAULT_TASK_SCORE,
+      dependencyDelay:
+        initialValues.dependencyDelay ?? DEFAULT_TASK_DEPENDENCY_DELAY,
+    }
+  }, [initialValues, isCreateMode])
 
   const initialDependsOnForEditor = React.useMemo(() => {
     return normalizeDependsOnForSelect(
@@ -142,46 +165,50 @@ function TaskPropertyPopupView(props: {
     )
   }, [block, initialValues.dependsOn, props.schema.propertyNames.dependsOn])
   const taskName = React.useMemo(() => {
+    if (isCreateMode) {
+      return ""
+    }
     return resolveTaskName(block, props.schema.tagAlias, isChinese)
-  }, [block, isChinese, props.schema.tagAlias])
+  }, [block, isChinese, isCreateMode, props.schema.tagAlias])
   const initialRepeatEditor = React.useMemo(() => {
-    return parseRepeatRuleToEditorState(initialValues.repeatRule)
-  }, [initialValues.repeatRule])
+    return parseRepeatRuleToEditorState(editorInitialValues.repeatRule)
+  }, [editorInitialValues.repeatRule])
 
-  const [statusValue, setStatusValue] = React.useState(initialValues.status)
+  const [taskNameText, setTaskNameText] = React.useState(taskName)
+  const [statusValue, setStatusValue] = React.useState(editorInitialValues.status)
   const [startTimeValue, setStartTimeValue] = React.useState<Date | null>(
-    initialValues.startTime,
+    editorInitialValues.startTime,
   )
   const [endTimeValue, setEndTimeValue] = React.useState<Date | null>(
-    initialValues.endTime,
+    editorInitialValues.endTime,
   )
   const [importanceText, setImportanceText] = React.useState(
-    initialValues.importance == null ? "" : String(initialValues.importance),
+    editorInitialValues.importance == null ? "" : String(editorInitialValues.importance),
   )
   const [urgencyText, setUrgencyText] = React.useState(
-    initialValues.urgency == null ? "" : String(initialValues.urgency),
+    editorInitialValues.urgency == null ? "" : String(editorInitialValues.urgency),
   )
   const [effortText, setEffortText] = React.useState(
-    initialValues.effort == null ? "" : String(initialValues.effort),
+    editorInitialValues.effort == null ? "" : String(editorInitialValues.effort),
   )
   const [importanceValue, setImportanceValue] = React.useState(
-    clampScore(initialValues.importance),
+    clampScore(editorInitialValues.importance),
   )
   const [urgencyValue, setUrgencyValue] = React.useState(
-    clampScore(initialValues.urgency),
+    clampScore(editorInitialValues.urgency),
   )
   const [effortValue, setEffortValue] = React.useState(
-    clampScore(initialValues.effort),
+    clampScore(editorInitialValues.effort),
   )
-  const [starValue, setStarValue] = React.useState(initialValues.star)
-  const [repeatRuleText, setRepeatRuleText] = React.useState(initialValues.repeatRule)
+  const [starValue, setStarValue] = React.useState(editorInitialValues.star)
+  const [repeatRuleText, setRepeatRuleText] = React.useState(editorInitialValues.repeatRule)
   const [taskLabelsValue, setTaskLabelsValue] = React.useState<string[]>(
-    initialValues.labels,
+    editorInitialValues.labels,
   )
   const [taskLabelOptions, setTaskLabelOptions] = React.useState<string[]>(
-    initialValues.labels,
+    editorInitialValues.labels,
   )
-  const [remarkText, setRemarkText] = React.useState(initialValues.remark)
+  const [remarkText, setRemarkText] = React.useState(editorInitialValues.remark)
   const [repeatModeValue, setRepeatModeValue] = React.useState<RepeatMode>(
     initialRepeatEditor.mode,
   )
@@ -207,12 +234,12 @@ function TaskPropertyPopupView(props: {
     initialDependsOnForEditor,
   )
   const [dependsModeValue, setDependsModeValue] = React.useState(
-    initialValues.dependsMode,
+    editorInitialValues.dependsMode,
   )
   const [dependencyDelayText, setDependencyDelayText] = React.useState(
-    initialValues.dependencyDelay == null
+    editorInitialValues.dependencyDelay == null
       ? ""
-      : String(initialValues.dependencyDelay),
+      : String(editorInitialValues.dependencyDelay),
   )
   const [editingDateField, setEditingDateField] = React.useState<
     "start" | "end" | "repeatEnd" | null
@@ -234,6 +261,9 @@ function TaskPropertyPopupView(props: {
   }
 
   const hasDependencies = dependsOnValues.length > 0
+  const displayTaskName = taskNameText.trim() === ""
+    ? untitledTaskName
+    : taskNameText.trim()
   const selectedDateValue =
     editingDateField === "start"
       ? startTimeValue
@@ -244,39 +274,46 @@ function TaskPropertyPopupView(props: {
         : null
   const initialSnapshot = React.useMemo(() => {
     return buildEditorSnapshot({
-      status: initialValues.status,
-      startTime: initialValues.startTime,
-      endTime: initialValues.endTime,
-      importanceText: initialValues.importance == null ? "" : String(initialValues.importance),
-      urgencyText: initialValues.urgency == null ? "" : String(initialValues.urgency),
-      effortText: initialValues.effort == null ? "" : String(initialValues.effort),
-      star: initialValues.star,
-      repeatRuleText: initialValues.repeatRule,
-      taskLabels: initialValues.labels,
-      remarkText: initialValues.remark,
+      taskNameText: taskName,
+      status: editorInitialValues.status,
+      startTime: editorInitialValues.startTime,
+      endTime: editorInitialValues.endTime,
+      importanceText:
+        editorInitialValues.importance == null ? "" : String(editorInitialValues.importance),
+      urgencyText:
+        editorInitialValues.urgency == null ? "" : String(editorInitialValues.urgency),
+      effortText: editorInitialValues.effort == null ? "" : String(editorInitialValues.effort),
+      star: editorInitialValues.star,
+      repeatRuleText: editorInitialValues.repeatRule,
+      taskLabels: editorInitialValues.labels,
+      remarkText: editorInitialValues.remark,
       dependsOn: initialDependsOnForEditor,
-      dependsMode: initialValues.dependsMode,
+      dependsMode: editorInitialValues.dependsMode,
       dependencyDelayText:
-        initialValues.dependencyDelay == null ? "" : String(initialValues.dependencyDelay),
+        editorInitialValues.dependencyDelay == null
+          ? ""
+          : String(editorInitialValues.dependencyDelay),
       hasDependencies: initialDependsOnForEditor.length > 0,
     })
   }, [
     initialDependsOnForEditor,
-    initialValues.dependencyDelay,
-    initialValues.dependsMode,
-    initialValues.endTime,
-    initialValues.effort,
-    initialValues.importance,
-    initialValues.labels,
-    initialValues.remark,
-    initialValues.repeatRule,
-    initialValues.startTime,
-    initialValues.star,
-    initialValues.status,
-    initialValues.urgency,
+    taskName,
+    editorInitialValues.dependencyDelay,
+    editorInitialValues.dependsMode,
+    editorInitialValues.endTime,
+    editorInitialValues.effort,
+    editorInitialValues.importance,
+    editorInitialValues.labels,
+    editorInitialValues.remark,
+    editorInitialValues.repeatRule,
+    editorInitialValues.startTime,
+    editorInitialValues.star,
+    editorInitialValues.status,
+    editorInitialValues.urgency,
   ])
   const currentSnapshot = React.useMemo(() => {
     return buildEditorSnapshot({
+      taskNameText,
       status: statusValue,
       startTime: startTimeValue,
       endTime: endTimeValue,
@@ -305,27 +342,29 @@ function TaskPropertyPopupView(props: {
     startTimeValue,
     starValue,
     statusValue,
+    taskNameText,
     taskLabelsValue,
     urgencyText,
   ])
 
   React.useEffect(() => {
-    setStatusValue(initialValues.status)
-    setStartTimeValue(initialValues.startTime)
-    setEndTimeValue(initialValues.endTime)
+    setTaskNameText(taskName)
+    setStatusValue(editorInitialValues.status)
+    setStartTimeValue(editorInitialValues.startTime)
+    setEndTimeValue(editorInitialValues.endTime)
     setImportanceText(
-      initialValues.importance == null ? "" : String(initialValues.importance),
+      editorInitialValues.importance == null ? "" : String(editorInitialValues.importance),
     )
-    setUrgencyText(initialValues.urgency == null ? "" : String(initialValues.urgency))
-    setEffortText(initialValues.effort == null ? "" : String(initialValues.effort))
-    setImportanceValue(clampScore(initialValues.importance))
-    setUrgencyValue(clampScore(initialValues.urgency))
-    setEffortValue(clampScore(initialValues.effort))
-    setStarValue(initialValues.star)
-    setRepeatRuleText(initialValues.repeatRule)
-    setTaskLabelsValue(initialValues.labels)
-    setTaskLabelOptions(initialValues.labels)
-    setRemarkText(initialValues.remark)
+    setUrgencyText(editorInitialValues.urgency == null ? "" : String(editorInitialValues.urgency))
+    setEffortText(editorInitialValues.effort == null ? "" : String(editorInitialValues.effort))
+    setImportanceValue(clampScore(editorInitialValues.importance))
+    setUrgencyValue(clampScore(editorInitialValues.urgency))
+    setEffortValue(clampScore(editorInitialValues.effort))
+    setStarValue(editorInitialValues.star)
+    setRepeatRuleText(editorInitialValues.repeatRule)
+    setTaskLabelsValue(editorInitialValues.labels)
+    setTaskLabelOptions(editorInitialValues.labels)
+    setRemarkText(editorInitialValues.remark)
     setRepeatModeValue(initialRepeatEditor.mode)
     setRepeatIntervalText(initialRepeatEditor.intervalText)
     setRepeatWeekdayValue(initialRepeatEditor.weekdayValue)
@@ -334,11 +373,11 @@ function TaskPropertyPopupView(props: {
     setRepeatOccurrence(initialRepeatEditor.occurrence)
     setRepeatRuleParseable(initialRepeatEditor.parseable)
     setDependsOnValues(initialDependsOnForEditor)
-    setDependsModeValue(initialValues.dependsMode)
+    setDependsModeValue(editorInitialValues.dependsMode)
     setDependencyDelayText(
-      initialValues.dependencyDelay == null
+      editorInitialValues.dependencyDelay == null
         ? ""
-        : String(initialValues.dependencyDelay),
+        : String(editorInitialValues.dependencyDelay),
     )
     setEditingDateField(null)
     setErrorText("")
@@ -356,7 +395,8 @@ function TaskPropertyPopupView(props: {
     initialRepeatEditor.endAtValue,
     initialRepeatEditor.weekdayValue,
     initialSnapshot,
-    initialValues,
+    taskName,
+    editorInitialValues,
   ])
 
   const statusOptions = props.schema.statusChoices.map((item) => ({
@@ -426,6 +466,12 @@ function TaskPropertyPopupView(props: {
   ])
 
   const refreshActivationInfo = React.useCallback(async () => {
+    if (isCreateMode || props.blockId == null) {
+      setActivationInfo(null)
+      setActivationLoading(false)
+      return
+    }
+
     setActivationLoading(true)
     try {
       const next = await loadTaskActivationInfo(props.schema, props.blockId)
@@ -436,7 +482,7 @@ function TaskPropertyPopupView(props: {
     } finally {
       setActivationLoading(false)
     }
-  }, [props.blockId, props.schema])
+  }, [isCreateMode, props.blockId, props.schema])
 
   React.useEffect(() => {
     void refreshActivationInfo()
@@ -452,7 +498,7 @@ function TaskPropertyPopupView(props: {
       }
 
       setTaskLabelOptions((prev: string[]) =>
-        mergeTaskLabelValues(prev, choices, initialValues.labels))
+        mergeTaskLabelValues(prev, choices, editorInitialValues.labels))
     }
 
     void loadTaskLabelOptions()
@@ -460,19 +506,18 @@ function TaskPropertyPopupView(props: {
       disposed = true
     }
   }, [
-    initialValues.labels,
+    editorInitialValues.labels,
     props.blockId,
     props.schema,
   ])
 
-  const handleSave = async (snapshot: string) => {
-    if (taskRef == null) {
-      const message = t("Task ref not found")
-      setErrorText(message)
-      orca.notify("error", message)
-      setLastFailedSnapshot(snapshot)
-      return
-    }
+  const handleSave = async (
+    snapshot: string,
+    options?: {
+      closeOnSuccess?: boolean
+    },
+  ) => {
+    const closeOnSuccess = options?.closeOnSuccess === true
 
     const importance = validateNumericField(labels.importance, importanceText)
     if (importance.error != null) {
@@ -528,13 +573,99 @@ function TaskPropertyPopupView(props: {
     setErrorText("")
 
     try {
+      const normalizedTaskName = normalizeTaskName(taskNameText)
+      const contentText = normalizedTaskName === "" ? untitledTaskName : normalizedTaskName
+      const normalizedTaskLabels = normalizeTaskLabelValues(taskLabelsValue)
+      await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
+
+      if (isCreateMode) {
+        const journalBlock = (await orca.invokeBackend(
+          "get-journal-block",
+          new Date(),
+        )) as Block | null
+        if (journalBlock == null) {
+          throw new Error(t("Failed to add task"))
+        }
+
+        let createdTaskId: DbId | null = null
+        await orca.commands.invokeGroup(async () => {
+          const insertedTaskId = (await orca.commands.invokeEditorCommand(
+            "core.editor.insertBlock",
+            null,
+            journalBlock,
+            "lastChild",
+            [{ t: "t", v: contentText }],
+          )) as DbId
+          createdTaskId = insertedTaskId
+
+          const dependencyRefIds = await ensureDependencyRefIds(
+            insertedTaskId,
+            dependsOnValues,
+          )
+          const valuesToSave = {
+            status: statusValue,
+            startTime: startTimeValue,
+            endTime: endTimeValue,
+            importance: importanceInRange,
+            urgency: urgencyInRange,
+            effort: effortInRange,
+            star: starValue,
+            repeatRule: repeatRuleText,
+            labels: normalizedTaskLabels,
+            remark: remarkText,
+            dependsOn: dependencyRefIds,
+            dependsMode: hasDependencies ? dependsModeValue : "ALL",
+            dependencyDelay: hasDependencies ? dependencyDelay.value : null,
+          }
+          const payload = toRefDataForSave(valuesToSave, props.schema)
+          await orca.commands.invokeEditorCommand(
+            "core.editor.insertTag",
+            null,
+            insertedTaskId,
+            props.schema.tagAlias,
+            payload,
+          )
+        })
+
+        if (createdTaskId == null) {
+          throw new Error(t("Failed to add task"))
+        }
+
+        setLastSavedSnapshot(snapshot)
+        setLastFailedSnapshot(null)
+        props.onTaskCreated?.(createdTaskId)
+        if (closeOnSuccess) {
+          props.onClose()
+        }
+        return
+      }
+
+      if (taskRef == null || props.blockId == null) {
+        const message = t("Task ref not found")
+        setErrorText(message)
+        orca.notify("error", message)
+        setLastFailedSnapshot(snapshot)
+        return
+      }
+
       const sourceBlockId = getMirrorId(props.blockId)
+      const currentTaskName = normalizeTaskName(taskName)
+      if (normalizedTaskName !== currentTaskName) {
+        await orca.commands.invokeEditorCommand(
+          "core.editor.setBlocksContent",
+          null,
+          [{
+            id: sourceBlockId,
+            content: [{ t: "t", v: contentText }],
+          }],
+          false,
+        )
+      }
+
       const dependencyRefIds = await ensureDependencyRefIds(
         sourceBlockId,
         dependsOnValues,
       )
-      const normalizedTaskLabels = normalizeTaskLabelValues(taskLabelsValue)
-      await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
       const previousValues = getTaskPropertiesFromRef(taskRef.data, props.schema)
       const valuesToSave = {
         status: statusValue,
@@ -573,18 +704,14 @@ function TaskPropertyPopupView(props: {
       setLastSavedSnapshot(snapshot)
       setLastFailedSnapshot(null)
       void refreshActivationInfo()
+      if (closeOnSuccess) {
+        props.onClose()
+      }
     } catch (error) {
-      setErrorText(
-        error instanceof Error
-          ? error.message
-          : t("Save failed"),
-      )
-      orca.notify(
-        "error",
-        error instanceof Error
-          ? error.message
-          : t("Save failed"),
-      )
+      const defaultMessage = isCreateMode ? t("Failed to add task") : t("Save failed")
+      const message = error instanceof Error ? error.message : defaultMessage
+      setErrorText(message)
+      orca.notify("error", message)
       setLastFailedSnapshot(snapshot)
     } finally {
       setSaving(false)
@@ -592,14 +719,14 @@ function TaskPropertyPopupView(props: {
   }
 
   React.useEffect(() => {
-    if (taskRef == null) {
+    if (isCreateMode || taskRef == null) {
       return
     }
 
     const unchanged = currentSnapshot === lastSavedSnapshot
     const failedAndUnchanged =
       lastFailedSnapshot != null && currentSnapshot === lastFailedSnapshot
-    if (unchanged || failedAndUnchanged) {
+    if (unchanged || failedAndUnchanged || saving) {
       return
     }
 
@@ -610,7 +737,7 @@ function TaskPropertyPopupView(props: {
     return () => {
       window.clearTimeout(timer)
     }
-  }, [currentSnapshot, handleSave, lastFailedSnapshot, lastSavedSnapshot, taskRef])
+  }, [currentSnapshot, isCreateMode, lastFailedSnapshot, lastSavedSnapshot, saving, taskRef])
 
   // Use a consistent 2-column row layout: label + control.
   const rowLabelWidth = isChinese ? "92px" : "114px"
@@ -904,9 +1031,11 @@ function TaskPropertyPopupView(props: {
                   lineHeight: 1.2,
                 },
               },
-              labels.title,
+              isCreateMode ? t("Add task") : labels.title,
             ),
-            React.createElement("span", { style: activationBadgeStyle }, activationBadgeText),
+            !isCreateMode
+              ? React.createElement("span", { style: activationBadgeStyle }, activationBadgeText)
+              : null,
           ),
           React.createElement(
             "button",
@@ -936,7 +1065,14 @@ function TaskPropertyPopupView(props: {
         renderSection(
           renderFormRow(
             t("Task name"),
-            React.createElement("div", { style: readOnlyFieldStyle }, taskName),
+            React.createElement(Input, {
+              value: taskNameText,
+              placeholder: untitledTaskName,
+              onChange: (event: Event) => {
+                setTaskNameText((event.target as HTMLInputElement).value)
+              },
+              width: "100%",
+            }),
           ),
           renderFormRow(
             labels.status,
@@ -1214,6 +1350,39 @@ function TaskPropertyPopupView(props: {
               onClose: () => setEditingDateField(null),
             })
           : null,
+        isCreateMode
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  marginTop: "8px",
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "8px",
+                },
+              },
+              React.createElement(
+                Button,
+                {
+                  variant: "plain",
+                  disabled: saving,
+                  onClick: () => props.onClose(),
+                },
+                labels.cancel,
+              ),
+              React.createElement(
+                Button,
+                {
+                  variant: "solid",
+                  disabled: saving,
+                  onClick: () => {
+                    void handleSave(currentSnapshot, { closeOnSuccess: true })
+                  },
+                },
+                saving ? t("Saving...") : labels.save,
+              ),
+            )
+          : null,
         errorText.trim() !== ""
           ? React.createElement(
               "div",
@@ -1232,6 +1401,7 @@ function TaskPropertyPopupView(props: {
 }
 
 interface TaskEditorSnapshotInput {
+  taskNameText: string
   status: string
   startTime: Date | null
   endTime: Date | null
@@ -1250,6 +1420,7 @@ interface TaskEditorSnapshotInput {
 
 function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {
   return JSON.stringify({
+    taskNameText: normalizeTaskName(input.taskNameText),
     status: input.status,
     startTime: input.startTime?.getTime() ?? null,
     endTime: input.endTime?.getTime() ?? null,
@@ -1265,6 +1436,10 @@ function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {
     dependsMode: input.hasDependencies ? input.dependsMode : "ALL",
     dependencyDelayText: input.hasDependencies ? input.dependencyDelayText.trim() : "",
   })
+}
+
+function normalizeTaskName(value: string): string {
+  return value.trim()
 }
 
 function resolveTaskName(

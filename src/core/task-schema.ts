@@ -15,8 +15,8 @@ const PROP_TYPE = {
   TEXT_CHOICES: 6,
 } as const
 
-const DEFAULT_SCORE = 50
-const DEFAULT_DEPENDENCY_DELAY = 0
+export const DEFAULT_TASK_SCORE = 50
+export const DEFAULT_TASK_DEPENDENCY_DELAY = 0
 
 interface TaskSchemaPropertyNames {
   status: string
@@ -283,7 +283,7 @@ function buildTaskTagProperties(
       type: PROP_TYPE.NUMBER,
       typeArgs: {
         defaultEnabled: true,
-        default: DEFAULT_SCORE,
+        default: DEFAULT_TASK_SCORE,
       },
       pos: findPos(names.importance),
     },
@@ -292,7 +292,7 @@ function buildTaskTagProperties(
       type: PROP_TYPE.NUMBER,
       typeArgs: {
         defaultEnabled: true,
-        default: DEFAULT_SCORE,
+        default: DEFAULT_TASK_SCORE,
       },
       pos: findPos(names.urgency),
     },
@@ -301,7 +301,7 @@ function buildTaskTagProperties(
       type: PROP_TYPE.NUMBER,
       typeArgs: {
         defaultEnabled: true,
-        default: DEFAULT_SCORE,
+        default: DEFAULT_TASK_SCORE,
       },
       pos: findPos(names.effort),
     },
@@ -329,7 +329,7 @@ function buildTaskTagProperties(
       type: PROP_TYPE.NUMBER,
       typeArgs: {
         defaultEnabled: true,
-        default: DEFAULT_DEPENDENCY_DELAY,
+        default: DEFAULT_TASK_DEPENDENCY_DELAY,
       },
       pos: findPos(names.dependencyDelay),
     },

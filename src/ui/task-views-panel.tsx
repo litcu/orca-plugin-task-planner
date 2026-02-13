@@ -21,6 +21,7 @@ import {
 import { t } from "../libs/l10n"
 import { TaskPropertyPanelCard } from "./task-property-card"
 import { TaskListRow, type TaskListRowItem } from "./task-list-row"
+import { openTaskPropertyPopup } from "./task-property-panel"
 
 interface TaskViewsPanelProps extends PanelProps {
   schema: TaskSchemaDefinition
@@ -225,6 +226,18 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     setSelectedTaskId(null)
     void loadByTab(tab, { silent: true })
   }, [loadByTab, tab])
+
+  const addTask = React.useCallback(() => {
+    openTaskPropertyPopup({
+      schema: props.schema,
+      triggerSource: "panel-view",
+      mode: "create",
+      onTaskCreated: () => {
+        setErrorText("")
+        void loadByTab(tab, { silent: true })
+      },
+    })
+  }, [loadByTab, props.schema, tab])
 
   const navigateToTaskParent = React.useCallback((item: TaskListRowItem) => {
     const targetId = item.parentBlockId ?? item.blockId
@@ -533,6 +546,34 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           flex: 1,
         },
       }),
+      React.createElement(
+        Button,
+        {
+          variant: "outline",
+          onClick: () => {
+            addTask()
+          },
+          style: {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+            whiteSpace: "nowrap",
+            borderRadius: "8px",
+          },
+        },
+        React.createElement("i", {
+          className: "ti ti-plus",
+          style: {
+            fontSize: "14px",
+            lineHeight: 1,
+          },
+        }),
+        React.createElement(
+          "span",
+          null,
+          t("Add task"),
+        ),
+      ),
       isAllTasksTab
         ? React.createElement(
             "label",
