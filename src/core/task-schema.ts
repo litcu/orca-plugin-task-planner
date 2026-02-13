@@ -1,6 +1,5 @@
 import type { Block, BlockProperty, DbId } from "../orca.d.ts"
 
-// 任务标签固定别名：后续阶段可在设置中开放自定义
 export const TASK_TAG_ALIAS = "Task"
 
 export type DependencyMode = "ALL" | "ANY"
@@ -22,6 +21,7 @@ interface TaskSchemaPropertyNames {
   status: string
   startTime: string
   endTime: string
+  review: string
   importance: string
   urgency: string
   effort: string
@@ -50,6 +50,7 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
       status: "Status",
       startTime: "Start time",
       endTime: "End time",
+      review: "Review",
       importance: "Importance",
       urgency: "Urgency",
       effort: "Effort",
@@ -68,21 +69,22 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
     locale: "zh-CN",
     tagAlias: TASK_TAG_ALIAS,
     propertyNames: {
-      status: "状态",
-      startTime: "开始时间",
-      endTime: "结束时间",
-      importance: "重要性",
-      urgency: "紧急度",
-      effort: "工作量",
-      dependsOn: "依赖任务",
-      dependsMode: "依赖模式",
-      dependencyDelay: "依赖延迟",
-      star: "收藏",
-      repeatRule: "重复规则",
-      labels: "标签",
-      remark: "备注",
+      status: "\u72b6\u6001",
+      startTime: "\u5f00\u59cb\u65f6\u95f4",
+      endTime: "\u7ed3\u675f\u65f6\u95f4",
+      review: "\u56de\u987e",
+      importance: "\u91cd\u8981\u6027",
+      urgency: "\u7d27\u6025\u5ea6",
+      effort: "\u5de5\u4f5c\u91cf",
+      dependsOn: "\u4f9d\u8d56\u4efb\u52a1",
+      dependsMode: "\u4f9d\u8d56\u6a21\u5f0f",
+      dependencyDelay: "\u4f9d\u8d56\u5ef6\u8fdf",
+      star: "\u6536\u85cf",
+      repeatRule: "\u91cd\u590d\u89c4\u5219",
+      labels: "\u6807\u7b7e",
+      remark: "\u5907\u6ce8",
     },
-    statusChoices: ["待开始", "进行中", "已完成"],
+    statusChoices: ["\u5f85\u5f00\u59cb", "\u8fdb\u884c\u4e2d", "\u5df2\u5b8c\u6210"],
     dependencyModeChoices: ["ALL", "ANY"],
   },
 }
@@ -140,12 +142,9 @@ export async function ensureTaskTagSchema(
   }
 
   if (taskBlock == null) {
-    throw new Error(
-      `初始化任务标签失败：未找到 ${taskTagAlias} 标签块`,
-    )
+    throw new Error(`Failed to initialize task tag: ${taskTagAlias}`)
   }
 
-  // 已存在任务 schema 时沿用既有命名，避免切换语言后自动改写历史属性
   const existingSchema = detectSchemaFromProperties(taskBlock.properties)
   const targetSchema = withTaskTagAlias(
     existingSchema ?? getTaskSchemaByLocale(locale),
@@ -277,6 +276,11 @@ function buildTaskTagProperties(
       type: PROP_TYPE.DATE_TIME,
       typeArgs: { subType: "datetime" },
       pos: findPos(names.endTime),
+    },
+    {
+      name: names.review,
+      type: PROP_TYPE.TEXT,
+      pos: findPos(names.review),
     },
     {
       name: names.importance,

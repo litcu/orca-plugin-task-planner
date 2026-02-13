@@ -24,6 +24,12 @@ import {
   parseRepeatRuleToEditorState,
   type RepeatMode,
 } from "./repeat-rule-editor"
+import {
+  buildReviewRuleFromEditorState,
+  parseReviewRuleToEditorState,
+  type ReviewMode,
+  type TaskReviewType,
+} from "../core/task-review"
 type PopupTriggerSource = "tag-click" | "tag-menu" | "panel-view"
 
 type ReactRootLike = {
@@ -173,6 +179,13 @@ function TaskPropertyPopupView(props: {
   const initialRepeatEditor = React.useMemo(() => {
     return parseRepeatRuleToEditorState(editorInitialValues.repeatRule)
   }, [editorInitialValues.repeatRule])
+  const initialReviewEditor = React.useMemo(() => {
+    const parsed = parseReviewRuleToEditorState(editorInitialValues.reviewEvery)
+    return {
+      mode: parsed.mode === "none" ? "day" as ReviewMode : parsed.mode,
+      intervalText: parsed.intervalText,
+    }
+  }, [editorInitialValues.reviewEvery])
 
   const [taskNameText, setTaskNameText] = React.useState(taskName)
   const [statusValue, setStatusValue] = React.useState(editorInitialValues.status)
@@ -181,6 +194,15 @@ function TaskPropertyPopupView(props: {
   )
   const [endTimeValue, setEndTimeValue] = React.useState<Date | null>(
     editorInitialValues.endTime,
+  )
+  const [nextReviewValue, setNextReviewValue] = React.useState<Date | null>(
+    editorInitialValues.nextReview,
+  )
+  const [reviewEnabledValue, setReviewEnabledValue] = React.useState(
+    editorInitialValues.reviewEnabled,
+  )
+  const [reviewTypeValue, setReviewTypeValue] = React.useState<TaskReviewType>(
+    editorInitialValues.reviewType,
   )
   const [importanceText, setImportanceText] = React.useState(
     editorInitialValues.importance == null ? "" : String(editorInitialValues.importance),
@@ -230,6 +252,15 @@ function TaskPropertyPopupView(props: {
   const [repeatRuleParseable, setRepeatRuleParseable] = React.useState(
     initialRepeatEditor.parseable,
   )
+  const [reviewModeValue, setReviewModeValue] = React.useState<ReviewMode>(
+    initialReviewEditor.mode,
+  )
+  const [reviewIntervalText, setReviewIntervalText] = React.useState(
+    initialReviewEditor.intervalText,
+  )
+  const [lastReviewedValue, setLastReviewedValue] = React.useState<Date | null>(
+    editorInitialValues.lastReviewed,
+  )
   const [dependsOnValues, setDependsOnValues] = React.useState<DbId[]>(
     initialDependsOnForEditor,
   )
@@ -242,7 +273,7 @@ function TaskPropertyPopupView(props: {
       : String(editorInitialValues.dependencyDelay),
   )
   const [editingDateField, setEditingDateField] = React.useState<
-    "start" | "end" | "repeatEnd" | null
+    "start" | "end" | "repeatEnd" | "nextReview" | null
   >(null)
   const [errorText, setErrorText] = React.useState("")
   const [saving, setSaving] = React.useState(false)
@@ -269,6 +300,8 @@ function TaskPropertyPopupView(props: {
       ? startTimeValue
       : editingDateField === "end"
         ? endTimeValue
+        : editingDateField === "nextReview"
+          ? nextReviewValue
         : editingDateField === "repeatEnd"
           ? repeatEndAtValue
         : null
@@ -278,6 +311,12 @@ function TaskPropertyPopupView(props: {
       status: editorInitialValues.status,
       startTime: editorInitialValues.startTime,
       endTime: editorInitialValues.endTime,
+      reviewEnabled: editorInitialValues.reviewEnabled,
+      reviewType: editorInitialValues.reviewType,
+      nextReview: editorInitialValues.nextReview,
+      reviewMode: initialReviewEditor.mode,
+      reviewIntervalText: initialReviewEditor.intervalText,
+      lastReviewed: editorInitialValues.lastReviewed,
       importanceText:
         editorInitialValues.importance == null ? "" : String(editorInitialValues.importance),
       urgencyText:
@@ -303,13 +342,19 @@ function TaskPropertyPopupView(props: {
     editorInitialValues.endTime,
     editorInitialValues.effort,
     editorInitialValues.importance,
+    editorInitialValues.lastReviewed,
     editorInitialValues.labels,
+    editorInitialValues.nextReview,
+    editorInitialValues.reviewEnabled,
+    editorInitialValues.reviewType,
     editorInitialValues.remark,
     editorInitialValues.repeatRule,
     editorInitialValues.startTime,
     editorInitialValues.star,
     editorInitialValues.status,
     editorInitialValues.urgency,
+    initialReviewEditor.intervalText,
+    initialReviewEditor.mode,
   ])
   const currentSnapshot = React.useMemo(() => {
     return buildEditorSnapshot({
@@ -317,6 +362,12 @@ function TaskPropertyPopupView(props: {
       status: statusValue,
       startTime: startTimeValue,
       endTime: endTimeValue,
+      reviewEnabled: reviewEnabledValue,
+      reviewType: reviewTypeValue,
+      nextReview: nextReviewValue,
+      reviewMode: reviewModeValue,
+      reviewIntervalText,
+      lastReviewed: lastReviewedValue,
       importanceText,
       urgencyText,
       effortText,
@@ -337,7 +388,13 @@ function TaskPropertyPopupView(props: {
     effortText,
     hasDependencies,
     importanceText,
+    lastReviewedValue,
+    nextReviewValue,
+    reviewEnabledValue,
     remarkText,
+    reviewIntervalText,
+    reviewModeValue,
+    reviewTypeValue,
     repeatRuleText,
     startTimeValue,
     starValue,
@@ -352,6 +409,9 @@ function TaskPropertyPopupView(props: {
     setStatusValue(editorInitialValues.status)
     setStartTimeValue(editorInitialValues.startTime)
     setEndTimeValue(editorInitialValues.endTime)
+    setNextReviewValue(editorInitialValues.nextReview)
+    setReviewEnabledValue(editorInitialValues.reviewEnabled)
+    setReviewTypeValue(editorInitialValues.reviewType)
     setImportanceText(
       editorInitialValues.importance == null ? "" : String(editorInitialValues.importance),
     )
@@ -372,6 +432,9 @@ function TaskPropertyPopupView(props: {
     setRepeatEndAtValue(initialRepeatEditor.endAtValue)
     setRepeatOccurrence(initialRepeatEditor.occurrence)
     setRepeatRuleParseable(initialRepeatEditor.parseable)
+    setReviewModeValue(initialReviewEditor.mode)
+    setReviewIntervalText(initialReviewEditor.intervalText)
+    setLastReviewedValue(editorInitialValues.lastReviewed)
     setDependsOnValues(initialDependsOnForEditor)
     setDependsModeValue(editorInitialValues.dependsMode)
     setDependencyDelayText(
@@ -394,6 +457,8 @@ function TaskPropertyPopupView(props: {
     initialRepeatEditor.parseable,
     initialRepeatEditor.endAtValue,
     initialRepeatEditor.weekdayValue,
+    initialReviewEditor.intervalText,
+    initialReviewEditor.mode,
     initialSnapshot,
     taskName,
     editorInitialValues,
@@ -410,6 +475,15 @@ function TaskPropertyPopupView(props: {
   ]
   const repeatModeOptions = [
     { value: "none", label: t("No repeat") },
+    { value: "day", label: t("By day") },
+    { value: "week", label: t("By week") },
+    { value: "month", label: t("By month") },
+  ]
+  const reviewTypeOptions = [
+    { value: "single", label: labels.singleReview },
+    { value: "cycle", label: labels.cycleReview },
+  ]
+  const reviewModeOptions = [
     { value: "day", label: t("By day") },
     { value: "week", label: t("By week") },
     { value: "month", label: t("By month") },
@@ -463,6 +537,20 @@ function TaskPropertyPopupView(props: {
     repeatModeValue,
     repeatOccurrence,
     repeatWeekdayValue,
+  ])
+
+  const updateReviewEditor = React.useCallback((next: {
+    mode?: ReviewMode
+    intervalText?: string
+  }) => {
+    const mode = next.mode ?? reviewModeValue
+    const intervalText = next.intervalText ?? reviewIntervalText
+
+    setReviewModeValue(mode)
+    setReviewIntervalText(intervalText)
+  }, [
+    reviewIntervalText,
+    reviewModeValue,
   ])
 
   const refreshActivationInfo = React.useCallback(async () => {
@@ -576,6 +664,12 @@ function TaskPropertyPopupView(props: {
       const normalizedTaskName = normalizeTaskName(taskNameText)
       const contentText = normalizedTaskName === "" ? untitledTaskName : normalizedTaskName
       const normalizedTaskLabels = normalizeTaskLabelValues(taskLabelsValue)
+      const reviewEvery = reviewEnabledValue && reviewTypeValue === "cycle"
+        ? buildReviewRuleFromEditorState({
+            mode: reviewModeValue,
+            intervalText: reviewIntervalText,
+          })
+        : ""
       await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
 
       if (isCreateMode) {
@@ -606,6 +700,14 @@ function TaskPropertyPopupView(props: {
             status: statusValue,
             startTime: startTimeValue,
             endTime: endTimeValue,
+            reviewEnabled: reviewEnabledValue,
+            reviewType: reviewTypeValue,
+            nextReview:
+              reviewEnabledValue && reviewTypeValue === "single"
+                ? nextReviewValue
+                : null,
+            reviewEvery,
+            lastReviewed: reviewEnabledValue ? lastReviewedValue : null,
             importance: importanceInRange,
             urgency: urgencyInRange,
             effort: effortInRange,
@@ -671,6 +773,14 @@ function TaskPropertyPopupView(props: {
         status: statusValue,
         startTime: startTimeValue,
         endTime: endTimeValue,
+        reviewEnabled: reviewEnabledValue,
+        reviewType: reviewTypeValue,
+        nextReview:
+          reviewEnabledValue && reviewTypeValue === "single"
+            ? nextReviewValue
+            : null,
+        reviewEvery,
+        lastReviewed: reviewEnabledValue ? lastReviewedValue : null,
         importance: importanceInRange,
         urgency: urgencyInRange,
         effort: effortInRange,
@@ -821,7 +931,7 @@ function TaskPropertyPopupView(props: {
   }
 
   const renderTimeField = (
-    key: "start" | "end" | "repeatEnd",
+    key: "start" | "end" | "repeatEnd" | "nextReview",
     label: string,
     value: Date | null,
     setValue: (next: Date | null) => void,
@@ -1264,6 +1374,123 @@ function TaskPropertyPopupView(props: {
         ),
         renderSection(
           renderFormRow(
+            labels.reviewEnabled,
+            React.createElement(
+              "label",
+              {
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "12px",
+                  color: "var(--orca-color-text-1, var(--orca-color-text))",
+                },
+              },
+              React.createElement("input", {
+                type: "checkbox",
+                checked: reviewEnabledValue,
+                onChange: (event: Event) => {
+                  const checked = (event.target as HTMLInputElement).checked
+                  setReviewEnabledValue(checked)
+                },
+              }),
+              t("Enable review"),
+            ),
+          ),
+          reviewEnabledValue
+            ? renderFormRow(
+                labels.reviewType,
+                React.createElement(Select, {
+                  selected: [reviewTypeValue],
+                  options: reviewTypeOptions,
+                  onChange: (selected: string[]) => {
+                    const nextType = selected[0] === "cycle" ? "cycle" : "single"
+                    setReviewTypeValue(nextType)
+                  },
+                  menuContainer: popupMenuContainerRef,
+                  width: "100%",
+                }),
+              )
+            : null,
+          reviewEnabledValue && reviewTypeValue === "single"
+            ? renderTimeField(
+                "nextReview",
+                labels.nextReview,
+                nextReviewValue,
+                setNextReviewValue,
+              )
+            : null,
+          reviewEnabledValue && reviewTypeValue === "cycle"
+            ? renderFormRow(
+                labels.reviewEvery,
+                React.createElement(
+                  "div",
+                  {
+                    style: inlineDualControlLayoutStyle,
+                  },
+                  React.createElement(Select, {
+                    selected: [reviewModeValue],
+                    options: reviewModeOptions,
+                    onChange: (selected: string[]) => {
+                      updateReviewEditor({
+                        mode: (selected[0] ?? "day") as ReviewMode,
+                      })
+                    },
+                    menuContainer: popupMenuContainerRef,
+                    width: "100%",
+                  }),
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        display: "grid",
+                        gridTemplateColumns: "74px auto",
+                        alignItems: "center",
+                        gap: "8px",
+                      },
+                    },
+                    React.createElement(Input, {
+                      value: reviewIntervalText,
+                      placeholder: "1",
+                      onChange: (event: Event) => {
+                        updateReviewEditor({
+                          intervalText: (event.target as HTMLInputElement).value,
+                        })
+                      },
+                    }),
+                    React.createElement(
+                      "span",
+                      { style: hintTextStyle },
+                      reviewModeValue === "day"
+                        ? t("day(s)")
+                        : reviewModeValue === "week"
+                          ? t("week(s)")
+                          : t("month(s)"),
+                    ),
+                  ),
+                ),
+              )
+            : null,
+          reviewEnabledValue
+            ? renderFormRow(
+                labels.lastReviewed,
+                React.createElement(
+                  "div",
+                  {
+                    style: {
+                      ...readOnlyFieldStyle,
+                      fontVariantNumeric: "tabular-nums",
+                    },
+                  },
+                  lastReviewedValue == null
+                    ? labels.neverReviewed
+                    : lastReviewedValue.toLocaleString(),
+                ),
+              )
+            : null,
+        ),
+        renderSection(
+          renderFormRow(
             labels.dependsOn,
             React.createElement(BlockSelect, {
               mode: "block",
@@ -1342,6 +1569,8 @@ function TaskPropertyPopupView(props: {
                   setStartTimeValue(next)
                 } else if (editingDateField === "end") {
                   setEndTimeValue(next)
+                } else if (editingDateField === "nextReview") {
+                  setNextReviewValue(next)
                 } else {
                   updateRepeatEditor({ endAtValue: next })
                 }
@@ -1405,6 +1634,12 @@ interface TaskEditorSnapshotInput {
   status: string
   startTime: Date | null
   endTime: Date | null
+  reviewEnabled: boolean
+  reviewType: TaskReviewType
+  nextReview: Date | null
+  reviewMode: ReviewMode
+  reviewIntervalText: string
+  lastReviewed: Date | null
   importanceText: string
   urgencyText: string
   effortText: string
@@ -1424,6 +1659,20 @@ function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {
     status: input.status,
     startTime: input.startTime?.getTime() ?? null,
     endTime: input.endTime?.getTime() ?? null,
+    reviewEnabled: input.reviewEnabled,
+    reviewType: input.reviewType,
+    nextReview:
+      input.reviewEnabled && input.reviewType === "single"
+        ? input.nextReview?.getTime() ?? null
+        : null,
+    reviewMode: input.reviewEnabled && input.reviewType === "cycle"
+      ? input.reviewMode
+      : "none",
+    reviewIntervalText:
+      !input.reviewEnabled || input.reviewType !== "cycle"
+      ? ""
+      : input.reviewIntervalText.trim(),
+    lastReviewed: input.reviewEnabled ? input.lastReviewed?.getTime() ?? null : null,
     importanceText: input.importanceText.trim(),
     urgencyText: input.urgencyText.trim(),
     effortText: input.effortText.trim(),

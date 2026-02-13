@@ -9,6 +9,9 @@ export interface TaskListRowItem {
   text: string
   status: string
   endTime: Date | null
+  nextReview: Date | null
+  reviewEvery: string
+  lastReviewed: Date | null
   labels: string[]
   star: boolean
   parentTaskName?: string | null
@@ -27,11 +30,17 @@ interface TaskListRowProps {
   showCollapseToggle: boolean
   collapsed: boolean
   showParentTaskContext: boolean
+  showReviewAction: boolean
+  showReviewSelection?: boolean
+  reviewSelected?: boolean
   starUpdating: boolean
+  reviewUpdating: boolean
   onToggleCollapse?: () => void
+  onToggleReviewSelected?: () => void
   onToggleStatus: () => void | Promise<void>
   onNavigate: () => void
   onToggleStar: () => void | Promise<void>
+  onMarkReviewed: () => void | Promise<void>
   onOpen: () => void
 }
 
@@ -44,6 +53,11 @@ export function TaskListRow(props: TaskListRowProps) {
   const statusVisualState = resolveStatusVisualState(props.item.status, props.schema)
   const dueInfo = resolveDueInfo(props.item.endTime, props.isChinese)
   const dueBadgeStyle = resolveDueBadgeStyle(dueInfo.tone)
+  const reviewInfo = resolveReviewInfo(props.item.nextReview, props.isChinese)
+  const reviewBadgeStyle = resolveReviewBadgeStyle(reviewInfo.tone)
+  const hasReviewConfiguration =
+    props.item.nextReview != null || props.item.reviewEvery.trim() !== ""
+  const canShowReviewAction = props.showReviewAction && hasReviewConfiguration
   const taskLabels = Array.isArray(props.item.labels) ? props.item.labels : []
   const parentTaskName = props.item.parentTaskName ?? ""
   const hasParentContext = props.showParentTaskContext && props.item.parentTaskName != null
@@ -97,6 +111,44 @@ export function TaskListRow(props: TaskListRowProps) {
         animationFillMode: "backwards",
       },
     },
+    props.showReviewSelection
+      ? React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation()
+              props.onToggleReviewSelected?.()
+            },
+            title: props.reviewSelected ? t("Selected") : t("Select"),
+            style: {
+              width: "16px",
+              height: "16px",
+              border: props.reviewSelected
+                ? "1px solid rgba(56, 161, 105, 0.55)"
+                : "1px solid rgba(148, 163, 184, 0.35)",
+              borderRadius: "4px",
+              background: props.reviewSelected
+                ? "rgba(56, 161, 105, 0.18)"
+                : "rgba(148, 163, 184, 0.08)",
+              color: props.reviewSelected
+                ? "var(--orca-color-text-green, #2f855a)"
+                : "var(--orca-color-text-2)",
+              cursor: "pointer",
+              flexShrink: 0,
+              fontSize: "11px",
+              lineHeight: 1,
+              padding: 0,
+            },
+          },
+          props.reviewSelected
+            ? React.createElement("i", {
+                className: "ti ti-check",
+                style: { fontSize: "11px", lineHeight: 1 },
+              })
+            : null,
+        )
+      : null,
     props.showCollapseToggle
       ? React.createElement(
           "button",
@@ -324,6 +376,25 @@ export function TaskListRow(props: TaskListRowProps) {
           )
         : null,
     ),
+    reviewInfo.text !== ""
+      ? React.createElement(
+          "div",
+          {
+            style: {
+              fontSize: "9.5px",
+              color: reviewBadgeStyle.color,
+              fontWeight: reviewInfo.strong ? 600 : 400,
+              whiteSpace: "nowrap",
+              padding: "1px 7px",
+              borderRadius: "999px",
+              border: reviewBadgeStyle.border,
+              background: reviewBadgeStyle.background,
+              letterSpacing: "0.02em",
+            },
+          },
+          reviewInfo.text,
+        )
+      : null,
     dueInfo.text !== ""
       ? React.createElement(
           "div",
@@ -341,6 +412,44 @@ export function TaskListRow(props: TaskListRowProps) {
             },
           },
           dueInfo.text,
+        )
+      : null,
+    canShowReviewAction
+      ? React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation()
+              if (props.loading || props.reviewUpdating) {
+                return
+              }
+              void props.onMarkReviewed()
+            },
+            disabled: props.loading || props.reviewUpdating,
+            title: t("Mark reviewed"),
+            style: {
+              width: "22px",
+              height: "22px",
+              padding: 0,
+              border: "1px solid rgba(56, 161, 105, 0.35)",
+              borderRadius: "6px",
+              background: reviewInfo.tone === "overdue"
+                ? "rgba(56, 161, 105, 0.16)"
+                : "rgba(56, 161, 105, 0.08)",
+              color: "var(--orca-color-text-green, #2f855a)",
+              cursor: props.loading || props.reviewUpdating ? "not-allowed" : "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              opacity: props.loading || props.reviewUpdating ? 0.62 : 1,
+            },
+          },
+          React.createElement("i", {
+            className: "ti ti-checks",
+            style: { fontSize: "14px", lineHeight: 1 },
+          }),
         )
       : null,
     React.createElement(
@@ -525,6 +634,7 @@ function resolveStatusColor(status: string, schema: TaskSchemaDefinition): strin
 }
 
 type DueInfoTone = "none" | "normal" | "soon" | "overdue"
+type ReviewInfoTone = "none" | "normal" | "soon" | "overdue"
 
 function resolveDueBadgeStyle(tone: DueInfoTone): {
   color: string
@@ -544,6 +654,34 @@ function resolveDueBadgeStyle(tone: DueInfoTone): {
       color: "var(--orca-color-text-yellow, #b7791f)",
       border: "1px solid rgba(183, 121, 31, 0.3)",
       background: "rgba(183, 121, 31, 0.12)",
+    }
+  }
+
+  return {
+    color: "var(--orca-color-text-2)",
+    border: "1px solid rgba(148, 163, 184, 0.3)",
+    background: "rgba(148, 163, 184, 0.08)",
+  }
+}
+
+function resolveReviewBadgeStyle(tone: ReviewInfoTone): {
+  color: string
+  border: string
+  background: string
+} {
+  if (tone === "overdue") {
+    return {
+      color: "var(--orca-color-text-red, #c53030)",
+      border: "1px solid rgba(197, 48, 48, 0.3)",
+      background: "rgba(197, 48, 48, 0.12)",
+    }
+  }
+
+  if (tone === "soon") {
+    return {
+      color: "var(--orca-color-text-green, #2f855a)",
+      border: "1px solid rgba(56, 161, 105, 0.3)",
+      background: "rgba(56, 161, 105, 0.12)",
     }
   }
 
@@ -615,6 +753,65 @@ function resolveDueInfo(
   return {
     text: endTime.toLocaleDateString(isChinese ? "zh-CN" : undefined),
     color: "var(--orca-color-text-2)",
+    strong: false,
+    tone: "normal",
+  }
+}
+
+function resolveReviewInfo(
+  nextReview: Date | null,
+  isChinese: boolean,
+): { text: string; strong: boolean; tone: ReviewInfoTone } {
+  if (nextReview == null || Number.isNaN(nextReview.getTime())) {
+    return {
+      text: "",
+      strong: false,
+      tone: "none",
+    }
+  }
+
+  const now = new Date()
+  const nowTime = now.getTime()
+  const reviewTime = nextReview.getTime()
+
+  if (reviewTime < nowTime) {
+    const diffMs = nowTime - reviewTime
+    const overdueDays = Math.max(1, Math.ceil(diffMs / (24 * 60 * 60 * 1000)))
+    return {
+      text: t("Review overdue ${days}d", { days: String(overdueDays) }),
+      strong: true,
+      tone: "overdue",
+    }
+  }
+
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  const startOfAfterTomorrow = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 2,
+  )
+
+  if (reviewTime >= startOfToday.getTime() && reviewTime < startOfTomorrow.getTime()) {
+    return {
+      text: t("Review today"),
+      strong: true,
+      tone: "soon",
+    }
+  }
+
+  if (reviewTime >= startOfTomorrow.getTime() && reviewTime < startOfAfterTomorrow.getTime()) {
+    return {
+      text: t("Review tomorrow"),
+      strong: true,
+      tone: "soon",
+    }
+  }
+
+  return {
+    text: t("Review ${date}", {
+      date: nextReview.toLocaleDateString(isChinese ? "zh-CN" : undefined),
+    }),
     strong: false,
     tone: "normal",
   }

@@ -1,5 +1,11 @@
 import type { BlockProperty, DbId } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "./task-schema"
+import {
+  buildTaskReviewStateFromLegacyFields,
+  parseTaskReviewState,
+  stringifyTaskReviewState,
+  type TaskReviewType,
+} from "./task-review"
 import { t } from "../libs/l10n"
 
 const PROP_TYPE = {
@@ -11,10 +17,19 @@ const PROP_TYPE = {
   TEXT_CHOICES: 6,
 } as const
 
+const LEGACY_NEXT_REVIEW_NAMES = ["Next review", "\u4e0b\u6b21\u56de\u987e"]
+const LEGACY_REVIEW_EVERY_NAMES = ["Review every", "\u56de\u987e\u5468\u671f"]
+const LEGACY_LAST_REVIEWED_NAMES = ["Last reviewed", "\u4e0a\u6b21\u56de\u987e"]
+
 export interface TaskPropertyValues {
   status: string
   startTime: Date | null
   endTime: Date | null
+  reviewEnabled: boolean
+  reviewType: TaskReviewType
+  nextReview: Date | null
+  reviewEvery: string
+  lastReviewed: Date | null
   importance: number | null
   urgency: number | null
   effort: number | null
@@ -32,6 +47,15 @@ export interface TaskFieldLabels {
   status: string
   startTime: string
   endTime: string
+  review: string
+  reviewEnabled: string
+  reviewType: string
+  singleReview: string
+  cycleReview: string
+  nextReview: string
+  reviewEvery: string
+  lastReviewed: string
+  neverReviewed: string
   importance: string
   urgency: string
   effort: string
@@ -52,6 +76,15 @@ export function buildTaskFieldLabels(_locale: string): TaskFieldLabels {
     status: t("Status"),
     startTime: t("Start time"),
     endTime: t("End time"),
+    review: t("Review"),
+    reviewEnabled: t("Enable review"),
+    reviewType: t("Review type"),
+    singleReview: t("Single review"),
+    cycleReview: t("Cyclic review"),
+    nextReview: t("Next review"),
+    reviewEvery: t("Review every"),
+    lastReviewed: t("Last reviewed"),
+    neverReviewed: t("Never reviewed"),
     importance: t("Importance"),
     urgency: t("Urgency"),
     effort: t("Effort"),
@@ -74,10 +107,22 @@ export function getTaskPropertiesFromRef(
   const names = schema.propertyNames
   const labelsFromChoices = getStringArray(refData, names.labels)
 
+  const hasReviewProperty = hasProperty(refData, names.review)
+  const reviewFromJson = parseTaskReviewState(getString(refData, names.review))
+  const reviewFromLegacy = readLegacyReviewState(refData)
+  const review = hasReviewProperty ? reviewFromJson : (reviewFromLegacy.enabled
+    ? reviewFromLegacy
+    : reviewFromJson)
+
   return {
     status: getString(refData, names.status) ?? schema.statusChoices[0],
     startTime: getDate(refData, names.startTime),
     endTime: getDate(refData, names.endTime),
+    reviewEnabled: review.enabled,
+    reviewType: review.type,
+    nextReview: review.nextReview,
+    reviewEvery: review.reviewEvery,
+    lastReviewed: review.lastReviewed,
     importance: getNumber(refData, names.importance),
     urgency: getNumber(refData, names.urgency),
     effort: getNumber(refData, names.effort),
@@ -97,6 +142,14 @@ export function toRefDataForSave(
 ): BlockProperty[] {
   const names = schema.propertyNames
 
+  const reviewValue = stringifyTaskReviewState({
+    enabled: values.reviewEnabled,
+    type: values.reviewType,
+    nextReview: values.nextReview,
+    reviewEvery: values.reviewEvery,
+    lastReviewed: values.lastReviewed,
+  })
+
   return [
     {
       name: names.status,
@@ -112,6 +165,11 @@ export function toRefDataForSave(
       name: names.endTime,
       type: PROP_TYPE.DATE_TIME,
       value: values.endTime,
+    },
+    {
+      name: names.review,
+      type: PROP_TYPE.TEXT,
+      value: reviewValue,
     },
     {
       name: names.importance,
@@ -185,7 +243,7 @@ export function parseTaskLabels(rawValue: string): string[] {
   }
 
   return normalizeTaskLabels(
-    normalized.split(/[\n,£¬;£»]+/g),
+    normalized.split(/[\n,\uFF0C;\uFF1B]+/g),
   )
 }
 
@@ -213,12 +271,47 @@ export function validateNumericField(
   return { value: parsed, error: null }
 }
 
+function readLegacyReviewState(
+  refData: BlockProperty[] | undefined,
+) {
+  const nextReview = getDateByNames(refData, LEGACY_NEXT_REVIEW_NAMES)
+  const reviewEvery = getStringByNames(refData, LEGACY_REVIEW_EVERY_NAMES) ?? ""
+  const lastReviewed = getDateByNames(refData, LEGACY_LAST_REVIEWED_NAMES)
+
+  return buildTaskReviewStateFromLegacyFields(
+    nextReview,
+    reviewEvery,
+    lastReviewed,
+  )
+}
+
+function hasProperty(
+  refData: BlockProperty[] | undefined,
+  name: string,
+): boolean {
+  return refData?.some((item) => item.name === name) === true
+}
+
 function getString(
   refData: BlockProperty[] | undefined,
   name: string,
 ): string | null {
   const property = refData?.find((item) => item.name === name)
   return typeof property?.value === "string" ? property.value : null
+}
+
+function getStringByNames(
+  refData: BlockProperty[] | undefined,
+  names: string[],
+): string | null {
+  for (const name of names) {
+    const value = getString(refData, name)
+    if (value != null) {
+      return value
+    }
+  }
+
+  return null
 }
 
 function getStringArray(
@@ -256,6 +349,20 @@ function getDate(
     : new Date(property.value)
 
   return Number.isNaN(date.getTime()) ? null : date
+}
+
+function getDateByNames(
+  refData: BlockProperty[] | undefined,
+  names: string[],
+): Date | null {
+  for (const name of names) {
+    const value = getDate(refData, name)
+    if (value != null) {
+      return value
+    }
+  }
+
+  return null
 }
 
 function getBoolean(

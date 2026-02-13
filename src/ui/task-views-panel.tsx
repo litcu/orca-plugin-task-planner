@@ -11,6 +11,7 @@ import { collectNextActions, type NextActionItem } from "../core/dependency-engi
 import {
   collectAllTasks,
   cycleTaskStatusInView,
+  markTaskReviewedInView,
   moveTaskInView,
   toggleTaskStarInView,
   type AllTaskItem,
@@ -142,6 +143,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [showCompletedInAllTasks, setShowCompletedInAllTasks] = React.useState(true)
   const [updatingIds, setUpdatingIds] = React.useState<Set<DbId>>(new Set())
   const [starringIds, setStarringIds] = React.useState<Set<DbId>>(new Set())
+  const [reviewingIds, setReviewingIds] = React.useState<Set<DbId>>(new Set())
+  const [selectedReviewIds, setSelectedReviewIds] = React.useState<Set<DbId>>(new Set())
   const [movingIds, setMovingIds] = React.useState<Set<DbId>>(new Set())
   const [collapsedIds, setCollapsedIds] = React.useState<Set<DbId>>(new Set())
   const [draggingTaskId, setDraggingTaskId] = React.useState<DbId | null>(null)
@@ -333,6 +336,58 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     [loadByTab, props.schema, tab],
   )
 
+  const markTaskItemsReviewed = React.useCallback(
+    async (items: TaskListRowItem[]): Promise<boolean> => {
+      if (items.length === 0) {
+        return true
+      }
+
+      const itemIds = items.map((item) => item.blockId)
+      setReviewingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        for (const itemId of itemIds) {
+          next.add(itemId)
+        }
+        return next
+      })
+
+      try {
+        for (const item of items) {
+          await markTaskReviewedInView(
+            item.blockId,
+            props.schema,
+            item.taskTagRef ?? null,
+            item.sourceBlockId,
+          )
+        }
+
+        setErrorText("")
+        await loadByTab(tab, { silent: true })
+        return true
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to mark reviewed"))
+        return false
+      } finally {
+        setReviewingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          for (const itemId of itemIds) {
+            next.delete(itemId)
+          }
+          return next
+        })
+      }
+    },
+    [loadByTab, props.schema, tab],
+  )
+
+  const markTaskReviewed = React.useCallback(
+    async (item: TaskListRowItem) => {
+      await markTaskItemsReviewed([item])
+    },
+    [markTaskItemsReviewed],
+  )
+
   const closeTaskProperty = React.useCallback(() => {
     setSelectedTaskId(null)
     void loadByTab(tab, { silent: true })
@@ -506,6 +561,15 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       .filter(matchesItem)
       .sort(compareDueSoonItems)
   }, [allTaskItems, matchesItem, panelSettings.dueSoonDays, panelSettings.dueSoonIncludeOverdue])
+  const filteredReviewDueTaskItems = React.useMemo(() => {
+    const nowMs = Date.now()
+    return allTaskItems
+      .filter((item: AllTaskItem) => item.status !== props.schema.statusChoices[2])
+      .filter((item: AllTaskItem) => isTaskDueForReview(item, nowMs))
+      .filter(matchesItem)
+      .sort(compareReviewDueItems)
+  }, [allTaskItems, matchesItem, props.schema.statusChoices])
+  const isReviewDueTab = tab === "review-due"
   const isAllTasksTab = tab === "all-tasks"
   const showParentTaskContext = tab === "next-actions"
   const flatVisibleItems = React.useMemo((): TaskListRowItem[] => {
@@ -521,8 +585,104 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       return filteredDueSoonTaskItems
     }
 
+    if (tab === "review-due") {
+      return filteredReviewDueTaskItems
+    }
+
     return []
-  }, [filteredDueSoonTaskItems, filteredNextActionItems, filteredStarredTaskItems, tab])
+  }, [
+    filteredDueSoonTaskItems,
+    filteredNextActionItems,
+    filteredReviewDueTaskItems,
+    filteredStarredTaskItems,
+    tab,
+  ])
+  const selectedReviewItems = React.useMemo(() => {
+    if (!isReviewDueTab || selectedReviewIds.size === 0) {
+      return []
+    }
+
+    return filteredReviewDueTaskItems.filter((item: AllTaskItem) => {
+      return selectedReviewIds.has(item.blockId)
+    })
+  }, [filteredReviewDueTaskItems, isReviewDueTab, selectedReviewIds])
+  const selectedReviewCount = selectedReviewItems.length
+  const allReviewItemsSelected =
+    isReviewDueTab &&
+    filteredReviewDueTaskItems.length > 0 &&
+    selectedReviewCount === filteredReviewDueTaskItems.length
+
+  React.useEffect(() => {
+    if (isReviewDueTab) {
+      return
+    }
+
+    setSelectedReviewIds((prev: Set<DbId>) => {
+      return prev.size === 0 ? prev : new Set()
+    })
+  }, [isReviewDueTab])
+
+  React.useEffect(() => {
+    if (!isReviewDueTab) {
+      return
+    }
+
+    const visibleIds = new Set(
+      filteredReviewDueTaskItems.map((item: AllTaskItem) => item.blockId),
+    )
+    setSelectedReviewIds((prev: Set<DbId>) => {
+      if (prev.size === 0) {
+        return prev
+      }
+
+      let changed = false
+      const next = new Set<DbId>()
+      for (const blockId of prev) {
+        if (visibleIds.has(blockId)) {
+          next.add(blockId)
+        } else {
+          changed = true
+        }
+      }
+
+      return changed ? next : prev
+    })
+  }, [filteredReviewDueTaskItems, isReviewDueTab])
+
+  const toggleReviewSelection = React.useCallback((blockId: DbId) => {
+    setSelectedReviewIds((prev: Set<DbId>) => {
+      const next = new Set(prev)
+      if (next.has(blockId)) {
+        next.delete(blockId)
+      } else {
+        next.add(blockId)
+      }
+      return next
+    })
+  }, [])
+
+  const selectAllReviewItems = React.useCallback(() => {
+    setSelectedReviewIds(
+      new Set(filteredReviewDueTaskItems.map((item: AllTaskItem) => item.blockId)),
+    )
+  }, [filteredReviewDueTaskItems])
+
+  const clearReviewSelection = React.useCallback(() => {
+    setSelectedReviewIds((prev: Set<DbId>) => {
+      return prev.size === 0 ? prev : new Set()
+    })
+  }, [])
+
+  const markSelectedReviewed = React.useCallback(async () => {
+    if (selectedReviewItems.length === 0) {
+      return
+    }
+
+    const success = await markTaskItemsReviewed(selectedReviewItems)
+    if (success) {
+      setSelectedReviewIds(new Set())
+    }
+  }, [markTaskItemsReviewed, selectedReviewItems])
 
   const doneStatus = props.schema.statusChoices[2]
   const allTaskItemsForTree = React.useMemo(() => {
@@ -766,7 +926,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       ? t("All Tasks")
       : tab === "starred-tasks"
         ? t("Starred Tasks")
-        : t("Due Soon")
+        : tab === "due-soon"
+          ? t("Due Soon")
+          : t("Review")
   const visibleCount = isAllTasksTab
     ? visibleAllTaskRows.length
     : flatVisibleItems.length
@@ -776,14 +938,18 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       ? t("No matched tasks")
       : tab === "starred-tasks"
         ? t("No starred tasks")
-        : t("No due soon tasks")
+        : tab === "due-soon"
+          ? t("No due soon tasks")
+          : t("No tasks to review")
   const panelAccentGlow = tab === "next-actions"
     ? "rgba(37, 99, 235, 0.18)"
     : tab === "all-tasks"
       ? "rgba(183, 121, 31, 0.2)"
       : tab === "starred-tasks"
         ? "rgba(214, 158, 46, 0.18)"
-        : "rgba(221, 107, 32, 0.18)"
+        : tab === "due-soon"
+          ? "rgba(221, 107, 32, 0.18)"
+          : "rgba(56, 161, 105, 0.2)"
   const countText = t("Showing ${count} items", { count: String(visibleCount) })
   const groupLogicOptions = [
     { value: "and", label: t("AND") },
@@ -1187,6 +1353,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               value: "due-soon",
               label: t("Due Soon"),
             },
+            {
+              value: "review-due",
+              label: t("Review"),
+            },
           ],
           onChange: (value: string) => {
             if (isTaskViewsTab(value)) {
@@ -1533,6 +1703,93 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               errorText,
             )
           : null,
+        !loading && isReviewDueTab && visibleCount > 0
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                  marginBottom: "8px",
+                  border: "1px solid rgba(56, 161, 105, 0.3)",
+                  borderRadius: "10px",
+                  background: "rgba(56, 161, 105, 0.08)",
+                  padding: "7px 9px",
+                },
+              },
+              React.createElement(
+                "span",
+                {
+                  style: {
+                    color: "var(--orca-color-text-2)",
+                    fontSize: "12px",
+                    whiteSpace: "nowrap",
+                  },
+                },
+                `${t("Selected")}: ${selectedReviewCount}`,
+              ),
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    flexWrap: "wrap",
+                  },
+                },
+                React.createElement(
+                  Button,
+                  {
+                    variant: "outline",
+                    disabled: filteredReviewDueTaskItems.length === 0 || allReviewItemsSelected,
+                    onClick: () => {
+                      selectAllReviewItems()
+                    },
+                    style: {
+                      borderRadius: "8px",
+                    },
+                  },
+                  t("Select all"),
+                ),
+                React.createElement(
+                  Button,
+                  {
+                    variant: "outline",
+                    disabled: selectedReviewCount === 0,
+                    onClick: () => {
+                      clearReviewSelection()
+                    },
+                    style: {
+                      borderRadius: "8px",
+                    },
+                  },
+                  t("Clear selection"),
+                ),
+                React.createElement(
+                  Button,
+                  {
+                    variant: "solid",
+                    disabled: selectedReviewCount === 0 || reviewingIds.size > 0,
+                    onClick: () => {
+                      void markSelectedReviewed()
+                    },
+                    style: {
+                      borderRadius: "8px",
+                      whiteSpace: "nowrap",
+                      background: "var(--orca-color-text-green, #2f855a)",
+                      borderColor: "var(--orca-color-text-green, #2f855a)",
+                      color: "#fff",
+                    },
+                  },
+                  t("Mark selected reviewed"),
+                ),
+              ),
+            )
+          : null,
         loading
           ? React.createElement(
               "div",
@@ -1633,19 +1890,26 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                           showCollapseToggle: row.hasChildren,
                           collapsed: row.collapsed,
                           showParentTaskContext: false,
+                          showReviewAction: false,
+                          showReviewSelection: false,
+                          reviewSelected: false,
                           starUpdating: starringIds.has(row.node.item.blockId),
+                          reviewUpdating: reviewingIds.has(row.node.item.blockId),
                           onToggleCollapse: row.hasChildren
                             ? () => toggleCollapsed(row.node.item.blockId)
                             : undefined,
+                          onToggleReviewSelected: undefined,
                           onToggleStatus: () => toggleTaskStatus(row.node.item),
                           onNavigate: () => navigateToTask(row.node.item),
                           onToggleStar: () => toggleTaskStar(row.node.item),
+                          onMarkReviewed: () => markTaskReviewed(row.node.item),
                           onOpen: () => openTaskProperty(row.node.item.blockId),
                         }),
                       )
                     }),
                   ]
                 : flatVisibleItems.map((item: TaskListRowItem, index: number) => {
+                    const reviewSelectionEnabled = isReviewDueTab
                     return React.createElement(TaskListRow, {
                       key: item.blockId,
                       item,
@@ -1659,10 +1923,18 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       showCollapseToggle: false,
                       collapsed: false,
                       showParentTaskContext,
+                      showReviewAction: reviewSelectionEnabled,
+                      showReviewSelection: reviewSelectionEnabled,
+                      reviewSelected: reviewSelectionEnabled && selectedReviewIds.has(item.blockId),
                       starUpdating: starringIds.has(item.blockId),
+                      reviewUpdating: reviewingIds.has(item.blockId),
+                      onToggleReviewSelected: reviewSelectionEnabled
+                        ? () => toggleReviewSelection(item.blockId)
+                        : undefined,
                       onToggleStatus: () => toggleTaskStatus(item),
                       onNavigate: () => navigateToTask(item),
                       onToggleStar: () => toggleTaskStar(item),
+                      onMarkReviewed: () => markTaskReviewed(item),
                       onOpen: () => openTaskProperty(item.blockId),
                     })
                   }),
@@ -2546,6 +2818,34 @@ function isDueSoon(
   return dueMs <= endMs
 }
 
+function isReviewDue(
+  nextReview: Date | null,
+  nowMs: number,
+): boolean {
+  if (nextReview == null) {
+    return false
+  }
+
+  const reviewMs = nextReview.getTime()
+  if (Number.isNaN(reviewMs)) {
+    return false
+  }
+
+  return reviewMs <= nowMs
+}
+
+function isTaskDueForReview(item: AllTaskItem, nowMs: number): boolean {
+  if (!item.reviewEnabled) {
+    return false
+  }
+
+  if (isReviewDue(item.nextReview, nowMs)) {
+    return true
+  }
+
+  return isNeverReviewedCycleTask(item)
+}
+
 function compareDueSoonItems(left: AllTaskItem, right: AllTaskItem): number {
   const leftDue = left.endTime?.getTime() ?? Number.MAX_SAFE_INTEGER
   const rightDue = right.endTime?.getTime() ?? Number.MAX_SAFE_INTEGER
@@ -2554,6 +2854,37 @@ function compareDueSoonItems(left: AllTaskItem, right: AllTaskItem): number {
   }
 
   return left.blockId - right.blockId
+}
+
+function compareReviewDueItems(left: AllTaskItem, right: AllTaskItem): number {
+  const leftReview = resolveReviewSortTime(left)
+  const rightReview = resolveReviewSortTime(right)
+  if (leftReview !== rightReview) {
+    return leftReview - rightReview
+  }
+
+  return left.blockId - right.blockId
+}
+
+function resolveReviewSortTime(item: AllTaskItem): number {
+  const reviewMs = item.nextReview?.getTime()
+  if (typeof reviewMs === "number" && !Number.isNaN(reviewMs)) {
+    return reviewMs
+  }
+
+  if (isNeverReviewedCycleTask(item)) {
+    return Number.MIN_SAFE_INTEGER
+  }
+
+  return Number.MAX_SAFE_INTEGER
+}
+
+function isNeverReviewedCycleTask(item: AllTaskItem): boolean {
+  return item.reviewEnabled &&
+    item.reviewType === "cycle" &&
+    item.reviewEvery.trim() !== "" &&
+    item.lastReviewed == null &&
+    item.nextReview == null
 }
 
 function flattenVisibleTree(

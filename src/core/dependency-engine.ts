@@ -3,6 +3,7 @@ import { getTaskPropertiesFromRef } from "./task-properties"
 import type { DependencyMode, TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
 import { calculateTaskScoreFromValues } from "./score-engine"
+import { resolveEffectiveNextReview, type TaskReviewType } from "./task-review"
 
 const TAG_REF_TYPE = 2
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -15,6 +16,11 @@ export interface NextActionItem {
   text: string
   status: string
   endTime: Date | null
+  reviewEnabled: boolean
+  reviewType: TaskReviewType
+  nextReview: Date | null
+  reviewEvery: string
+  lastReviewed: Date | null
   labels: string[]
   score: number
   star: boolean
@@ -160,6 +166,17 @@ export function evaluateNextAction(
       text: resolveTaskText(liveTaskBlock, schema.tagAlias),
       status,
       endTime: values.endTime,
+      reviewEnabled: values.reviewEnabled,
+      reviewType: values.reviewType,
+      nextReview: resolveEffectiveNextReview({
+        enabled: values.reviewEnabled,
+        type: values.reviewType,
+        nextReview: values.nextReview,
+        reviewEvery: values.reviewEvery,
+        lastReviewed: values.lastReviewed,
+      }),
+      reviewEvery: values.reviewEvery,
+      lastReviewed: values.lastReviewed,
       labels: values.labels,
       score,
       star: values.star,

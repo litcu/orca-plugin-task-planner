@@ -3,6 +3,12 @@ import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
 import { getTaskPropertiesFromRef } from "./task-properties"
 import type { TaskSchemaDefinition } from "./task-schema"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
+import {
+  resolveEffectiveNextReview,
+  resolveNextReviewAfterMarkReviewed,
+  stringifyTaskReviewState,
+  type TaskReviewType,
+} from "./task-review"
 
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
@@ -17,6 +23,11 @@ export interface AllTaskItem {
   text: string
   status: string
   endTime: Date | null
+  reviewEnabled: boolean
+  reviewType: TaskReviewType
+  nextReview: Date | null
+  reviewEvery: string
+  lastReviewed: Date | null
   labels: string[]
   star: boolean
   taskTagRef: BlockRef
@@ -59,6 +70,17 @@ export async function collectAllTasks(
       text: resolveTaskText(liveBlock, schema.tagAlias),
       status: values.status,
       endTime: values.endTime,
+      reviewEnabled: values.reviewEnabled,
+      reviewType: values.reviewType,
+      nextReview: resolveEffectiveNextReview({
+        enabled: values.reviewEnabled,
+        type: values.reviewType,
+        nextReview: values.nextReview,
+        reviewEvery: values.reviewEvery,
+        lastReviewed: values.lastReviewed,
+      }),
+      reviewEvery: values.reviewEvery,
+      lastReviewed: values.lastReviewed,
       labels: values.labels,
       star: values.star,
       taskTagRef: taskRef,
@@ -389,6 +411,77 @@ export async function toggleTaskStarInView(
         "core.editor.setRefData",
         null,
         taskTagRef,
+        payload,
+      )
+      return
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const targetIds = [sourceBlockId ?? null, getMirrorId(blockId), blockId]
+    .filter((id): id is DbId => id != null && !Number.isNaN(id))
+    .filter((id, index, all) => all.indexOf(id) === index)
+
+  let lastError: unknown = null
+  for (const targetId of targetIds) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.insertTag",
+        null,
+        targetId,
+        schema.tagAlias,
+        payload,
+      )
+      return
+    } catch (error) {
+      lastError = error
+      console.error(error)
+    }
+  }
+
+  if (lastError != null) {
+    throw lastError
+  }
+}
+
+export async function markTaskReviewedInView(
+  blockId: DbId,
+  schema: TaskSchemaDefinition,
+  taskTagRef?: BlockRef | null,
+  sourceBlockId?: DbId | null,
+): Promise<void> {
+  const taskRefFromState = resolveTaskRefFromState(blockId, schema)
+  const effectiveTaskRef = taskRefFromState ?? taskTagRef
+  const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema)
+  const reviewedAt = new Date()
+  const nextReview = resolveNextReviewAfterMarkReviewed({
+    enabled: values.reviewEnabled,
+    type: values.reviewType,
+    nextReview: values.nextReview,
+    reviewEvery: values.reviewEvery,
+    lastReviewed: values.lastReviewed,
+  }, reviewedAt)
+  const reviewValue = stringifyTaskReviewState({
+    enabled: values.reviewEnabled,
+    type: values.reviewType,
+    nextReview,
+    reviewEvery: values.reviewEvery,
+    lastReviewed: reviewedAt,
+  })
+  const payload = [
+    {
+      name: schema.propertyNames.review,
+      value: reviewValue,
+    },
+  ]
+
+  if (effectiveTaskRef != null) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setRefData",
+        null,
+        effectiveTaskRef,
         payload,
       )
       return

@@ -3,6 +3,7 @@ export type TaskViewsTab =
   | "all-tasks"
   | "starred-tasks"
   | "due-soon"
+  | "review-due"
 
 const TASK_VIEWS_TAB_EVENT = "mlo:task-views-tab-change"
 
@@ -12,7 +13,8 @@ export function isTaskViewsTab(tab: unknown): tab is TaskViewsTab {
   return tab === "next-actions" ||
     tab === "all-tasks" ||
     tab === "starred-tasks" ||
-    tab === "due-soon"
+    tab === "due-soon" ||
+    tab === "review-due"
 }
 
 export function getPreferredTaskViewsTab(): TaskViewsTab {
