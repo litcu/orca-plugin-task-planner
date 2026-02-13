@@ -45,8 +45,11 @@ export function TaskListRow(props: TaskListRowProps) {
   const dueInfo = resolveDueInfo(props.item.endTime, props.isChinese)
   const dueBadgeStyle = resolveDueBadgeStyle(dueInfo.tone)
   const taskLabels = Array.isArray(props.item.labels) ? props.item.labels : []
-  const visibleLabels = taskLabels.slice(0, 4)
+  const parentTaskName = props.item.parentTaskName ?? ""
+  const hasParentContext = props.showParentTaskContext && props.item.parentTaskName != null
+  const visibleLabels = taskLabels.slice(0, hasParentContext ? 2 : 3)
   const hiddenLabelCount = Math.max(0, taskLabels.length - visibleLabels.length)
+  const hasMetaLine = visibleLabels.length > 0 || hiddenLabelCount > 0 || hasParentContext
 
   React.useEffect(() => {
     ensureTaskRowStyles()
@@ -67,11 +70,11 @@ export function TaskListRow(props: TaskListRowProps) {
         boxSizing: "border-box",
         display: "flex",
         alignItems: "center",
-        gap: "8px",
-        padding: "7px 10px",
-        paddingLeft: `${10 + props.depth * 18}px`,
+        gap: "6px",
+        padding: "6px 9px",
+        paddingLeft: `${9 + props.depth * 16}px`,
         border: "1px solid var(--orca-color-border)",
-        borderRadius: "10px",
+        borderRadius: "9px",
         background: props.contextOnly
           ? "linear-gradient(120deg, rgba(148, 163, 184, 0.08), var(--orca-color-bg-2))"
           : hovered || focused
@@ -81,7 +84,7 @@ export function TaskListRow(props: TaskListRowProps) {
           ? "var(--orca-color-text-blue, #2563eb)"
           : "var(--orca-color-border)",
         boxShadow: hovered || focused
-          ? "0 8px 18px rgba(15, 23, 42, 0.14)"
+          ? "0 6px 14px rgba(15, 23, 42, 0.13)"
           : "0 1px 3px rgba(15, 23, 42, 0.08)",
         transform: hovered ? "translateY(-1px)" : "translateY(0)",
         transition:
@@ -105,8 +108,8 @@ export function TaskListRow(props: TaskListRowProps) {
             },
             title: props.collapsed ? t("Expand subtasks") : t("Collapse subtasks"),
             style: {
-              width: "18px",
-              height: "18px",
+              width: "16px",
+              height: "16px",
               border: "1px solid rgba(148, 163, 184, 0.3)",
               borderRadius: "4px",
               background: props.collapsed
@@ -117,7 +120,7 @@ export function TaskListRow(props: TaskListRowProps) {
                 : "var(--orca-color-text-blue, #2563eb)",
               cursor: "pointer",
               flexShrink: 0,
-              fontSize: "12px",
+              fontSize: "11px",
               lineHeight: 1,
               padding: 0,
             },
@@ -126,15 +129,15 @@ export function TaskListRow(props: TaskListRowProps) {
         )
       : React.createElement("div", {
           style: {
-            width: "18px",
-            height: "18px",
+            width: "16px",
+            height: "16px",
             flexShrink: 0,
           },
         }),
     React.createElement("div", {
       style: {
-        width: "3px",
-        height: "28px",
+        width: "2px",
+        height: "24px",
         borderRadius: "99px",
         background: statusColor,
         opacity: props.contextOnly ? 0.62 : 0.95,
@@ -155,8 +158,8 @@ export function TaskListRow(props: TaskListRowProps) {
         "aria-disabled": props.loading || props.updating,
         title: t("Toggle task status"),
         style: {
-          width: "20px",
-          height: "20px",
+          width: "18px",
+          height: "18px",
           border: "none",
           background: "transparent",
           color: statusColor,
@@ -186,11 +189,11 @@ export function TaskListRow(props: TaskListRowProps) {
           padding: 0,
           flex: 1,
           minWidth: 0,
-          fontSize: "13px",
+          fontSize: "12.5px",
           display: "flex",
           flexDirection: "column",
           alignItems: "flex-start",
-          gap: "3px",
+          gap: "2px",
         },
       },
       React.createElement(
@@ -202,22 +205,25 @@ export function TaskListRow(props: TaskListRowProps) {
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            lineHeight: 1.25,
             fontWeight: props.contextOnly ? 500 : 560,
             letterSpacing: "0.01em",
           },
         },
         props.item.text,
       ),
-      taskLabels.length > 0
+      hasMetaLine
         ? React.createElement(
             "div",
             {
               style: {
                 display: "flex",
-                flexWrap: "wrap",
+                alignItems: "center",
+                flexWrap: "nowrap",
                 gap: "4px",
                 width: "100%",
-                marginTop: "1px",
+                minWidth: 0,
+                overflow: "hidden",
               },
             },
             ...visibleLabels.map((label: string) =>
@@ -228,14 +234,16 @@ export function TaskListRow(props: TaskListRowProps) {
                   style: {
                     display: "inline-flex",
                     alignItems: "center",
-                    maxWidth: "100%",
-                    padding: "1px 7px",
+                    maxWidth: "86px",
+                    padding: "0 6px",
+                    height: "16px",
                     borderRadius: "999px",
                     border: "1px solid rgba(37, 99, 235, 0.24)",
                     background: "rgba(37, 99, 235, 0.12)",
                     color: "var(--orca-color-text-blue, #2563eb)",
                     fontSize: "10px",
-                    lineHeight: 1.3,
+                    lineHeight: 1,
+                    flexShrink: 0,
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
@@ -251,36 +259,68 @@ export function TaskListRow(props: TaskListRowProps) {
                     style: {
                       display: "inline-flex",
                       alignItems: "center",
-                      padding: "1px 7px",
+                      padding: "0 6px",
+                      height: "16px",
                       borderRadius: "999px",
                       border: "1px solid rgba(148, 163, 184, 0.3)",
                       background: "rgba(148, 163, 184, 0.08)",
                       color: "var(--orca-color-text-2)",
                       fontSize: "10px",
-                      lineHeight: 1.3,
+                      lineHeight: 1,
+                      flexShrink: 0,
                     },
                   },
                   `+${hiddenLabelCount}`,
                 )
               : null,
-          )
-        : null,
-      props.showParentTaskContext && props.item.parentTaskName != null
-        ? React.createElement(
-            "span",
-            {
-              style: {
-                display: "block",
-                width: "100%",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                fontSize: "11px",
-                color: "var(--orca-color-text-2)",
-                letterSpacing: "0.01em",
-              },
-            },
-            t("Parent: ${name}", { name: props.item.parentTaskName }),
+            hasParentContext
+              ? React.createElement(
+                  "span",
+                  {
+                    key: `${props.item.blockId}-parent`,
+                    title: t("Parent: ${name}", { name: parentTaskName }),
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "3px",
+                      minWidth: 0,
+                      maxWidth: "100%",
+                      flex: "1 1 auto",
+                      padding: "0 6px",
+                      height: "16px",
+                      borderRadius: "999px",
+                      border: "1px solid rgba(148, 163, 184, 0.3)",
+                      background: "rgba(148, 163, 184, 0.08)",
+                      color: "var(--orca-color-text-2)",
+                      fontSize: "10px",
+                      lineHeight: 1,
+                    },
+                  },
+                  React.createElement(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "9px",
+                        opacity: 0.75,
+                        lineHeight: 1,
+                        flexShrink: 0,
+                      },
+                    },
+                    "\u21B3",
+                  ),
+                  React.createElement(
+                    "span",
+                    {
+                      style: {
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      },
+                    },
+                    parentTaskName,
+                  ),
+                )
+              : null,
           )
         : null,
     ),
@@ -289,11 +329,11 @@ export function TaskListRow(props: TaskListRowProps) {
           "div",
           {
             style: {
-              fontSize: "10px",
+              fontSize: "9.5px",
               color: dueBadgeStyle.color,
               fontWeight: dueInfo.strong ? 600 : 400,
               whiteSpace: "nowrap",
-              padding: "2px 8px",
+              padding: "1px 7px",
               borderRadius: "999px",
               border: dueBadgeStyle.border,
               background: dueBadgeStyle.background,
@@ -313,8 +353,8 @@ export function TaskListRow(props: TaskListRowProps) {
         },
         title: t("Jump to task location"),
         style: {
-          width: "24px",
-          height: "24px",
+          width: "22px",
+          height: "22px",
           padding: 0,
           border: "1px solid rgba(148, 163, 184, 0.3)",
           borderRadius: "6px",
@@ -345,8 +385,8 @@ export function TaskListRow(props: TaskListRowProps) {
         disabled: props.loading || props.starUpdating,
         title: props.item.star ? t("Starred") : t("Not starred"),
         style: {
-          width: "24px",
-          height: "24px",
+          width: "22px",
+          height: "22px",
           padding: 0,
           border: "1px solid rgba(148, 163, 184, 0.3)",
           borderRadius: "6px",
@@ -441,8 +481,8 @@ function StatusIcon(props: { state: StatusVisualState }) {
   return React.createElement(
     "svg",
     {
-      width: 18,
-      height: 18,
+      width: 16,
+      height: 16,
       viewBox: "0 0 24 24",
       fill: "none",
       stroke: "currentColor",
