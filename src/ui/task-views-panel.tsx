@@ -1,4 +1,4 @@
-import type { DbId, PanelProps } from "../orca.d.ts"
+import type { Block, BlockProperty, BlockRef, DbId, PanelProps } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 import {
   getPreferredTaskViewsTab,
@@ -49,12 +49,78 @@ interface TaskDropTarget {
   position: TaskDropPosition
 }
 
+type TaskFilterGroupLogic = "and" | "or"
+type TaskFilterFieldType =
+  | "text"
+  | "single-select"
+  | "multi-select"
+  | "number"
+  | "boolean"
+  | "datetime"
+  | "block-refs"
+type TaskFilterOperator =
+  | "eq"
+  | "neq"
+  | "contains"
+  | "contains-any"
+  | "contains-all"
+  | "not-contains"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "before"
+  | "after"
+  | "empty"
+  | "not-empty"
+
+interface TaskFilterRuleNode {
+  id: string
+  kind: "rule"
+  fieldKey: string
+  operator: TaskFilterOperator
+  value: string | string[]
+}
+
+interface TaskFilterGroupNode {
+  id: string
+  kind: "group"
+  logic: TaskFilterGroupLogic
+  children: TaskFilterNode[]
+}
+
+type TaskFilterNode = TaskFilterRuleNode | TaskFilterGroupNode
+
+interface TaskFilterField {
+  key: string
+  label: string
+  type: TaskFilterFieldType
+  options: string[]
+  extractValue: (item: FilterableTaskItem) => unknown
+}
+
+interface FilterableTaskItem {
+  status: string
+  text: string
+  labels?: string[]
+  taskTagRef?: BlockRef | null
+}
+
+const PROP_TYPE_TEXT = 1
+const PROP_TYPE_BLOCK_REFS = 2
+const PROP_TYPE_NUMBER = 3
+const PROP_TYPE_BOOLEAN = 4
+const PROP_TYPE_DATE_TIME = 5
+const PROP_TYPE_TEXT_CHOICES = 6
+const FILTER_TASK_NAME_FIELD_KEY = "__task_name__"
+const FILTER_GROUP_ROOT_ID = "__root__"
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
   const Button = orca.components.Button
   const Input = orca.components.Input
+  const Popup = orca.components.Popup
   const Select = orca.components.Select
   const Segmented = orca.components.Segmented
   const Switch = orca.components.Switch
@@ -63,18 +129,23 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [tab, setTab] = React.useState<TaskViewsTab>(() => {
     return getPreferredTaskViewsTab()
   })
+  const filterButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
+  const filterPopupContainerRef = React.useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [errorText, setErrorText] = React.useState("")
-  const [statusFilter, setStatusFilter] = React.useState("all")
+  const [filterPanelVisible, setFilterPanelVisible] = React.useState(false)
+  const [quickSearchKeyword, setQuickSearchKeyword] = React.useState("")
+  const [taskTagProperties, setTaskTagProperties] = React.useState<BlockProperty[]>([])
+  const [filterRoot, setFilterRoot] = React.useState<TaskFilterGroupNode>(() =>
+    createTaskFilterGroup(FILTER_GROUP_ROOT_ID, "and")
+  )
   const [showCompletedInAllTasks, setShowCompletedInAllTasks] = React.useState(true)
-  const [keyword, setKeyword] = React.useState("")
   const [updatingIds, setUpdatingIds] = React.useState<Set<DbId>>(new Set())
   const [starringIds, setStarringIds] = React.useState<Set<DbId>>(new Set())
   const [movingIds, setMovingIds] = React.useState<Set<DbId>>(new Set())
   const [collapsedIds, setCollapsedIds] = React.useState<Set<DbId>>(new Set())
   const [draggingTaskId, setDraggingTaskId] = React.useState<DbId | null>(null)
   const [dropTarget, setDropTarget] = React.useState<TaskDropTarget | null>(null)
-  const [todayJournalDropActive, setTodayJournalDropActive] = React.useState(false)
   const [nextActionItems, setNextActionItems] = React.useState<NextActionItem[]>([])
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
   const [selectedTaskId, setSelectedTaskId] = React.useState<DbId | null>(null)
@@ -114,6 +185,19 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     [props.schema],
   )
 
+  const loadTaskTagProperties = React.useCallback(async () => {
+    try {
+      const tagBlock = (await orca.invokeBackend(
+        "get-block-by-alias",
+        props.schema.tagAlias,
+      )) as Block | null
+      setTaskTagProperties(Array.isArray(tagBlock?.properties) ? tagBlock.properties : [])
+    } catch (error) {
+      console.error(error)
+      setTaskTagProperties([])
+    }
+  }, [props.schema.tagAlias])
+
   React.useEffect(() => {
     return subscribePreferredTaskViewsTab((nextTab) => {
       setTab(nextTab)
@@ -137,6 +221,21 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   React.useEffect(() => {
     void loadByTab(tab)
   }, [loadByTab, tab])
+
+  React.useEffect(() => {
+    void loadTaskTagProperties()
+  }, [loadTaskTagProperties])
+
+  React.useEffect(() => {
+    if (!filterPanelVisible) {
+      return
+    }
+    void loadTaskTagProperties()
+  }, [filterPanelVisible, loadTaskTagProperties])
+
+  React.useEffect(() => {
+    setFilterPanelVisible(false)
+  }, [tab])
 
   React.useEffect(() => {
     // Listen for block changes and do lightweight refresh.
@@ -251,9 +350,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     })
   }, [loadByTab, props.schema, tab])
 
-  const navigateToTaskParent = React.useCallback((item: TaskListRowItem) => {
-    const targetId = item.parentBlockId ?? item.blockId
-    orca.nav.openInLastPanel("block", { blockId: targetId })
+  const navigateToTask = React.useCallback((item: TaskListRowItem) => {
+    orca.nav.openInLastPanel("block", { blockId: item.blockId })
   }, [])
 
   const toggleCollapsed = React.useCallback((blockId: DbId) => {
@@ -268,40 +366,122 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     })
   }, [])
 
-  const statusOptions = React.useMemo(() => {
-    return [
-      {
-        value: "all",
-        label: t("All statuses"),
-      },
-      ...props.schema.statusChoices.map((status) => ({
-        value: status,
-        label: status,
-      })),
-    ]
-  }, [props.schema])
+  const knownLabelValues = React.useMemo(() => {
+    return normalizeTaskFilterTextValues([
+      ...allTaskItems.flatMap((item: AllTaskItem) => item.labels ?? []),
+      ...nextActionItems.flatMap((item: NextActionItem) => item.labels ?? []),
+    ])
+  }, [allTaskItems, nextActionItems])
+  const filterFields = React.useMemo(() => {
+    return buildTaskFilterFields(props.schema, taskTagProperties, knownLabelValues)
+  }, [knownLabelValues, props.schema, taskTagProperties])
+  const filterFieldByKey = React.useMemo(() => {
+    const map = new Map<string, TaskFilterField>()
+    for (const field of filterFields) {
+      map.set(field.key, field)
+    }
+    return map
+  }, [filterFields])
+  const filterFieldOptions = React.useMemo(() => {
+    return filterFields.map((field: TaskFilterField) => ({
+      value: field.key,
+      label: field.label,
+    }))
+  }, [filterFields])
+  const hasActiveFilters = React.useMemo(() => {
+    return countEffectiveTaskFilterRules(filterRoot, filterFieldByKey) > 0
+  }, [filterFieldByKey, filterRoot])
+  const activeFilterCount = React.useMemo(() => {
+    return countEffectiveTaskFilterRules(filterRoot, filterFieldByKey)
+  }, [filterFieldByKey, filterRoot])
+  const normalizedQuickSearch = React.useMemo(() => {
+    return quickSearchKeyword.trim().toLowerCase()
+  }, [quickSearchKeyword])
 
-  const normalizedKeyword = React.useMemo(() => keyword.trim().toLowerCase(), [keyword])
+  const clearFilters = React.useCallback(() => {
+    setFilterRoot(createTaskFilterGroup(FILTER_GROUP_ROOT_ID, "and"))
+  }, [])
+
+  const addFilterRule = React.useCallback(
+    (groupId: string) => {
+      const defaultField = filterFields[0] ?? createTaskNameFilterField()
+      const nextRule = createTaskFilterRule(defaultField)
+      setFilterRoot((prev: TaskFilterGroupNode) => {
+        return appendRuleToTaskFilterGroup(prev, groupId, nextRule)
+      })
+    },
+    [filterFields],
+  )
+
+  const addFilterGroup = React.useCallback((groupId: string) => {
+    setFilterRoot((prev: TaskFilterGroupNode) => {
+      const nextGroup = createTaskFilterGroup(createTaskFilterNodeId("group"), "and")
+      return appendGroupToTaskFilterGroup(prev, groupId, nextGroup)
+    })
+  }, [])
+
+  const removeFilterNode = React.useCallback((nodeId: string) => {
+    if (nodeId === FILTER_GROUP_ROOT_ID) {
+      return
+    }
+
+    setFilterRoot((prev: TaskFilterGroupNode) => {
+      return removeTaskFilterNode(prev, nodeId)
+    })
+  }, [])
+
+  const updateFilterGroupLogic = React.useCallback((groupId: string, logic: TaskFilterGroupLogic) => {
+    setFilterRoot((prev: TaskFilterGroupNode) => {
+      return updateTaskFilterGroupLogic(prev, groupId, logic)
+    })
+  }, [])
+
+  const updateFilterRuleField = React.useCallback(
+    (ruleId: string, fieldKey: string) => {
+      const field = filterFieldByKey.get(fieldKey) ?? filterFields[0] ?? createTaskNameFilterField()
+      setFilterRoot((prev: TaskFilterGroupNode) => {
+        return updateTaskFilterRule(prev, ruleId, (rule) => ({
+          ...rule,
+          fieldKey: field.key,
+          operator: getDefaultTaskFilterOperator(field.type),
+          value: getDefaultTaskFilterValue(field.type),
+        }))
+      })
+    },
+    [filterFieldByKey, filterFields],
+  )
+
+  const updateFilterRuleOperator = React.useCallback((ruleId: string, operator: TaskFilterOperator) => {
+    setFilterRoot((prev: TaskFilterGroupNode) => {
+      return updateTaskFilterRule(prev, ruleId, (rule) => ({
+        ...rule,
+        operator,
+      }))
+    })
+  }, [])
+
+  const updateFilterRuleValue = React.useCallback((ruleId: string, value: string | string[]) => {
+    setFilterRoot((prev: TaskFilterGroupNode) => {
+      return updateTaskFilterRule(prev, ruleId, (rule) => ({
+        ...rule,
+        value,
+      }))
+    })
+  }, [])
+
   const matchesItem = React.useCallback(
-    (item: { status: string; text: string; labels?: string[] }) => {
-      const statusMatched = statusFilter === "all" || item.status === statusFilter
-      if (!statusMatched) {
+    (item: FilterableTaskItem) => {
+      if (normalizedQuickSearch !== "" && !item.text.toLowerCase().includes(normalizedQuickSearch)) {
         return false
       }
 
-      if (normalizedKeyword === "") {
+      if (!hasActiveFilters) {
         return true
       }
 
-      if (item.text.toLowerCase().includes(normalizedKeyword)) {
-        return true
-      }
-
-      return (item.labels ?? []).some((label) => {
-        return label.toLowerCase().includes(normalizedKeyword)
-      })
+      return evaluateTaskFilterGroup(filterRoot, item, filterFieldByKey)
     },
-    [normalizedKeyword, statusFilter],
+    [filterFieldByKey, filterRoot, hasActiveFilters, normalizedQuickSearch],
   )
 
   const filteredNextActionItems = React.useMemo(() => {
@@ -456,7 +636,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
       setDraggingTaskId(taskId)
       setDropTarget(null)
-      setTodayJournalDropActive(false)
       setErrorText("")
     },
     [isAllTasksTab],
@@ -465,14 +644,12 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const handleTaskDragEnd = React.useCallback(() => {
     setDraggingTaskId(null)
     setDropTarget(null)
-    setTodayJournalDropActive(false)
   }, [])
 
   React.useEffect(() => {
     if (!isAllTasksTab) {
       setDraggingTaskId(null)
       setDropTarget(null)
-      setTodayJournalDropActive(false)
     }
   }, [isAllTasksTab])
 
@@ -528,46 +705,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     [isDescendantTask, loadByTab, tab, taskItemById],
   )
 
-  const moveTaskToTodayJournal = React.useCallback(
-    async (sourceTaskId: DbId) => {
-      const source = taskItemById.get(sourceTaskId)
-      if (source == null) {
-        return
-      }
-
-      setMovingIds((prev: Set<DbId>) => {
-        const next = new Set(prev)
-        next.add(sourceTaskId)
-        return next
-      })
-
-      try {
-        await moveTaskInView(
-          source.blockId,
-          source.blockId,
-          {
-            sourceSourceBlockId: source.sourceBlockId,
-            targetSourceBlockId: source.sourceBlockId,
-            position: "after",
-            moveToTodayJournalRoot: true,
-          },
-        )
-        setErrorText("")
-        await loadByTab(tab, { silent: true })
-      } catch (error) {
-        console.error(error)
-        setErrorText(t("Failed to move task"))
-      } finally {
-        setMovingIds((prev: Set<DbId>) => {
-          const next = new Set(prev)
-          next.delete(sourceTaskId)
-          return next
-        })
-      }
-    },
-    [loadByTab, tab, taskItemById],
-  )
-
   const handleTaskRowDragOver = React.useCallback(
     (event: DragEvent, targetTaskId: DbId, targetDepth: number) => {
       const sourceTaskId = draggingTaskId
@@ -595,7 +732,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           position,
         }
       })
-      setTodayJournalDropActive(false)
     },
     [draggingTaskId, isDescendantTask, movingIds.size, resolveDropPosition],
   )
@@ -613,50 +749,15 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         setErrorText(t("Cannot move task into itself or its subtasks"))
         setDraggingTaskId(null)
         setDropTarget(null)
-        setTodayJournalDropActive(false)
         return
       }
 
       const position = resolveDropPosition(event, targetDepth)
       setDraggingTaskId(null)
       setDropTarget(null)
-      setTodayJournalDropActive(false)
       void moveTaskFromDrop(sourceTaskId, targetTaskId, position)
     },
     [draggingTaskId, isDescendantTask, moveTaskFromDrop, movingIds.size, resolveDropPosition],
-  )
-
-  const handleTodayJournalDropOver = React.useCallback((event: DragEvent) => {
-    if (draggingTaskId == null || movingIds.size > 0) {
-      return
-    }
-
-    event.preventDefault()
-    if (event.dataTransfer != null) {
-      event.dataTransfer.dropEffect = "move"
-    }
-    setDropTarget(null)
-    setTodayJournalDropActive(true)
-  }, [draggingTaskId, movingIds.size])
-
-  const handleTodayJournalDropLeave = React.useCallback(() => {
-    setTodayJournalDropActive(false)
-  }, [])
-
-  const handleTodayJournalDrop = React.useCallback(
-    (event: DragEvent) => {
-      event.preventDefault()
-      const sourceTaskId = draggingTaskId
-      if (sourceTaskId == null || movingIds.size > 0) {
-        return
-      }
-
-      setDraggingTaskId(null)
-      setDropTarget(null)
-      setTodayJournalDropActive(false)
-      void moveTaskToTodayJournal(sourceTaskId)
-    },
-    [draggingTaskId, moveTaskToTodayJournal, movingIds.size],
   )
 
   const viewName = tab === "next-actions"
@@ -684,7 +785,309 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         ? "rgba(214, 158, 46, 0.18)"
         : "rgba(221, 107, 32, 0.18)"
   const countText = t("Showing ${count} items", { count: String(visibleCount) })
-  const showTodayJournalDropZone = isAllTasksTab
+  const groupLogicOptions = [
+    { value: "and", label: t("AND") },
+    { value: "or", label: t("OR") },
+  ]
+
+  const renderFilterRuleNode = (rule: TaskFilterRuleNode, depth: number) => {
+    const fallbackField = filterFields[0] ?? createTaskNameFilterField()
+    const field = filterFieldByKey.get(rule.fieldKey) ?? fallbackField
+    const operatorOptions = getTaskFilterOperatorOptions(field.type)
+    const selectedOperator = operatorOptions.some((item) => item.value === rule.operator)
+      ? rule.operator
+      : getDefaultTaskFilterOperator(field.type)
+    const needsValue = doesTaskFilterOperatorNeedValue(selectedOperator)
+    const ruleValueList = toTaskFilterRuleValues(rule.value)
+    const selectedSingleValue = ruleValueList[0] ?? ""
+    const multiValueEnabled = (field.type === "multi-select" || field.type === "block-refs") &&
+      (selectedOperator === "contains" ||
+        selectedOperator === "contains-any" ||
+        selectedOperator === "contains-all" ||
+        selectedOperator === "not-contains" ||
+        selectedOperator === "eq" ||
+        selectedOperator === "neq")
+    const operatorSelectOptions = operatorOptions.map((item) => ({
+      value: item.value,
+      label: item.label,
+    }))
+
+    let valueEditor: React.ReactNode = null
+    if (needsValue) {
+      if (field.type === "single-select" || field.type === "multi-select" || field.type === "block-refs") {
+        const options = field.options.map((option: string) => ({
+          value: option,
+          label: option,
+        }))
+        valueEditor = options.length > 0
+          ? React.createElement(Select, {
+              selected: multiValueEnabled
+                ? ruleValueList
+                : (selectedSingleValue === "" ? [] : [selectedSingleValue]),
+              options,
+              multiSelection: multiValueEnabled,
+              filter: true,
+              onChange: (selected: string[]) =>
+                updateFilterRuleValue(rule.id, multiValueEnabled ? selected : (selected[0] ?? "")),
+              width: "100%",
+              menuContainer: filterPopupContainerRef,
+            })
+          : React.createElement(Input, {
+              value: multiValueEnabled ? ruleValueList.join(", ") : selectedSingleValue,
+              placeholder: multiValueEnabled ? t("Use comma to separate multiple values") : t("Value"),
+              onChange: (event: Event) => {
+                const target = event.target as HTMLInputElement | null
+                updateFilterRuleValue(
+                  rule.id,
+                  multiValueEnabled
+                    ? splitTaskFilterInputValues(target?.value ?? "")
+                    : (target?.value ?? ""),
+                )
+              },
+              width: "100%",
+            })
+      } else if (field.type === "boolean") {
+        valueEditor = React.createElement(Select, {
+          selected: selectedSingleValue === "" ? [] : [selectedSingleValue],
+          options: [
+            { value: "true", label: t("True") },
+            { value: "false", label: t("False") },
+          ],
+          onChange: (selected: string[]) => updateFilterRuleValue(rule.id, selected[0] ?? ""),
+          width: "100%",
+          menuContainer: filterPopupContainerRef,
+        })
+      } else {
+        valueEditor = React.createElement(Input, {
+          value: selectedSingleValue,
+          type: field.type === "number"
+            ? "number"
+            : field.type === "datetime"
+              ? "datetime-local"
+              : "text",
+          placeholder: t("Value"),
+          onChange: (event: Event) => {
+            const target = event.target as HTMLInputElement | null
+            updateFilterRuleValue(rule.id, target?.value ?? "")
+          },
+          width: "100%",
+        })
+      }
+    }
+
+    return React.createElement(
+      "div",
+      {
+        key: rule.id,
+        style: {
+          marginLeft: `${depth * 8}px`,
+          display: "flex",
+          flexWrap: "nowrap",
+          gap: "4px",
+          alignItems: "center",
+          padding: "8px",
+          borderRadius: "8px",
+          border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+          background: "rgba(148, 163, 184, 0.08)",
+          overflow: "hidden",
+        },
+      },
+      React.createElement(
+        "div",
+        {
+          style: {
+            flex: "0 0 124px",
+            minWidth: "124px",
+          },
+        },
+        React.createElement(Select, {
+          selected: [field.key],
+          options: filterFieldOptions,
+          filter: true,
+          onChange: (selected: string[]) => {
+            updateFilterRuleField(rule.id, selected[0] ?? fallbackField.key)
+          },
+          width: "100%",
+          menuContainer: filterPopupContainerRef,
+        }),
+      ),
+      React.createElement(
+        "div",
+        {
+          style: {
+            flex: "0 0 124px",
+            minWidth: "124px",
+          },
+        },
+        React.createElement(Select, {
+          selected: [selectedOperator],
+          options: operatorSelectOptions,
+          onChange: (selected: string[]) => {
+            const nextOperator = selected[0]
+            if (isTaskFilterOperator(nextOperator)) {
+              updateFilterRuleOperator(rule.id, nextOperator)
+            }
+          },
+          width: "100%",
+          menuContainer: filterPopupContainerRef,
+        }),
+      ),
+      React.createElement(
+        "div",
+        {
+          style: {
+            flex: "1 1 auto",
+            minWidth: "130px",
+            overflow: "hidden",
+          },
+        },
+        React.createElement(
+          "div",
+          {
+            style: {
+              minWidth: 0,
+              width: "100%",
+            },
+          },
+          valueEditor,
+        ),
+      ),
+      React.createElement(
+        "div",
+        {
+          style: {
+            flex: "0 0 30px",
+            minWidth: 0,
+          },
+        },
+        React.createElement(
+          Button,
+          {
+            variant: "outline",
+            onClick: () => removeFilterNode(rule.id),
+            title: t("Delete"),
+            style: {
+              borderRadius: "8px",
+              width: "30px",
+              height: "30px",
+              minWidth: "30px",
+              padding: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--orca-color-text-red, #c53030)",
+              borderColor: "rgba(197, 48, 48, 0.35)",
+              background: "rgba(197, 48, 48, 0.08)",
+            },
+          },
+          React.createElement("i", {
+            className: "ti ti-trash",
+            style: {
+              fontSize: "14px",
+              lineHeight: 1,
+            },
+          }),
+        ),
+      ),
+    )
+  }
+
+  const renderFilterGroupNode = (
+    group: TaskFilterGroupNode,
+    depth: number,
+    isRoot: boolean = false,
+  ): React.ReactElement => {
+    return React.createElement(
+      "div",
+      {
+        key: group.id,
+        style: {
+          marginLeft: isRoot ? 0 : `${depth * 8}px`,
+          padding: "8px",
+          borderRadius: "10px",
+          border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+          background: isRoot ? "rgba(148, 163, 184, 0.06)" : "rgba(148, 163, 184, 0.04)",
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+        },
+      },
+      React.createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            flexWrap: "wrap",
+          },
+        },
+        React.createElement(Segmented, {
+          selected: group.logic,
+          options: groupLogicOptions,
+          onChange: (value: string) => {
+            updateFilterGroupLogic(group.id, value === "or" ? "or" : "and")
+          },
+          style: {
+            minWidth: "112px",
+          },
+        }),
+        React.createElement(
+          Button,
+          {
+            variant: "outline",
+            onClick: () => addFilterRule(group.id),
+            style: {
+              borderRadius: "8px",
+            },
+          },
+          t("Add condition"),
+        ),
+        React.createElement(
+          Button,
+          {
+            variant: "outline",
+            onClick: () => addFilterGroup(group.id),
+            style: {
+              borderRadius: "8px",
+            },
+          },
+          t("Add group"),
+        ),
+        !isRoot
+          ? React.createElement(
+              Button,
+              {
+                variant: "outline",
+                onClick: () => removeFilterNode(group.id),
+                style: {
+                  borderRadius: "8px",
+                },
+              },
+              t("Delete"),
+            )
+          : null,
+      ),
+      group.children.length === 0
+        ? React.createElement(
+            "div",
+            {
+              style: {
+                fontSize: "12px",
+                color: "var(--orca-color-text-2)",
+                padding: "2px 4px",
+              },
+            },
+            t("No conditions yet"),
+          )
+        : group.children.map((child) => {
+            if (child.kind === "group") {
+              return renderFilterGroupNode(child, depth + 1)
+            }
+            return renderFilterRuleNode(child, depth + 1)
+          }),
+    )
+  }
 
   return React.createElement(
     "div",
@@ -803,6 +1206,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       {
         style: {
           display: "flex",
+          justifyContent: "space-between",
           flexWrap: "wrap",
           gap: "8px",
           alignItems: "center",
@@ -813,93 +1217,44 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             "linear-gradient(145deg, rgba(15, 23, 42, 0.03), var(--orca-color-bg-1) 45%, rgba(148, 163, 184, 0.1))",
         },
       },
-      React.createElement(Select, {
-        selected: [statusFilter],
-        options: statusOptions,
-        onChange: (selected: string[]) => setStatusFilter(selected[0] ?? "all"),
-        width: 170,
-      }),
-      React.createElement(Input, {
-        value: keyword,
-        placeholder: t("Filter by keyword"),
-        onChange: (event: Event) => {
-          const target = event.target as HTMLInputElement | null
-          setKeyword(target?.value ?? "")
-        },
-        style: {
-          minWidth: "180px",
-          flex: 1,
-        },
-      }),
       React.createElement(
-        Button,
+        "div",
         {
-          variant: "outline",
-          onClick: () => {
-            addTask()
-          },
           style: {
-            display: "inline-flex",
+            display: "flex",
             alignItems: "center",
-            gap: "4px",
-            whiteSpace: "nowrap",
-            borderRadius: "8px",
+            gap: "8px",
+            flexWrap: "wrap",
+            flex: "1 1 420px",
           },
         },
-        React.createElement("i", {
-          className: "ti ti-plus",
-          style: {
-            fontSize: "14px",
-            lineHeight: 1,
-          },
-        }),
         React.createElement(
-          "span",
-          null,
-          t("Add task"),
-        ),
-      ),
-      isAllTasksTab
-        ? React.createElement(
-            "label",
+          "div",
+          {
+            ref: filterButtonAnchorRef,
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+            },
+          },
+          React.createElement(
+            Button,
             {
+              variant: hasActiveFilters ? "soft" : "outline",
+              onClick: () => {
+                setFilterPanelVisible((prev: boolean) => !prev)
+              },
+              title: t("Filter"),
               style: {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "6px",
-                fontSize: "12px",
-                color: "var(--orca-color-text)",
-                whiteSpace: "nowrap",
-                padding: "0 4px",
-              },
-            },
-            React.createElement(Switch, {
-              on: showCompletedInAllTasks,
-              onChange: (nextOn: boolean) => {
-                setShowCompletedInAllTasks(nextOn)
-              },
-            }),
-            t("Show completed tasks"),
-          )
-        : null,
-      isAllTasksTab
-        ? React.createElement(
-            Button,
-            {
-              variant: "outline",
-              disabled: !canToggleAllCollapsed,
-              onClick: () => toggleAllCollapsed(),
-              title: allVisibleCollapsed ? t("Expand all") : t("Collapse all"),
-              style: {
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "4px",
                 whiteSpace: "nowrap",
                 borderRadius: "8px",
               },
             },
             React.createElement("i", {
-              className: allVisibleCollapsed ? "ti ti-chevrons-down" : "ti ti-chevrons-up",
+              className: "ti ti-adjustments-horizontal",
               style: {
                 fontSize: "14px",
                 lineHeight: 1,
@@ -908,10 +1263,226 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             React.createElement(
               "span",
               null,
-              allVisibleCollapsed ? t("Expand all") : t("Collapse all"),
+              t("Filter"),
             ),
-          )
-        : null,
+            activeFilterCount > 0
+              ? React.createElement(
+                  "span",
+                  {
+                    style: {
+                      minWidth: "18px",
+                      height: "18px",
+                      borderRadius: "999px",
+                      padding: "0 5px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "rgba(37, 99, 235, 0.16)",
+                      color: "var(--orca-color-text-blue, #2563eb)",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      lineHeight: 1,
+                    },
+                  },
+                  String(activeFilterCount),
+                )
+              : null,
+          ),
+        ),
+        React.createElement(
+          Popup,
+          {
+            refElement: filterButtonAnchorRef,
+            visible: filterPanelVisible,
+            onClose: () => setFilterPanelVisible(false),
+            defaultPlacement: "bottom",
+            alignment: "left",
+            offset: 6,
+          },
+          React.createElement(
+            "div",
+            {
+              ref: filterPopupContainerRef,
+              style: {
+                width: "min(520px, calc(100vw - 24px))",
+                maxWidth: "100%",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                padding: "10px",
+                borderRadius: "12px",
+                border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+                background:
+                  "linear-gradient(160deg, var(--orca-color-bg-1), var(--orca-color-bg-2) 82%)",
+                boxShadow: "0 12px 28px rgba(15, 23, 42, 0.18)",
+              },
+            },
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                },
+              },
+            React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: "var(--orca-color-text-1, var(--orca-color-text))",
+                },
+              },
+              t("Filter"),
+            ),
+              React.createElement(
+                Button,
+                {
+                  variant: "outline",
+                  disabled: !hasActiveFilters,
+                  onClick: () => clearFilters(),
+                  style: {
+                    whiteSpace: "nowrap",
+                    borderRadius: "8px",
+                  },
+                },
+                t("Clear filters"),
+              ),
+            ),
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                },
+              },
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    fontSize: "12px",
+                    color: "var(--orca-color-text-2)",
+                  },
+                },
+                t("Build expression with AND/OR groups"),
+              ),
+              renderFilterGroupNode(filterRoot, 0, true),
+            ),
+          ),
+        ),
+        React.createElement(Input, {
+          value: quickSearchKeyword,
+          placeholder: t("Search task name"),
+          onChange: (event: Event) => {
+            const target = event.target as HTMLInputElement | null
+            setQuickSearchKeyword(target?.value ?? "")
+          },
+          style: {
+            width: "220px",
+            minWidth: "160px",
+          },
+        }),
+        isAllTasksTab
+          ? React.createElement(
+              "label",
+              {
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "12px",
+                  color: "var(--orca-color-text)",
+                  whiteSpace: "nowrap",
+                  padding: "0 4px",
+                },
+              },
+              React.createElement(Switch, {
+                on: showCompletedInAllTasks,
+                onChange: (nextOn: boolean) => {
+                  setShowCompletedInAllTasks(nextOn)
+                },
+              }),
+              t("Show completed tasks"),
+            )
+          : null,
+        isAllTasksTab
+          ? React.createElement(
+              Button,
+              {
+                variant: "outline",
+                disabled: !canToggleAllCollapsed,
+                onClick: () => toggleAllCollapsed(),
+                title: allVisibleCollapsed ? t("Expand all") : t("Collapse all"),
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  whiteSpace: "nowrap",
+                  borderRadius: "8px",
+                },
+              },
+              React.createElement("i", {
+                className: allVisibleCollapsed ? "ti ti-chevrons-down" : "ti ti-chevrons-up",
+                style: {
+                  fontSize: "14px",
+                  lineHeight: 1,
+                },
+              }),
+              React.createElement(
+                "span",
+                null,
+                allVisibleCollapsed ? t("Expand all") : t("Collapse all"),
+              ),
+            )
+          : null,
+      ),
+      React.createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            flex: "0 0 auto",
+          },
+        },
+        React.createElement(
+          Button,
+          {
+            variant: "solid",
+            onClick: () => {
+              addTask()
+            },
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              whiteSpace: "nowrap",
+              borderRadius: "8px",
+              background: "var(--orca-color-text-blue, #2563eb)",
+              borderColor: "var(--orca-color-text-blue, #2563eb)",
+              color: "#fff",
+            },
+          },
+          React.createElement("i", {
+            className: "ti ti-plus",
+            style: {
+              fontSize: "14px",
+              lineHeight: 1,
+            },
+          }),
+          React.createElement(
+            "span",
+            null,
+            t("Add task"),
+          ),
+        ),
+      ),
     ),
     React.createElement(
       "div",
@@ -1011,37 +1582,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               },
               isAllTasksTab
                 ? [
-                    showTodayJournalDropZone
-                      ? React.createElement(
-                          "div",
-                          {
-                            key: "today-journal-drop-zone",
-                            onDragOver: (event: DragEvent) => handleTodayJournalDropOver(event),
-                            onDragLeave: () => handleTodayJournalDropLeave(),
-                            onDrop: (event: DragEvent) => handleTodayJournalDrop(event),
-                            style: {
-                              minHeight: "30px",
-                              borderRadius: "9px",
-                              border: todayJournalDropActive
-                                ? "1px solid var(--orca-color-text-blue, #2563eb)"
-                                : "1px dashed rgba(148, 163, 184, 0.45)",
-                              background: todayJournalDropActive
-                                ? "rgba(37, 99, 235, 0.12)"
-                                : "rgba(148, 163, 184, 0.07)",
-                              color: todayJournalDropActive
-                                ? "var(--orca-color-text-blue, #2563eb)"
-                                : "var(--orca-color-text-2)",
-                              fontSize: "11px",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              letterSpacing: "0.01em",
-                              transition: "background 120ms ease, border-color 120ms ease",
-                            },
-                          },
-                          t("Drop here to move task to today's journal"),
-                        )
-                      : null,
                     ...visibleAllTaskRows.map((row: VisibleTreeRow, index: number) => {
                       const isDragging = draggingTaskId === row.node.item.blockId
                       const moving = movingIds.has(row.node.item.blockId)
@@ -1098,7 +1638,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                             ? () => toggleCollapsed(row.node.item.blockId)
                             : undefined,
                           onToggleStatus: () => toggleTaskStatus(row.node.item),
-                          onNavigate: () => navigateToTaskParent(row.node.item),
+                          onNavigate: () => navigateToTask(row.node.item),
                           onToggleStar: () => toggleTaskStar(row.node.item),
                           onOpen: () => openTaskProperty(row.node.item.blockId),
                         }),
@@ -1121,7 +1661,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       showParentTaskContext,
                       starUpdating: starringIds.has(item.blockId),
                       onToggleStatus: () => toggleTaskStatus(item),
-                      onNavigate: () => navigateToTaskParent(item),
+                      onNavigate: () => navigateToTask(item),
                       onToggleStar: () => toggleTaskStar(item),
                       onOpen: () => openTaskProperty(item.blockId),
                     })
@@ -1138,6 +1678,754 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         : null,
     ),
   )
+}
+
+let taskFilterNodeSeed = 0
+
+function createTaskFilterNodeId(prefix: string): string {
+  taskFilterNodeSeed += 1
+  return `${prefix}-${taskFilterNodeSeed}`
+}
+
+function createTaskFilterGroup(
+  id: string = createTaskFilterNodeId("group"),
+  logic: TaskFilterGroupLogic = "and",
+): TaskFilterGroupNode {
+  return {
+    id,
+    kind: "group",
+    logic,
+    children: [],
+  }
+}
+
+function createTaskNameFilterField(): TaskFilterField {
+  return {
+    key: FILTER_TASK_NAME_FIELD_KEY,
+    label: t("Task name"),
+    type: "text",
+    options: [],
+    extractValue: (item: FilterableTaskItem) => item.text,
+  }
+}
+
+function createTaskFilterRule(field: TaskFilterField): TaskFilterRuleNode {
+  return {
+    id: createTaskFilterNodeId("rule"),
+    kind: "rule",
+    fieldKey: field.key,
+    operator: getDefaultTaskFilterOperator(field.type),
+    value: getDefaultTaskFilterValue(field.type),
+  }
+}
+
+function toTaskFilterFieldKey(propertyName: string): string {
+  return `prop:${propertyName}`
+}
+
+function normalizeTaskFilterTextValues(values: string[]): string[] {
+  const normalizedValues: string[] = []
+  const seen = new Set<string>()
+
+  for (const rawValue of values) {
+    const value = rawValue.replace(/\s+/g, " ").trim()
+    if (value === "") {
+      continue
+    }
+
+    const dedupKey = value.toLowerCase()
+    if (seen.has(dedupKey)) {
+      continue
+    }
+
+    seen.add(dedupKey)
+    normalizedValues.push(value)
+  }
+
+  return normalizedValues
+}
+
+function readTaskFilterChoiceValues(property: BlockProperty): string[] {
+  const rawChoices = property.typeArgs?.choices
+  if (!Array.isArray(rawChoices)) {
+    return []
+  }
+
+  const choices = rawChoices.map((item) => {
+    if (typeof item === "string") {
+      return item
+    }
+    if (isRecord(item) && typeof item.n === "string") {
+      return item.n
+    }
+    if (isRecord(item) && typeof item.value === "string") {
+      return item.value
+    }
+    return ""
+  })
+  return normalizeTaskFilterTextValues(choices)
+}
+
+function buildTaskFilterFields(
+  schema: TaskSchemaDefinition,
+  properties: BlockProperty[],
+  knownLabelValues: string[],
+): TaskFilterField[] {
+  const fields: TaskFilterField[] = [createTaskNameFilterField()]
+  const seenKeys = new Set<string>([FILTER_TASK_NAME_FIELD_KEY])
+  const sortedProperties = [...properties].sort((left, right) => {
+    const leftPos = typeof left.pos === "number" ? left.pos : Number.MAX_SAFE_INTEGER
+    const rightPos = typeof right.pos === "number" ? right.pos : Number.MAX_SAFE_INTEGER
+    if (leftPos !== rightPos) {
+      return leftPos - rightPos
+    }
+    return left.name.localeCompare(right.name)
+  })
+
+  for (const property of sortedProperties) {
+    if (typeof property.name !== "string" || property.name.trim() === "") {
+      continue
+    }
+    if (property.name.startsWith("_")) {
+      continue
+    }
+
+    const key = toTaskFilterFieldKey(property.name)
+    if (seenKeys.has(key)) {
+      continue
+    }
+
+    const field = buildTaskFilterFieldFromProperty(schema, property, knownLabelValues)
+    fields.push(field)
+    seenKeys.add(key)
+  }
+
+  const statusKey = toTaskFilterFieldKey(schema.propertyNames.status)
+  if (!seenKeys.has(statusKey)) {
+    fields.push({
+      key: statusKey,
+      label: schema.propertyNames.status,
+      type: "single-select",
+      options: [...schema.statusChoices],
+      extractValue: (item: FilterableTaskItem) => item.status,
+    })
+    seenKeys.add(statusKey)
+  }
+
+  const labelsKey = toTaskFilterFieldKey(schema.propertyNames.labels)
+  if (!seenKeys.has(labelsKey)) {
+    fields.push({
+      key: labelsKey,
+      label: schema.propertyNames.labels,
+      type: "multi-select",
+      options: knownLabelValues,
+      extractValue: (item: FilterableTaskItem) => item.labels ?? [],
+    })
+  }
+
+  return fields
+}
+
+function buildTaskFilterFieldFromProperty(
+  schema: TaskSchemaDefinition,
+  property: BlockProperty,
+  knownLabelValues: string[],
+): TaskFilterField {
+  const propertyName = property.name
+  const key = toTaskFilterFieldKey(propertyName)
+  let fieldType: TaskFilterFieldType = "text"
+  let options: string[] = []
+
+  if (property.type === PROP_TYPE_TEXT_CHOICES) {
+    const subType = typeof property.typeArgs?.subType === "string"
+      ? property.typeArgs.subType
+      : "single"
+    fieldType = subType === "multi" ? "multi-select" : "single-select"
+    options = readTaskFilterChoiceValues(property)
+  } else if (property.type === PROP_TYPE_NUMBER) {
+    fieldType = "number"
+  } else if (property.type === PROP_TYPE_BOOLEAN) {
+    fieldType = "boolean"
+  } else if (property.type === PROP_TYPE_DATE_TIME) {
+    fieldType = "datetime"
+  } else if (property.type === PROP_TYPE_BLOCK_REFS) {
+    fieldType = "block-refs"
+  } else if (property.type === PROP_TYPE_TEXT) {
+    fieldType = "text"
+  }
+
+  if (propertyName === schema.propertyNames.status) {
+    fieldType = "single-select"
+    options = options.length > 0 ? options : [...schema.statusChoices]
+  } else if (propertyName === schema.propertyNames.labels) {
+    fieldType = "multi-select"
+    options = options.length > 0 ? options : knownLabelValues
+  }
+
+  return {
+    key,
+    label: propertyName,
+    type: fieldType,
+    options,
+    extractValue: (item: FilterableTaskItem) => {
+      if (propertyName === schema.propertyNames.status) {
+        return item.status
+      }
+      if (propertyName === schema.propertyNames.labels) {
+        return item.labels ?? []
+      }
+      return readTaskFilterPropertyValue(item.taskTagRef?.data, propertyName)
+    },
+  }
+}
+
+function readTaskFilterPropertyValue(
+  refData: BlockProperty[] | undefined,
+  propertyName: string,
+): unknown {
+  const property = refData?.find((item) => item.name === propertyName)
+  return property?.value
+}
+
+function isTaskFilterOperator(value: string): value is TaskFilterOperator {
+  return value === "eq" ||
+    value === "neq" ||
+    value === "contains" ||
+    value === "contains-any" ||
+    value === "contains-all" ||
+    value === "not-contains" ||
+    value === "gt" ||
+    value === "gte" ||
+    value === "lt" ||
+    value === "lte" ||
+    value === "before" ||
+    value === "after" ||
+    value === "empty" ||
+    value === "not-empty"
+}
+
+function doesTaskFilterOperatorNeedValue(operator: TaskFilterOperator): boolean {
+  return operator !== "empty" && operator !== "not-empty"
+}
+
+function getTaskFilterOperatorOptions(
+  fieldType: TaskFilterFieldType,
+): Array<{ value: TaskFilterOperator; label: string }> {
+  if (fieldType === "number") {
+    return [
+      { value: "eq", label: t("Equals") },
+      { value: "neq", label: t("Not equals") },
+      { value: "gt", label: t("Greater than") },
+      { value: "gte", label: t("Greater or equal") },
+      { value: "lt", label: t("Less than") },
+      { value: "lte", label: t("Less or equal") },
+      { value: "empty", label: t("Is empty") },
+      { value: "not-empty", label: t("Is not empty") },
+    ]
+  }
+
+  if (fieldType === "datetime") {
+    return [
+      { value: "eq", label: t("Equals") },
+      { value: "before", label: t("Before") },
+      { value: "after", label: t("After") },
+      { value: "lte", label: t("On or before") },
+      { value: "gte", label: t("On or after") },
+      { value: "empty", label: t("Is empty") },
+      { value: "not-empty", label: t("Is not empty") },
+    ]
+  }
+
+  if (fieldType === "single-select" || fieldType === "boolean") {
+    return [
+      { value: "eq", label: t("Equals") },
+      { value: "neq", label: t("Not equals") },
+      { value: "empty", label: t("Is empty") },
+      { value: "not-empty", label: t("Is not empty") },
+    ]
+  }
+
+  if (fieldType === "multi-select" || fieldType === "block-refs") {
+    return [
+      { value: "contains-any", label: t("Contains any") },
+      { value: "contains-all", label: t("Contains all") },
+      { value: "not-contains", label: t("Does not contain") },
+      { value: "eq", label: t("Equals") },
+      { value: "neq", label: t("Not equals") },
+      { value: "empty", label: t("Is empty") },
+      { value: "not-empty", label: t("Is not empty") },
+    ]
+  }
+
+  return [
+    { value: "contains", label: t("Contains") },
+    { value: "not-contains", label: t("Does not contain") },
+    { value: "eq", label: t("Equals") },
+    { value: "neq", label: t("Not equals") },
+    { value: "empty", label: t("Is empty") },
+    { value: "not-empty", label: t("Is not empty") },
+  ]
+}
+
+function getDefaultTaskFilterOperator(fieldType: TaskFilterFieldType): TaskFilterOperator {
+  if (fieldType === "single-select" || fieldType === "number" || fieldType === "boolean") {
+    return "eq"
+  }
+  if (fieldType === "datetime") {
+    return "after"
+  }
+  if (fieldType === "multi-select" || fieldType === "block-refs") {
+    return "contains-any"
+  }
+  return "contains"
+}
+
+function getDefaultTaskFilterValue(fieldType: TaskFilterFieldType): string | string[] {
+  if (fieldType === "multi-select" || fieldType === "block-refs") {
+    return []
+  }
+  return ""
+}
+
+function countEffectiveTaskFilterRules(
+  group: TaskFilterGroupNode,
+  fields: Map<string, TaskFilterField>,
+): number {
+  return group.children.reduce((total, child) => {
+    if (child.kind === "group") {
+      return total + countEffectiveTaskFilterRules(child, fields)
+    }
+    return total + (isTaskFilterRuleEffective(child, fields) ? 1 : 0)
+  }, 0)
+}
+
+function isTaskFilterRuleEffective(
+  rule: TaskFilterRuleNode,
+  fields: Map<string, TaskFilterField>,
+): boolean {
+  const field = fields.get(rule.fieldKey)
+  if (field == null) {
+    return false
+  }
+  if (!doesTaskFilterOperatorNeedValue(rule.operator)) {
+    return true
+  }
+  return toTaskFilterRuleValues(rule.value).length > 0
+}
+
+function appendRuleToTaskFilterGroup(
+  group: TaskFilterGroupNode,
+  targetGroupId: string,
+  rule: TaskFilterRuleNode,
+): TaskFilterGroupNode {
+  if (group.id === targetGroupId) {
+    return {
+      ...group,
+      children: [...group.children, rule],
+    }
+  }
+
+  return {
+    ...group,
+    children: group.children.map((child) => {
+      if (child.kind !== "group") {
+        return child
+      }
+      return appendRuleToTaskFilterGroup(child, targetGroupId, rule)
+    }),
+  }
+}
+
+function appendGroupToTaskFilterGroup(
+  group: TaskFilterGroupNode,
+  targetGroupId: string,
+  nextGroup: TaskFilterGroupNode,
+): TaskFilterGroupNode {
+  if (group.id === targetGroupId) {
+    return {
+      ...group,
+      children: [...group.children, nextGroup],
+    }
+  }
+
+  return {
+    ...group,
+    children: group.children.map((child) => {
+      if (child.kind !== "group") {
+        return child
+      }
+      return appendGroupToTaskFilterGroup(child, targetGroupId, nextGroup)
+    }),
+  }
+}
+
+function removeTaskFilterNode(
+  group: TaskFilterGroupNode,
+  targetNodeId: string,
+): TaskFilterGroupNode {
+  const nextChildren = group.children
+    .filter((child) => child.id !== targetNodeId)
+    .map((child) => {
+      if (child.kind !== "group") {
+        return child
+      }
+      return removeTaskFilterNode(child, targetNodeId)
+    })
+
+  return {
+    ...group,
+    children: nextChildren,
+  }
+}
+
+function updateTaskFilterGroupLogic(
+  group: TaskFilterGroupNode,
+  targetGroupId: string,
+  logic: TaskFilterGroupLogic,
+): TaskFilterGroupNode {
+  if (group.id === targetGroupId) {
+    return {
+      ...group,
+      logic,
+    }
+  }
+
+  return {
+    ...group,
+    children: group.children.map((child) => {
+      if (child.kind !== "group") {
+        return child
+      }
+      return updateTaskFilterGroupLogic(child, targetGroupId, logic)
+    }),
+  }
+}
+
+function updateTaskFilterRule(
+  group: TaskFilterGroupNode,
+  targetRuleId: string,
+  updater: (rule: TaskFilterRuleNode) => TaskFilterRuleNode,
+): TaskFilterGroupNode {
+  return {
+    ...group,
+    children: group.children.map((child) => {
+      if (child.kind === "rule" && child.id === targetRuleId) {
+        return updater(child)
+      }
+
+      if (child.kind === "group") {
+        return updateTaskFilterRule(child, targetRuleId, updater)
+      }
+
+      return child
+    }),
+  }
+}
+
+function evaluateTaskFilterGroup(
+  group: TaskFilterGroupNode,
+  item: FilterableTaskItem,
+  fields: Map<string, TaskFilterField>,
+): boolean {
+  const effectiveChildren = group.children.filter((child) => {
+    if (child.kind === "group") {
+      return countEffectiveTaskFilterRules(child, fields) > 0
+    }
+    return isTaskFilterRuleEffective(child, fields)
+  })
+
+  if (effectiveChildren.length === 0) {
+    return true
+  }
+
+  if (group.logic === "and") {
+    return effectiveChildren.every((child) => {
+      if (child.kind === "group") {
+        return evaluateTaskFilterGroup(child, item, fields)
+      }
+      return evaluateTaskFilterRule(child, item, fields)
+    })
+  }
+
+  return effectiveChildren.some((child) => {
+    if (child.kind === "group") {
+      return evaluateTaskFilterGroup(child, item, fields)
+    }
+    return evaluateTaskFilterRule(child, item, fields)
+  })
+}
+
+function evaluateTaskFilterRule(
+  rule: TaskFilterRuleNode,
+  item: FilterableTaskItem,
+  fields: Map<string, TaskFilterField>,
+): boolean {
+  const field = fields.get(rule.fieldKey)
+  if (field == null) {
+    return true
+  }
+
+  const rawValue = field.extractValue(item)
+  if (rule.operator === "empty") {
+    return isTaskFilterEmptyValue(rawValue, field.type)
+  }
+  if (rule.operator === "not-empty") {
+    return !isTaskFilterEmptyValue(rawValue, field.type)
+  }
+
+  const targets = toTaskFilterRuleValues(rule.value)
+  if (targets.length === 0) {
+    return true
+  }
+  const rawTarget = targets[0] ?? ""
+
+  if (field.type === "number") {
+    const currentNumber = toTaskFilterNumber(rawValue)
+    const targetNumber = Number(rawTarget)
+    if (currentNumber == null || Number.isNaN(targetNumber)) {
+      return false
+    }
+
+    if (rule.operator === "eq") {
+      return currentNumber === targetNumber
+    }
+    if (rule.operator === "neq") {
+      return currentNumber !== targetNumber
+    }
+    if (rule.operator === "gt") {
+      return currentNumber > targetNumber
+    }
+    if (rule.operator === "gte") {
+      return currentNumber >= targetNumber
+    }
+    if (rule.operator === "lt") {
+      return currentNumber < targetNumber
+    }
+    if (rule.operator === "lte") {
+      return currentNumber <= targetNumber
+    }
+    return false
+  }
+
+  if (field.type === "datetime") {
+    const currentMs = toTaskFilterDateMs(rawValue)
+    const targetMs = toTaskFilterDateMs(rawTarget)
+    if (currentMs == null || targetMs == null) {
+      return false
+    }
+
+    if (rule.operator === "eq") {
+      return currentMs === targetMs
+    }
+    if (rule.operator === "before") {
+      return currentMs < targetMs
+    }
+    if (rule.operator === "after") {
+      return currentMs > targetMs
+    }
+    if (rule.operator === "gte") {
+      return currentMs >= targetMs
+    }
+    if (rule.operator === "lte") {
+      return currentMs <= targetMs
+    }
+    return false
+  }
+
+  if (field.type === "boolean") {
+    const currentValue = toTaskFilterBoolean(rawValue)
+    const targetValue = toTaskFilterBoolean(rawTarget)
+    if (currentValue == null || targetValue == null) {
+      return false
+    }
+
+    if (rule.operator === "eq") {
+      return currentValue === targetValue
+    }
+    if (rule.operator === "neq") {
+      return currentValue !== targetValue
+    }
+    return false
+  }
+
+  if (field.type === "multi-select" || field.type === "block-refs") {
+    const values = toTaskFilterStringArray(rawValue).map((value) => value.toLowerCase())
+    const targetSet = normalizeTaskFilterTextValues(targets).map((target) => target.toLowerCase())
+    const valueSet = normalizeTaskFilterTextValues(values).map((value) => value.toLowerCase())
+
+    if (rule.operator === "contains" || rule.operator === "contains-any") {
+      return targetSet.some((target) => valueSet.includes(target))
+    }
+    if (rule.operator === "contains-all") {
+      return targetSet.every((target) => valueSet.includes(target))
+    }
+    if (rule.operator === "not-contains") {
+      return targetSet.every((target) => !valueSet.includes(target))
+    }
+    if (rule.operator === "eq") {
+      if (valueSet.length !== targetSet.length) {
+        return false
+      }
+      return targetSet.every((target) => valueSet.includes(target))
+    }
+    if (rule.operator === "neq") {
+      if (valueSet.length !== targetSet.length) {
+        return true
+      }
+      return !targetSet.every((target) => valueSet.includes(target))
+    }
+    return false
+  }
+
+  const textValue = toTaskFilterText(rawValue)
+  const targetText = rawTarget.toLowerCase()
+
+  if (rule.operator === "contains") {
+    return textValue.includes(targetText)
+  }
+  if (rule.operator === "not-contains") {
+    return !textValue.includes(targetText)
+  }
+  if (rule.operator === "eq") {
+    return textValue === targetText
+  }
+  if (rule.operator === "neq") {
+    return textValue !== targetText
+  }
+
+  return false
+}
+
+function isTaskFilterEmptyValue(value: unknown, fieldType: TaskFilterFieldType): boolean {
+  if (value == null) {
+    return true
+  }
+
+  if (fieldType === "boolean") {
+    return false
+  }
+
+  if (Array.isArray(value)) {
+    return value.length === 0
+  }
+
+  if (fieldType === "number") {
+    return toTaskFilterNumber(value) == null
+  }
+  if (fieldType === "datetime") {
+    return toTaskFilterDateMs(value) == null
+  }
+
+  return toTaskFilterText(value) === ""
+}
+
+function toTaskFilterRuleValues(value: string | string[]): string[] {
+  if (Array.isArray(value)) {
+    return normalizeTaskFilterTextValues(value)
+  }
+
+  if (typeof value === "string") {
+    return normalizeTaskFilterTextValues([value])
+  }
+
+  return []
+}
+
+function splitTaskFilterInputValues(rawValue: string): string[] {
+  return normalizeTaskFilterTextValues(
+    rawValue.split(/[\n,，;；]+/g),
+  )
+}
+
+function toTaskFilterStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return normalizeTaskFilterTextValues(
+      value
+        .map((item) => {
+          if (typeof item === "string") {
+            return item
+          }
+          if (typeof item === "number") {
+            return String(item)
+          }
+          return ""
+        }),
+    )
+  }
+
+  if (typeof value === "string") {
+    return normalizeTaskFilterTextValues([value])
+  }
+
+  if (typeof value === "number") {
+    return [String(value)]
+  }
+
+  return []
+}
+
+function toTaskFilterText(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim().toLowerCase()
+  }
+  if (typeof value === "number") {
+    return String(value).toLowerCase()
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false"
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().toLowerCase()
+  }
+  return ""
+}
+
+function toTaskFilterNumber(value: unknown): number | null {
+  if (typeof value === "number" && !Number.isNaN(value)) {
+    return value
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value)
+    return Number.isNaN(parsed) ? null : parsed
+  }
+  return null
+}
+
+function toTaskFilterBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === "true") {
+      return true
+    }
+    if (normalized === "false") {
+      return false
+    }
+  }
+  return null
+}
+
+function toTaskFilterDateMs(value: unknown): number | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.getTime()
+  }
+
+  if (typeof value === "number") {
+    return Number.isNaN(value) ? null : value
+  }
+
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getTime()
+  }
+
+  return null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value != null
 }
 
 function buildTaskTree(items: AllTaskItem[]): TaskTreeNode[] {
@@ -1212,7 +2500,7 @@ function buildTaskTree(items: AllTaskItem[]): TaskTreeNode[] {
 
 function filterTreeWithContext(
   nodes: TaskTreeNode[],
-  predicate: (item: { status: string; text: string }) => boolean,
+  predicate: (item: { status: string; text: string; labels?: string[] }) => boolean,
 ): TaskTreeNode[] {
   const filterNode = (node: TaskTreeNode): TaskTreeNode | null => {
     const matchedChildren = node.children
