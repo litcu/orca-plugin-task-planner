@@ -1,7 +1,7 @@
-import type { Block, BlockProperty, DbId } from "../orca.d.ts"
+import type { Block, BlockProperty, BlockRef, DbId } from "../orca.d.ts"
 import { getTaskPropertiesFromRef } from "./task-properties"
 import type { DependencyMode, TaskSchemaDefinition } from "./task-schema"
-import { getMirrorId } from "./block-utils"
+import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
 import { calculateTaskScoreFromValues } from "./score-engine"
 
 const TAG_REF_TYPE = 2
@@ -10,10 +10,15 @@ const ONE_HOUR_MS = 60 * 60 * 1000
 // Next Actions 运行时数据，供视图层直接渲染。
 export interface NextActionItem {
   blockId: DbId
+  sourceBlockId: DbId
+  parentBlockId: DbId | null
   text: string
   status: string
   endTime: Date | null
   score: number
+  star: boolean
+  parentTaskName: string | null
+  taskTagRef: BlockRef | null
 }
 
 export type NextActionBlockedReason =
@@ -89,8 +94,12 @@ export function evaluateNextAction(
   cycleContext: DependencyCycleContext | null = null,
   subtaskContext: SubtaskContext | null = null,
 ): NextActionEvaluation {
-  const taskRef = findTaskTagRef(block, schema.tagAlias)
+  const sourceTaskRef = findTaskTagRef(block, schema.tagAlias)
+  const liveTaskBlock = getLiveTaskBlock(block)
+  const taskRef = findTaskTagRef(liveTaskBlock, schema.tagAlias) ?? sourceTaskRef
   const status = getTaskStatus(taskRef?.data, schema)
+  const taskId = getMirrorIdFromBlock(liveTaskBlock)
+  const parentBlockId = liveTaskBlock.parent != null ? getMirrorId(liveTaskBlock.parent) : null
 
   const blockedReason: NextActionEvaluation["blockedReason"] = []
   if (isDoneStatus(status, schema) || isCanceledStatus(status)) {
@@ -98,6 +107,7 @@ export function evaluateNextAction(
   }
 
   const values = getTaskPropertiesFromRef(taskRef?.data, schema)
+  const parentTaskName = resolveParentTaskName(taskId, taskMap, schema, subtaskContext)
 
   if (values.startTime != null && values.startTime.getTime() > now.getTime()) {
     blockedReason.push("not-started")
@@ -143,11 +153,16 @@ export function evaluateNextAction(
 
   return {
     item: {
-      blockId: getMirrorId(block.id),
-      text: resolveTaskText(block, schema.tagAlias),
+      blockId: taskId,
+      sourceBlockId: block.id,
+      parentBlockId,
+      text: resolveTaskText(liveTaskBlock, schema.tagAlias),
       status,
       endTime: values.endTime,
       score,
+      star: values.star,
+      parentTaskName,
+      taskTagRef: taskRef,
     },
     isNextAction: blockedReason.length === 0,
     blockedReason,
@@ -360,6 +375,29 @@ function hasOpenSubtask(
   subtaskContext: SubtaskContext | null,
 ): boolean {
   return hasOpenSubtaskByTaskId(getMirrorId(sourceBlock.id), schema, subtaskContext)
+}
+
+function resolveParentTaskName(
+  taskId: DbId,
+  taskMap: Map<DbId, Block>,
+  schema: TaskSchemaDefinition,
+  subtaskContext: SubtaskContext | null,
+): string | null {
+  if (subtaskContext == null) {
+    return null
+  }
+
+  const parentTaskId = subtaskContext.parentTaskIdByTaskId.get(taskId) ?? null
+  if (parentTaskId == null) {
+    return null
+  }
+
+  const parentTask = taskMap.get(parentTaskId) ?? orca.state.blocks[parentTaskId]
+  if (parentTask == null) {
+    return null
+  }
+
+  return resolveTaskText(getLiveTaskBlock(parentTask), schema.tagAlias)
 }
 
 function hasOpenSubtaskByTaskId(
@@ -668,7 +706,7 @@ function normalizeDueTime(endTime: Date | null): number {
 function findTaskTagRef(
   block: Block,
   tagAlias: string,
-): { data?: BlockProperty[] } | null {
+): BlockRef | null {
   const taskRef = block.refs.find((ref) => {
     return ref.type === TAG_REF_TYPE && ref.alias === tagAlias
   })

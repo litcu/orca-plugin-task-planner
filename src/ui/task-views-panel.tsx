@@ -10,11 +10,12 @@ import { collectNextActions, type NextActionItem } from "../core/dependency-engi
 import {
   collectAllTasks,
   cycleTaskStatusInView,
+  toggleTaskStarInView,
   type AllTaskItem,
 } from "../core/all-tasks-engine"
 import { t } from "../libs/l10n"
 import { TaskPropertyPanelCard } from "./task-property-card"
-import { TaskListRow } from "./task-list-row"
+import { TaskListRow, type TaskListRowItem } from "./task-list-row"
 
 interface TaskViewsPanelProps extends PanelProps {
   schema: TaskSchemaDefinition
@@ -48,6 +49,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [statusFilter, setStatusFilter] = React.useState("all")
   const [keyword, setKeyword] = React.useState("")
   const [updatingIds, setUpdatingIds] = React.useState<Set<DbId>>(new Set())
+  const [starringIds, setStarringIds] = React.useState<Set<DbId>>(new Set())
   const [collapsedIds, setCollapsedIds] = React.useState<Set<DbId>>(new Set())
   const [nextActionItems, setNextActionItems] = React.useState<NextActionItem[]>([])
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
@@ -154,10 +156,47 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     [],
   )
 
+  const toggleTaskStar = React.useCallback(
+    async (item: TaskListRowItem) => {
+      setStarringIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(item.blockId)
+        return next
+      })
+
+      try {
+        await toggleTaskStarInView(
+          item.blockId,
+          !item.star,
+          props.schema,
+          item.taskTagRef ?? null,
+          item.sourceBlockId,
+        )
+        setErrorText("")
+        await loadByTab(tab, { silent: true })
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to toggle task star"))
+      } finally {
+        setStarringIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(item.blockId)
+          return next
+        })
+      }
+    },
+    [loadByTab, props.schema, tab],
+  )
+
   const closeTaskProperty = React.useCallback(() => {
     setSelectedTaskId(null)
     void loadByTab(tab, { silent: true })
   }, [loadByTab, tab])
+
+  const navigateToTaskParent = React.useCallback((item: TaskListRowItem) => {
+    const targetId = item.parentBlockId ?? item.blockId
+    orca.nav.openInLastPanel("block", { blockId: targetId })
+  }, [])
 
   const toggleCollapsed = React.useCallback((blockId: DbId) => {
     setCollapsedIds((prev: Set<DbId>) => {
@@ -409,7 +448,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       updating: updatingIds.has(item.blockId),
                       showCollapseToggle: false,
                       collapsed: false,
+                      showParentTaskContext: true,
+                      starUpdating: starringIds.has(item.blockId),
                       onToggleStatus: () => toggleTaskStatus(item.blockId),
+                      onNavigate: () => navigateToTaskParent(item),
+                      onToggleStar: () => toggleTaskStar(item),
                       onOpen: () => openTaskProperty(item.blockId),
                     })
                   })
@@ -425,10 +468,14 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       updating: updatingIds.has(row.node.item.blockId),
                       showCollapseToggle: row.hasChildren,
                       collapsed: row.collapsed,
+                      showParentTaskContext: false,
+                      starUpdating: starringIds.has(row.node.item.blockId),
                       onToggleCollapse: row.hasChildren
                         ? () => toggleCollapsed(row.node.item.blockId)
                         : undefined,
                       onToggleStatus: () => toggleTaskStatus(row.node.item.blockId),
+                      onNavigate: () => navigateToTaskParent(row.node.item),
+                      onToggleStar: () => toggleTaskStar(row.node.item),
                       onOpen: () => openTaskProperty(row.node.item.blockId),
                     })
                   }),

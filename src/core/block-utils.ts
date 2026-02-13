@@ -1,4 +1,4 @@
-import type { DbId } from "../orca.d.ts"
+import type { Block, DbId } from "../orca.d.ts"
 
 // 统一处理镜像块，避免对镜像块写入或跳转时命中错误目标。
 export function getMirrorId(id: DbId): DbId {
@@ -16,4 +16,16 @@ export function getMirrorId(id: DbId): DbId {
   }
 
   return id
+}
+
+export function getMirrorIdFromBlock(block: Pick<Block, "id" | "properties">): DbId {
+  const repr = block.properties?.find((item) => item.name === "_repr")?.value as
+    | { type?: string; mirroredId?: DbId }
+    | undefined
+
+  if (repr?.type === "mirror" && repr.mirroredId != null) {
+    return repr.mirroredId
+  }
+
+  return getMirrorId(block.id)
 }

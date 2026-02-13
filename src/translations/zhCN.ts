@@ -50,6 +50,7 @@ const zhCN = {
 
   "Failed to load task view": "加载任务视图失败",
   "Failed to toggle task status": "切换任务状态失败",
+  "Failed to toggle task star": "切换任务收藏失败",
   "All statuses": "全部状态",
   "Active Tasks": "激活任务",
   "All Tasks": "全部任务",
@@ -74,6 +75,8 @@ const zhCN = {
   "Expand subtasks": "展开子任务",
   "Collapse subtasks": "折叠子任务",
   "Toggle task status": "切换任务状态",
+  "Parent: ${name}": "父任务：${name}",
+  "Jump to task location": "跳转到任务位置",
   "No due": "未设置",
   "Overdue ${days}d": "超期${days}天",
   "Today": "今天",

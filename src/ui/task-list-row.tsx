@@ -1,12 +1,17 @@
-import type { DbId } from "../orca.d.ts"
+import type { BlockRef, DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 
 export interface TaskListRowItem {
   blockId: DbId
+  sourceBlockId: DbId
+  parentBlockId: DbId | null
   text: string
   status: string
   endTime: Date | null
+  star: boolean
+  parentTaskName?: string | null
+  taskTagRef?: BlockRef | null
 }
 
 interface TaskListRowProps {
@@ -19,8 +24,12 @@ interface TaskListRowProps {
   updating: boolean
   showCollapseToggle: boolean
   collapsed: boolean
+  showParentTaskContext: boolean
+  starUpdating: boolean
   onToggleCollapse?: () => void
   onToggleStatus: () => void | Promise<void>
+  onNavigate: () => void
+  onToggleStar: () => void | Promise<void>
   onOpen: () => void
 }
 
@@ -124,9 +133,42 @@ export function TaskListRow(props: TaskListRowProps) {
           flex: 1,
           minWidth: 0,
           fontSize: "13px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-start",
+          gap: "2px",
         },
       },
-      props.item.text,
+      React.createElement(
+        "span",
+        {
+          style: {
+            display: "block",
+            width: "100%",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          },
+        },
+        props.item.text,
+      ),
+      props.showParentTaskContext && props.item.parentTaskName != null
+        ? React.createElement(
+            "span",
+            {
+              style: {
+                display: "block",
+                width: "100%",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                fontSize: "11px",
+                color: "var(--orca-color-text-2)",
+              },
+            },
+            t("Parent: ${name}", { name: props.item.parentTaskName }),
+          )
+        : null,
     ),
     React.createElement(
       "div",
@@ -140,6 +182,85 @@ export function TaskListRow(props: TaskListRowProps) {
       },
       dueInfo.text,
     ),
+    React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          props.onNavigate()
+        },
+        title: t("Jump to task location"),
+        style: {
+          width: "24px",
+          height: "24px",
+          padding: 0,
+          border: "none",
+          borderRadius: "4px",
+          background: "transparent",
+          color: "var(--orca-color-text-2)",
+          cursor: "pointer",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        },
+      },
+      React.createElement("i", {
+        className: "ti ti-arrow-up-right",
+        style: { fontSize: "14px", lineHeight: 1 },
+      }),
+    ),
+    React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          void props.onToggleStar()
+        },
+        disabled: props.loading || props.starUpdating,
+        title: props.item.star ? t("Starred") : t("Not starred"),
+        style: {
+          width: "24px",
+          height: "24px",
+          padding: 0,
+          border: "none",
+          background: "transparent",
+          color: props.item.star
+            ? "var(--orca-color-text-yellow, #d69e2e)"
+            : "var(--orca-color-text-2)",
+          cursor: props.loading || props.starUpdating ? "not-allowed" : "pointer",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        },
+      },
+      React.createElement(StarIcon, { filled: props.item.star }),
+    ),
+  )
+}
+
+function StarIcon(props: { filled: boolean }) {
+  const React = window.React
+  return React.createElement(
+    "svg",
+    {
+      width: 16,
+      height: 16,
+      viewBox: "0 0 24 24",
+      fill: props.filled ? "currentColor" : "none",
+      stroke: "currentColor",
+      strokeWidth: 1.8,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      "aria-hidden": true,
+    },
+    React.createElement("path", {
+      d:
+        "M12 3.5l2.77 5.62 6.2.9-4.48 4.36 1.06 6.16L12 17.62 6.45 20.54l1.06-6.16-4.48-4.36 6.2-.9L12 3.5z",
+    }),
   )
 }
 
