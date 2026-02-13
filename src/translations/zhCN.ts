@@ -1,5 +1,9 @@
 const zhCN = {
   "Task schema initialized": "任务 schema 已初始化（语言=${locale}，默认依赖模式=${mode}）",
+  "Task tag name": "任务标签名称",
+  "Name of the tag used to identify tasks. Changes apply after clicking Save.": "用于标识任务的标签名称。修改后点击保存才会生效。",
+  "Task tag name already exists: ${name}": "任务标签名称已存在：${name}",
+  "Failed to apply task tag name: ${message}": "任务标签名称应用失败：${message}",
 
   "Task Properties": "任务属性",
   "Status": "状态",

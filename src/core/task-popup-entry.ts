@@ -1,6 +1,6 @@
 import type { Block, DbId, TagMenuCommand } from "../orca.d.ts"
 import { t } from "../libs/l10n"
-import { TASK_TAG_ALIAS, getTaskSchemaByLocale } from "./task-schema"
+import type { TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId } from "./block-utils"
 import {
   closeTaskPropertyPopup,
@@ -14,12 +14,14 @@ export interface TaskPopupEntryHandle {
   dispose: () => void
 }
 
-export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
-  const tagAlias = TASK_TAG_ALIAS
+export function setupTaskPopupEntry(
+  pluginName: string,
+  schema: TaskSchemaDefinition,
+): TaskPopupEntryHandle {
+  const tagAlias = schema.tagAlias
   const tagName = tagAlias.toLowerCase()
   const menuCommandId = `${pluginName}.openTaskPropertyPopupFromTagMenu`
   const openCommandId = `${pluginName}.openTaskPropertyPopup`
-  const schema = getTaskSchemaByLocale(orca.state.locale)
 
   const clickListener = (event: MouseEvent) => {
     const target = event.target

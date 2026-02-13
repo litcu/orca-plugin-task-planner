@@ -88,18 +88,24 @@ export interface EnsureTaskSchemaResult {
   isNewTag: boolean
 }
 
-export function getTaskSchemaByLocale(locale: string): TaskSchemaDefinition {
-  return locale === "zh-CN"
+export function getTaskSchemaByLocale(
+  locale: string,
+  taskTagAlias: string = TASK_TAG_ALIAS,
+): TaskSchemaDefinition {
+  const schema = locale === "zh-CN"
     ? TASK_SCHEMA_BY_LOCALE["zh-CN"]
     : TASK_SCHEMA_BY_LOCALE.en
+
+  return withTaskTagAlias(schema, taskTagAlias)
 }
 
 export async function ensureTaskTagSchema(
   locale: string,
+  taskTagAlias: string = TASK_TAG_ALIAS,
 ): Promise<EnsureTaskSchemaResult> {
   let taskBlock = (await orca.invokeBackend(
     "get-block-by-alias",
-    TASK_TAG_ALIAS,
+    taskTagAlias,
   )) as Block | null
 
   const isNewTag = taskBlock == null
@@ -110,30 +116,35 @@ export async function ensureTaskTagSchema(
         null,
         null,
         null,
-        [{ t: "t", v: TASK_TAG_ALIAS }],
+        [{ t: "t", v: taskTagAlias }],
       )) as DbId
 
       await orca.commands.invokeEditorCommand(
         "core.editor.createAlias",
         null,
-        TASK_TAG_ALIAS,
+        taskTagAlias,
         taskBlockId,
       )
     })
 
     taskBlock = (await orca.invokeBackend(
       "get-block-by-alias",
-      TASK_TAG_ALIAS,
+      taskTagAlias,
     )) as Block | null
   }
 
   if (taskBlock == null) {
-    throw new Error("初始化任务标签失败：未找到 Task 标签块")
+    throw new Error(
+      `初始化任务标签失败：未找到 ${taskTagAlias} 标签块`,
+    )
   }
 
   // 已存在任务 schema 时沿用既有命名，避免切换语言后自动改写历史属性
   const existingSchema = detectSchemaFromProperties(taskBlock.properties)
-  const targetSchema = existingSchema ?? getTaskSchemaByLocale(locale)
+  const targetSchema = withTaskTagAlias(
+    existingSchema ?? getTaskSchemaByLocale(locale),
+    taskTagAlias,
+  )
 
   await orca.commands.invokeEditorCommand(
     "core.editor.setProperties",
@@ -147,6 +158,22 @@ export async function ensureTaskTagSchema(
     schemaLocale: targetSchema.locale,
     schema: targetSchema,
     isNewTag,
+  }
+}
+
+function withTaskTagAlias(
+  schema: TaskSchemaDefinition,
+  taskTagAlias: string,
+): TaskSchemaDefinition {
+  return {
+    ...schema,
+    tagAlias: taskTagAlias,
+    propertyNames: { ...schema.propertyNames },
+    statusChoices: [...schema.statusChoices] as [string, string, string],
+    dependencyModeChoices: [...schema.dependencyModeChoices] as [
+      DependencyMode,
+      DependencyMode,
+    ],
   }
 }
 
