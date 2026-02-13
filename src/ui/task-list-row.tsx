@@ -40,7 +40,7 @@ export function TaskListRow(props: TaskListRowProps) {
   const [hovered, setHovered] = React.useState(false)
   const [focused, setFocused] = React.useState(false)
   const statusColor = resolveStatusColor(props.item.status, props.schema)
-  const statusGlyph = resolveStatusGlyph(props.item.status, props.schema)
+  const statusVisualState = resolveStatusVisualState(props.item.status, props.schema)
   const dueInfo = resolveDueInfo(props.item.endTime, props.isChinese)
   const dueBadgeStyle = resolveDueBadgeStyle(dueInfo.tone)
 
@@ -148,23 +148,22 @@ export function TaskListRow(props: TaskListRowProps) {
         disabled: props.loading || props.updating,
         title: t("Toggle task status"),
         style: {
-          width: "22px",
-          height: "22px",
-          borderRadius: "6px",
-          border: "1px solid rgba(148, 163, 184, 0.34)",
-          background: "rgba(15, 23, 42, 0.03)",
+          width: "20px",
+          height: "20px",
+          border: "none",
+          background: "transparent",
           color: statusColor,
           cursor: props.loading || props.updating ? "not-allowed" : "pointer",
           flexShrink: 0,
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: "15px",
           lineHeight: 1,
           padding: 0,
+          opacity: props.loading || props.updating ? 0.6 : 1,
         },
       },
-      statusGlyph,
+      React.createElement(StatusIcon, { state: statusVisualState }),
     ),
     React.createElement(
       "button",
@@ -353,19 +352,60 @@ function StarIcon(props: { filled: boolean }) {
   )
 }
 
-function resolveStatusGlyph(status: string, schema: TaskSchemaDefinition): string {
+type StatusVisualState = "todo" | "doing" | "done"
+
+function resolveStatusVisualState(
+  status: string,
+  schema: TaskSchemaDefinition,
+): StatusVisualState {
   const [todoStatus, doingStatus, doneStatus] = schema.statusChoices
   if (status === doneStatus) {
-    return "\u2713"
+    return "done"
   }
   if (status === doingStatus) {
-    return "\u25D0"
+    return "doing"
   }
   if (status === todoStatus) {
-    return "\u25EF"
+    return "todo"
   }
 
-  return "\u25EF"
+  return "todo"
+}
+
+function StatusIcon(props: { state: StatusVisualState }) {
+  const React = window.React
+  return React.createElement(
+    "svg",
+    {
+      width: 18,
+      height: 18,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: 1.9,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      "aria-hidden": true,
+    },
+    React.createElement("circle", {
+      cx: 12,
+      cy: 12,
+      r: 8,
+    }),
+    props.state === "done"
+      ? React.createElement("path", {
+          d: "M8.4 12.3l2.1 2.2 5-5.2",
+        })
+      : props.state === "doing"
+        ? React.createElement("circle", {
+            cx: 12,
+            cy: 12,
+            r: 3.1,
+            fill: "currentColor",
+            stroke: "none",
+          })
+        : null,
+  )
 }
 
 function resolveStatusColor(status: string, schema: TaskSchemaDefinition): string {

@@ -673,6 +673,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                   flexDirection: "column",
                   alignItems: "stretch",
                   gap: "6px",
+                  paddingTop: "2px",
+                  paddingBottom: "2px",
                 },
               },
               isAllTasksTab
