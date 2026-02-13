@@ -170,18 +170,20 @@ export function TaskListRow(props: TaskListRowProps) {
           )
         : null,
     ),
-    React.createElement(
-      "div",
-      {
-        style: {
-          fontSize: "11px",
-          color: dueInfo.color,
-          fontWeight: dueInfo.strong ? 600 : 400,
-          whiteSpace: "nowrap",
-        },
-      },
-      dueInfo.text,
-    ),
+    dueInfo.text !== ""
+      ? React.createElement(
+          "div",
+          {
+            style: {
+              fontSize: "11px",
+              color: dueInfo.color,
+              fontWeight: dueInfo.strong ? 600 : 400,
+              whiteSpace: "nowrap",
+            },
+          },
+          dueInfo.text,
+        )
+      : null,
     React.createElement(
       "button",
       {
@@ -297,7 +299,7 @@ function resolveDueInfo(
 ): { text: string; color: string; strong: boolean } {
   if (endTime == null || Number.isNaN(endTime.getTime())) {
     return {
-      text: t("No due"),
+      text: "",
       color: "var(--orca-color-text-2)",
       strong: false,
     }

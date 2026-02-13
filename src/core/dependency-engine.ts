@@ -76,7 +76,7 @@ export async function collectNextActionEvaluations(
   const taskBlocks = await queryTaskBlocks(schema.tagAlias)
   const taskMap = buildTaskMap(taskBlocks)
   const cycleContext = buildDependencyCycleContext(taskBlocks, taskMap, schema)
-  const subtaskContext = buildSubtaskContext(taskBlocks, schema)
+  const subtaskContext = await buildSubtaskContext(taskBlocks, schema)
 
   const evaluations = taskBlocks.map((block) => {
     return evaluateNextAction(block, taskMap, schema, now, cycleContext, subtaskContext)
@@ -181,6 +181,7 @@ function buildTaskMap(blocks: Block[]): Map<DbId, Block> {
   const map = new Map<DbId, Block>()
 
   for (const block of blocks) {
+    map.set(getMirrorIdFromBlock(block), block)
     map.set(getMirrorId(block.id), block)
     map.set(block.id, block)
   }
@@ -188,10 +189,10 @@ function buildTaskMap(blocks: Block[]): Map<DbId, Block> {
   return map
 }
 
-function buildSubtaskContext(
+async function buildSubtaskContext(
   taskBlocks: Block[],
   schema: TaskSchemaDefinition,
-): SubtaskContext | null {
+): Promise<SubtaskContext | null> {
   if (taskBlocks.length === 0) {
     return null
   }
@@ -199,48 +200,182 @@ function buildSubtaskContext(
   const statusByTaskId = new Map<DbId, string>()
   const childTaskIdsByParentId = new Map<DbId, DbId[]>()
   const parentTaskIdByTaskId = new Map<DbId, DbId | null>()
+  const parentBlockIdByTaskId = new Map<DbId, DbId | null>()
+  const taskIdByAliasId = new Map<DbId, DbId>()
+  const blockCacheById = new Map<DbId, Block | null>()
 
   for (const block of taskBlocks) {
+    cacheBlockByKnownIds(block, blockCacheById)
     const liveBlock = getLiveTaskBlock(block)
-    const taskRef = findTaskTagRef(liveBlock, schema.tagAlias)
+    cacheBlockByKnownIds(liveBlock, blockCacheById)
+    const sourceTaskRef = findTaskTagRef(block, schema.tagAlias)
+    const taskRef = findTaskTagRef(liveBlock, schema.tagAlias) ?? sourceTaskRef
     if (taskRef == null) {
       continue
     }
 
-    const taskId = getMirrorId(liveBlock.id)
+    const taskId = getMirrorIdFromBlock(liveBlock)
+    const parentBlockId = liveBlock.parent != null ? getMirrorId(liveBlock.parent) : null
     statusByTaskId.set(taskId, getTaskStatus(taskRef.data, schema))
     parentTaskIdByTaskId.set(taskId, null)
+    parentBlockIdByTaskId.set(taskId, parentBlockId)
+    registerTaskAliasIds(taskIdByAliasId, taskId, block, liveBlock)
+    childTaskIdsByParentId.set(taskId, [])
   }
 
-  for (const block of taskBlocks) {
-    const liveBlock = getLiveTaskBlock(block)
-    const taskId = getMirrorId(liveBlock.id)
-    const childTaskIds: DbId[] = []
+  for (const [taskId, parentBlockId] of parentBlockIdByTaskId.entries()) {
+    const parentTaskId = await resolveNearestTaskAncestorId(
+      taskId,
+      parentBlockId,
+      taskIdByAliasId,
+      blockCacheById,
+    )
+    parentTaskIdByTaskId.set(taskId, parentTaskId)
 
-    for (const childId of liveBlock.children.map((item) => getMirrorId(item))) {
-      if (childId === taskId) {
-        continue
-      }
-      if (!statusByTaskId.has(childId)) {
-        continue
-      }
-      if (!childTaskIds.includes(childId)) {
-        childTaskIds.push(childId)
-      }
+    if (parentTaskId == null || parentTaskId === taskId) {
+      continue
+    }
+    if (!statusByTaskId.has(parentTaskId)) {
+      continue
     }
 
-    childTaskIdsByParentId.set(taskId, childTaskIds)
-
-    const parentId = liveBlock.parent != null ? getMirrorId(liveBlock.parent) : null
-    if (parentId != null && parentId !== taskId && statusByTaskId.has(parentId)) {
-      parentTaskIdByTaskId.set(taskId, parentId)
+    const childTaskIds = childTaskIdsByParentId.get(parentTaskId) ?? []
+    if (!childTaskIds.includes(taskId)) {
+      childTaskIds.push(taskId)
     }
+    childTaskIdsByParentId.set(parentTaskId, childTaskIds)
   }
 
   return {
     statusByTaskId,
     childTaskIdsByParentId,
     parentTaskIdByTaskId,
+  }
+}
+
+async function resolveNearestTaskAncestorId(
+  taskId: DbId,
+  parentBlockId: DbId | null,
+  taskIdByAliasId: Map<DbId, DbId>,
+  blockCacheById: Map<DbId, Block | null>,
+): Promise<DbId | null> {
+  const visited = new Set<DbId>()
+  let currentId = parentBlockId
+
+  while (currentId != null) {
+    if (currentId === taskId || visited.has(currentId)) {
+      return null
+    }
+
+    const currentTaskId = taskIdByAliasId.get(currentId)
+    if (currentTaskId != null) {
+      if (currentTaskId === taskId) {
+        return null
+      }
+      return currentTaskId
+    }
+
+    visited.add(currentId)
+    const block = await getBlockByIdWithCache(currentId, blockCacheById)
+    const resolvedByBlock = block != null
+      ? resolveTaskIdByBlock(block, taskIdByAliasId)
+      : null
+    if (resolvedByBlock != null) {
+      if (resolvedByBlock === taskId) {
+        return null
+      }
+      return resolvedByBlock
+    }
+
+    if (block?.parent == null) {
+      return null
+    }
+
+    currentId = block.parent
+  }
+
+  return null
+}
+
+function registerTaskAliasIds(
+  taskIdByAliasId: Map<DbId, DbId>,
+  taskId: DbId,
+  sourceBlock: Block,
+  liveBlock: Block,
+) {
+  const aliasIds = [
+    taskId,
+    sourceBlock.id,
+    liveBlock.id,
+    getMirrorIdFromBlock(sourceBlock),
+    getMirrorIdFromBlock(liveBlock),
+    getMirrorId(sourceBlock.id),
+    getMirrorId(liveBlock.id),
+  ]
+
+  for (const aliasId of aliasIds) {
+    if (aliasId == null || taskIdByAliasId.has(aliasId)) {
+      continue
+    }
+
+    taskIdByAliasId.set(aliasId, taskId)
+  }
+}
+
+function resolveTaskIdByBlock(
+  block: Block,
+  taskIdByAliasId: Map<DbId, DbId>,
+): DbId | null {
+  const candidateIds = [block.id, getMirrorIdFromBlock(block), getMirrorId(block.id)]
+  for (const candidateId of candidateIds) {
+    const taskId = taskIdByAliasId.get(candidateId)
+    if (taskId != null) {
+      return taskId
+    }
+  }
+
+  return null
+}
+
+async function getBlockByIdWithCache(
+  blockId: DbId,
+  blockCacheById: Map<DbId, Block | null>,
+): Promise<Block | null> {
+  if (blockCacheById.has(blockId)) {
+    return blockCacheById.get(blockId) ?? null
+  }
+
+  const stateBlock = orca.state.blocks[blockId]
+  if (stateBlock != null) {
+    cacheBlockByKnownIds(stateBlock, blockCacheById)
+    return stateBlock
+  }
+
+  try {
+    const block = (await orca.invokeBackend("get-block", blockId)) as Block | null
+    if (block != null) {
+      cacheBlockByKnownIds(block, blockCacheById)
+      return block
+    }
+  } catch (error) {
+    console.error(error)
+  }
+
+  blockCacheById.set(blockId, null)
+  return null
+}
+
+function cacheBlockByKnownIds(
+  block: Block,
+  blockCacheById: Map<DbId, Block | null>,
+) {
+  const aliasIds = [block.id, getMirrorIdFromBlock(block), getMirrorId(block.id)]
+  for (const aliasId of aliasIds) {
+    if (aliasId == null) {
+      continue
+    }
+
+    blockCacheById.set(aliasId, block)
   }
 }
 

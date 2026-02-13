@@ -274,52 +274,77 @@ function collectFirstTaskDescendants(
 export async function cycleTaskStatusInView(
   blockId: DbId,
   schema: TaskSchemaDefinition,
+  taskTagRef?: BlockRef | null,
+  sourceBlockId?: DbId | null,
 ): Promise<void> {
-  const targetId = getMirrorId(blockId)
-  const block = orca.state.blocks[targetId]
-  if (block == null) {
-    return
-  }
-
-  const taskRef = findTaskTagRef(block, schema.tagAlias)
-  if (taskRef == null) {
-    return
-  }
-
-  const values = getTaskPropertiesFromRef(taskRef.data, schema)
+  const taskRefFromState = resolveTaskRefFromState(blockId, schema)
+  const effectiveTaskRef = taskRefFromState ?? taskTagRef
+  const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema)
   const nextStatus = getNextStatus(values.status, schema)
   const [, doingStatus] = schema.statusChoices
   const dependsMode =
     values.dependsMode === "ALL" || values.dependsMode === "ANY"
       ? values.dependsMode
       : schema.dependencyModeChoices[0]
+  const payload = [
+    { name: schema.propertyNames.status, value: nextStatus },
+    {
+      name: schema.propertyNames.startTime,
+      type: DATE_TIME_PROP_TYPE,
+      value:
+        nextStatus === doingStatus && values.startTime == null
+          ? new Date()
+          : values.startTime,
+    },
+    {
+      name: schema.propertyNames.endTime,
+      type: DATE_TIME_PROP_TYPE,
+      value: values.endTime,
+    },
+    {
+      name: schema.propertyNames.dependsMode,
+      value: dependsMode,
+    },
+  ]
 
-  await orca.commands.invokeEditorCommand(
-    "core.editor.insertTag",
-    null,
-    targetId,
-    schema.tagAlias,
-    [
-      { name: schema.propertyNames.status, value: nextStatus },
-      {
-        name: schema.propertyNames.startTime,
-        type: DATE_TIME_PROP_TYPE,
-        value:
-          nextStatus === doingStatus && values.startTime == null
-            ? new Date()
-            : values.startTime,
-      },
-      {
-        name: schema.propertyNames.endTime,
-        type: DATE_TIME_PROP_TYPE,
-        value: values.endTime,
-      },
-      {
-        name: schema.propertyNames.dependsMode,
-        value: dependsMode,
-      },
-    ],
-  )
+  if (effectiveTaskRef != null) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setRefData",
+        null,
+        effectiveTaskRef,
+        payload,
+      )
+      return
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const targetIds = [sourceBlockId ?? null, getMirrorId(blockId), blockId]
+    .filter((id): id is DbId => id != null && !Number.isNaN(id))
+    .filter((id, index, all) => all.indexOf(id) === index)
+
+  let lastError: unknown = null
+  for (const targetId of targetIds) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.insertTag",
+        null,
+        targetId,
+        schema.tagAlias,
+        payload,
+      )
+      return
+    } catch (error) {
+      lastError = error
+      console.error(error)
+    }
+  }
+
+  if (lastError != null) {
+    throw lastError
+  }
 }
 
 export async function toggleTaskStarInView(
@@ -386,6 +411,26 @@ function findTaskTagRef(
   tagAlias: string,
 ): BlockRef | null {
   return block.refs.find((ref) => ref.type === TAG_REF_TYPE && ref.alias === tagAlias) ?? null
+}
+
+function resolveTaskRefFromState(
+  blockId: DbId,
+  schema: TaskSchemaDefinition,
+): BlockRef | null {
+  const idsToCheck = [getMirrorId(blockId), blockId]
+  for (const candidateId of idsToCheck) {
+    const block = orca.state.blocks[candidateId]
+    if (block == null) {
+      continue
+    }
+
+    const taskRef = findTaskTagRef(block, schema.tagAlias)
+    if (taskRef != null) {
+      return taskRef
+    }
+  }
+
+  return null
 }
 
 function getNextStatus(

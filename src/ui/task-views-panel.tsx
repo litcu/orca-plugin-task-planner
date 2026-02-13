@@ -36,9 +36,11 @@ interface VisibleTreeRow {
 
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
+  const Button = orca.components.Button
   const Input = orca.components.Input
   const Select = orca.components.Select
   const Segmented = orca.components.Segmented
+  const Switch = orca.components.Switch
 
   const isChinese = orca.state.locale === "zh-CN"
   const [tab, setTab] = React.useState<TaskViewsTab>(() => {
@@ -47,6 +49,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [loading, setLoading] = React.useState(true)
   const [errorText, setErrorText] = React.useState("")
   const [statusFilter, setStatusFilter] = React.useState("all")
+  const [showCompletedInAllTasks, setShowCompletedInAllTasks] = React.useState(true)
   const [keyword, setKeyword] = React.useState("")
   const [updatingIds, setUpdatingIds] = React.useState<Set<DbId>>(new Set())
   const [starringIds, setStarringIds] = React.useState<Set<DbId>>(new Set())
@@ -124,15 +127,20 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   }, [loadByTab, selectedTaskId, tab])
 
   const toggleTaskStatus = React.useCallback(
-    async (blockId: DbId) => {
+    async (item: TaskListRowItem) => {
       setUpdatingIds((prev: Set<DbId>) => {
         const next = new Set(prev)
-        next.add(blockId)
+        next.add(item.blockId)
         return next
       })
 
       try {
-        await cycleTaskStatusInView(blockId, props.schema)
+        await cycleTaskStatusInView(
+          item.blockId,
+          props.schema,
+          item.taskTagRef ?? null,
+          item.sourceBlockId,
+        )
         setErrorText("")
         await loadByTab(tab, { silent: true })
       } catch (error) {
@@ -141,7 +149,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       } finally {
         setUpdatingIds((prev: Set<DbId>) => {
           const next = new Set(prev)
-          next.delete(blockId)
+          next.delete(item.blockId)
           return next
         })
       }
@@ -244,13 +252,48 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     return nextActionItems.filter(matchesItem)
   }, [matchesItem, nextActionItems])
 
-  const allTaskTree = React.useMemo(() => buildTaskTree(allTaskItems), [allTaskItems])
+  const doneStatus = props.schema.statusChoices[2]
+  const allTaskItemsForTree = React.useMemo(() => {
+    if (showCompletedInAllTasks) {
+      return allTaskItems
+    }
+
+    return allTaskItems.filter((item: AllTaskItem) => item.status !== doneStatus)
+  }, [allTaskItems, doneStatus, showCompletedInAllTasks])
+  const allTaskTree = React.useMemo(() => buildTaskTree(allTaskItemsForTree), [allTaskItemsForTree])
   const filteredAllTaskTree = React.useMemo(() => {
     return filterTreeWithContext(allTaskTree, matchesItem)
   }, [allTaskTree, matchesItem])
   const visibleAllTaskRows = React.useMemo(() => {
     return flattenVisibleTree(filteredAllTaskTree, collapsedIds)
   }, [collapsedIds, filteredAllTaskTree])
+  const collapsibleVisibleTaskIds = React.useMemo(() => {
+    return collectCollapsibleNodeIds(filteredAllTaskTree)
+  }, [filteredAllTaskTree])
+  const canToggleAllCollapsed = collapsibleVisibleTaskIds.length > 0
+  const allVisibleCollapsed = canToggleAllCollapsed &&
+    collapsibleVisibleTaskIds.every((blockId: DbId) => collapsedIds.has(blockId))
+
+  const toggleAllCollapsed = React.useCallback(() => {
+    if (collapsibleVisibleTaskIds.length === 0) {
+      return
+    }
+
+    setCollapsedIds((prev: Set<DbId>) => {
+      const next = new Set(prev)
+      if (allVisibleCollapsed) {
+        for (const blockId of collapsibleVisibleTaskIds) {
+          next.delete(blockId)
+        }
+      } else {
+        for (const blockId of collapsibleVisibleTaskIds) {
+          next.add(blockId)
+        }
+      }
+
+      return next
+    })
+  }, [allVisibleCollapsed, collapsibleVisibleTaskIds])
 
   const viewName = tab === "next-actions"
     ? t("Active Tasks")
@@ -343,6 +386,57 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           flex: 1,
         },
       }),
+      tab === "all-tasks"
+        ? React.createElement(
+            "label",
+            {
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "12px",
+                color: "var(--orca-color-text-2)",
+                whiteSpace: "nowrap",
+              },
+            },
+            React.createElement(Switch, {
+              on: showCompletedInAllTasks,
+              onChange: (nextOn: boolean) => {
+                setShowCompletedInAllTasks(nextOn)
+              },
+            }),
+            t("Show completed tasks"),
+          )
+        : null,
+      tab === "all-tasks"
+        ? React.createElement(
+            Button,
+            {
+              variant: "outline",
+              disabled: !canToggleAllCollapsed,
+              onClick: () => toggleAllCollapsed(),
+              title: allVisibleCollapsed ? t("Expand all") : t("Collapse all"),
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                whiteSpace: "nowrap",
+              },
+            },
+            React.createElement("i", {
+              className: allVisibleCollapsed ? "ti ti-chevrons-down" : "ti ti-chevrons-up",
+              style: {
+                fontSize: "14px",
+                lineHeight: 1,
+              },
+            }),
+            React.createElement(
+              "span",
+              null,
+              allVisibleCollapsed ? t("Expand all") : t("Collapse all"),
+            ),
+          )
+        : null,
       React.createElement(
         "div",
         {
@@ -450,7 +544,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       collapsed: false,
                       showParentTaskContext: true,
                       starUpdating: starringIds.has(item.blockId),
-                      onToggleStatus: () => toggleTaskStatus(item.blockId),
+                      onToggleStatus: () => toggleTaskStatus(item),
                       onNavigate: () => navigateToTaskParent(item),
                       onToggleStar: () => toggleTaskStar(item),
                       onOpen: () => openTaskProperty(item.blockId),
@@ -473,7 +567,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       onToggleCollapse: row.hasChildren
                         ? () => toggleCollapsed(row.node.item.blockId)
                         : undefined,
-                      onToggleStatus: () => toggleTaskStatus(row.node.item.blockId),
+                      onToggleStatus: () => toggleTaskStatus(row.node.item),
                       onNavigate: () => navigateToTaskParent(row.node.item),
                       onToggleStar: () => toggleTaskStar(row.node.item),
                       onOpen: () => openTaskProperty(row.node.item.blockId),
@@ -623,4 +717,17 @@ function visitTree(nodes: TaskTreeNode[], visited: Set<DbId>) {
     visited.add(node.item.blockId)
     visitTree(node.children, visited)
   }
+}
+
+function collectCollapsibleNodeIds(nodes: TaskTreeNode[]): DbId[] {
+  const ids: DbId[] = []
+  const walk = (node: TaskTreeNode) => {
+    if (node.children.length > 0) {
+      ids.push(node.item.blockId)
+    }
+    node.children.forEach(walk)
+  }
+
+  nodes.forEach(walk)
+  return ids
 }
