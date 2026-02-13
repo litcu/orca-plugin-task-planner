@@ -18,6 +18,7 @@ interface TaskListRowProps {
   item: TaskListRowItem
   schema: TaskSchemaDefinition
   isChinese: boolean
+  rowIndex?: number
   depth: number
   contextOnly: boolean
   loading: boolean
@@ -35,25 +36,58 @@ interface TaskListRowProps {
 
 export function TaskListRow(props: TaskListRowProps) {
   const React = window.React
+  const rowIndex = props.rowIndex ?? 0
+  const [hovered, setHovered] = React.useState(false)
+  const [focused, setFocused] = React.useState(false)
+  const statusColor = resolveStatusColor(props.item.status, props.schema)
+  const statusGlyph = resolveStatusGlyph(props.item.status, props.schema)
   const dueInfo = resolveDueInfo(props.item.endTime, props.isChinese)
+  const dueBadgeStyle = resolveDueBadgeStyle(dueInfo.tone)
+
+  React.useEffect(() => {
+    ensureTaskRowStyles()
+  }, [])
 
   return React.createElement(
     "div",
     {
       key: props.item.blockId,
+      onMouseEnter: () => setHovered(true),
+      onMouseLeave: () => setHovered(false),
+      onFocusCapture: () => setFocused(true),
+      onBlurCapture: () => setFocused(false),
       style: {
+        position: "relative",
         width: "100%",
         minWidth: 0,
         boxSizing: "border-box",
         display: "flex",
         alignItems: "center",
         gap: "8px",
-        padding: "6px 8px",
-        paddingLeft: `${8 + props.depth * 18}px`,
+        padding: "7px 10px",
+        paddingLeft: `${10 + props.depth * 18}px`,
         border: "1px solid var(--orca-color-border)",
-        borderRadius: "6px",
-        background: "var(--orca-color-bg-2)",
-        opacity: props.contextOnly ? 0.72 : 1,
+        borderRadius: "10px",
+        background: props.contextOnly
+          ? "linear-gradient(120deg, rgba(148, 163, 184, 0.08), var(--orca-color-bg-2))"
+          : hovered || focused
+            ? "linear-gradient(120deg, rgba(37, 99, 235, 0.12), var(--orca-color-bg-1) 58%, rgba(37, 99, 235, 0.04))"
+            : "linear-gradient(120deg, var(--orca-color-bg-2), var(--orca-color-bg-1) 58%, rgba(148, 163, 184, 0.06))",
+        borderColor: hovered || focused
+          ? "var(--orca-color-text-blue, #2563eb)"
+          : "var(--orca-color-border)",
+        boxShadow: hovered || focused
+          ? "0 8px 18px rgba(15, 23, 42, 0.14)"
+          : "0 1px 3px rgba(15, 23, 42, 0.08)",
+        transform: hovered ? "translateY(-1px)" : "translateY(0)",
+        transition:
+          "transform 170ms ease, box-shadow 170ms ease, background 170ms ease, border-color 170ms ease",
+        opacity: props.contextOnly ? 0.78 : 1,
+        animationName: "mloTaskRowEnter",
+        animationDuration: "260ms",
+        animationTimingFunction: "cubic-bezier(.2,.8,.2,1)",
+        animationDelay: `${Math.min(rowIndex, 8) * 30}ms`,
+        animationFillMode: "backwards",
       },
     },
     props.showCollapseToggle
@@ -69,10 +103,14 @@ export function TaskListRow(props: TaskListRowProps) {
             style: {
               width: "18px",
               height: "18px",
-              border: "none",
+              border: "1px solid rgba(148, 163, 184, 0.3)",
               borderRadius: "4px",
-              background: "transparent",
-              color: "var(--orca-color-text-2)",
+              background: props.collapsed
+                ? "rgba(148, 163, 184, 0.08)"
+                : "rgba(37, 99, 235, 0.12)",
+              color: props.collapsed
+                ? "var(--orca-color-text-2)"
+                : "var(--orca-color-text-blue, #2563eb)",
               cursor: "pointer",
               flexShrink: 0,
               fontSize: "12px",
@@ -89,6 +127,16 @@ export function TaskListRow(props: TaskListRowProps) {
             flexShrink: 0,
           },
         }),
+    React.createElement("div", {
+      style: {
+        width: "3px",
+        height: "28px",
+        borderRadius: "99px",
+        background: statusColor,
+        opacity: props.contextOnly ? 0.62 : 0.95,
+        flexShrink: 0,
+      },
+    }),
     React.createElement(
       "button",
       {
@@ -102,10 +150,10 @@ export function TaskListRow(props: TaskListRowProps) {
         style: {
           width: "22px",
           height: "22px",
-          borderRadius: "4px",
-          border: "none",
-          background: "transparent",
-          color: resolveStatusColor(props.item.status, props.schema),
+          borderRadius: "6px",
+          border: "1px solid rgba(148, 163, 184, 0.34)",
+          background: "rgba(15, 23, 42, 0.03)",
+          color: statusColor,
           cursor: props.loading || props.updating ? "not-allowed" : "pointer",
           flexShrink: 0,
           display: "inline-flex",
@@ -116,7 +164,7 @@ export function TaskListRow(props: TaskListRowProps) {
           padding: 0,
         },
       },
-      resolveStatusGlyph(props.item.status, props.schema),
+      statusGlyph,
     ),
     React.createElement(
       "button",
@@ -136,7 +184,7 @@ export function TaskListRow(props: TaskListRowProps) {
           display: "flex",
           flexDirection: "column",
           alignItems: "flex-start",
-          gap: "2px",
+          gap: "3px",
         },
       },
       React.createElement(
@@ -148,6 +196,8 @@ export function TaskListRow(props: TaskListRowProps) {
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            fontWeight: props.contextOnly ? 500 : 560,
+            letterSpacing: "0.01em",
           },
         },
         props.item.text,
@@ -164,6 +214,7 @@ export function TaskListRow(props: TaskListRowProps) {
                 whiteSpace: "nowrap",
                 fontSize: "11px",
                 color: "var(--orca-color-text-2)",
+                letterSpacing: "0.01em",
               },
             },
             t("Parent: ${name}", { name: props.item.parentTaskName }),
@@ -175,10 +226,15 @@ export function TaskListRow(props: TaskListRowProps) {
           "div",
           {
             style: {
-              fontSize: "11px",
-              color: dueInfo.color,
+              fontSize: "10px",
+              color: dueBadgeStyle.color,
               fontWeight: dueInfo.strong ? 600 : 400,
               whiteSpace: "nowrap",
+              padding: "2px 8px",
+              borderRadius: "999px",
+              border: dueBadgeStyle.border,
+              background: dueBadgeStyle.background,
+              letterSpacing: "0.02em",
             },
           },
           dueInfo.text,
@@ -197,9 +253,11 @@ export function TaskListRow(props: TaskListRowProps) {
           width: "24px",
           height: "24px",
           padding: 0,
-          border: "none",
-          borderRadius: "4px",
-          background: "transparent",
+          border: "1px solid rgba(148, 163, 184, 0.3)",
+          borderRadius: "6px",
+          background: hovered || focused
+            ? "rgba(37, 99, 235, 0.08)"
+            : "rgba(15, 23, 42, 0.03)",
           color: "var(--orca-color-text-2)",
           cursor: "pointer",
           display: "inline-flex",
@@ -227,8 +285,13 @@ export function TaskListRow(props: TaskListRowProps) {
           width: "24px",
           height: "24px",
           padding: 0,
-          border: "none",
-          background: "transparent",
+          border: "1px solid rgba(148, 163, 184, 0.3)",
+          borderRadius: "6px",
+          background: props.item.star
+            ? "rgba(214, 158, 46, 0.14)"
+            : hovered || focused
+              ? "rgba(37, 99, 235, 0.08)"
+              : "rgba(15, 23, 42, 0.03)",
           color: props.item.star
             ? "var(--orca-color-text-yellow, #d69e2e)"
             : "var(--orca-color-text-2)",
@@ -242,6 +305,30 @@ export function TaskListRow(props: TaskListRowProps) {
       React.createElement(StarIcon, { filled: props.item.star }),
     ),
   )
+}
+
+function ensureTaskRowStyles() {
+  const styleId = "mlo-task-row-style"
+  if (document.getElementById(styleId) != null) {
+    return
+  }
+
+  const styleEl = document.createElement("style")
+  styleEl.id = styleId
+  styleEl.textContent = `
+@keyframes mloTaskRowEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.996);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+`
+
+  document.head.appendChild(styleEl)
 }
 
 function StarIcon(props: { filled: boolean }) {
@@ -293,15 +380,46 @@ function resolveStatusColor(status: string, schema: TaskSchemaDefinition): strin
   return "var(--orca-color-text-2)"
 }
 
+type DueInfoTone = "none" | "normal" | "soon" | "overdue"
+
+function resolveDueBadgeStyle(tone: DueInfoTone): {
+  color: string
+  border: string
+  background: string
+} {
+  if (tone === "overdue") {
+    return {
+      color: "var(--orca-color-text-red, #c53030)",
+      border: "1px solid rgba(197, 48, 48, 0.3)",
+      background: "rgba(197, 48, 48, 0.12)",
+    }
+  }
+
+  if (tone === "soon") {
+    return {
+      color: "var(--orca-color-text-yellow, #b7791f)",
+      border: "1px solid rgba(183, 121, 31, 0.3)",
+      background: "rgba(183, 121, 31, 0.12)",
+    }
+  }
+
+  return {
+    color: "var(--orca-color-text-2)",
+    border: "1px solid rgba(148, 163, 184, 0.3)",
+    background: "rgba(148, 163, 184, 0.08)",
+  }
+}
+
 function resolveDueInfo(
   endTime: Date | null,
   isChinese: boolean,
-): { text: string; color: string; strong: boolean } {
+): { text: string; color: string; strong: boolean; tone: DueInfoTone } {
   if (endTime == null || Number.isNaN(endTime.getTime())) {
     return {
       text: "",
       color: "var(--orca-color-text-2)",
       strong: false,
+      tone: "none",
     }
   }
 
@@ -316,6 +434,7 @@ function resolveDueInfo(
       text: t("Overdue ${days}d", { days: String(overdueDays) }),
       color: "var(--orca-color-text-red, #c53030)",
       strong: true,
+      tone: "overdue",
     }
   }
 
@@ -336,6 +455,7 @@ function resolveDueInfo(
       text: t("Today"),
       color: "var(--orca-color-text-yellow, #b7791f)",
       strong: true,
+      tone: "soon",
     }
   }
 
@@ -344,6 +464,7 @@ function resolveDueInfo(
       text: t("Tomorrow"),
       color: "var(--orca-color-text-yellow, #b7791f)",
       strong: true,
+      tone: "soon",
     }
   }
 
@@ -351,5 +472,6 @@ function resolveDueInfo(
     text: endTime.toLocaleDateString(isChinese ? "zh-CN" : undefined),
     color: "var(--orca-color-text-2)",
     strong: false,
+    tone: "normal",
   }
 }

@@ -42,6 +42,7 @@ export function setupNextActionsEntry(
     return React.createElement(TaskViewsPanel, {
       ...panelProps,
       schema,
+      pluginName,
     })
   }
 

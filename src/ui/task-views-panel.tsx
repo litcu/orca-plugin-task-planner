@@ -2,6 +2,7 @@ import type { DbId, PanelProps } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 import {
   getPreferredTaskViewsTab,
+  isTaskViewsTab,
   setPreferredTaskViewsTab,
   subscribePreferredTaskViewsTab,
   type TaskViewsTab,
@@ -13,12 +14,17 @@ import {
   toggleTaskStarInView,
   type AllTaskItem,
 } from "../core/all-tasks-engine"
+import {
+  getPluginSettings,
+  type MyLifeOrganizedSettings,
+} from "../core/plugin-settings"
 import { t } from "../libs/l10n"
 import { TaskPropertyPanelCard } from "./task-property-card"
 import { TaskListRow, type TaskListRowItem } from "./task-list-row"
 
 interface TaskViewsPanelProps extends PanelProps {
   schema: TaskSchemaDefinition
+  pluginName: string
 }
 
 interface TaskTreeNode {
@@ -33,6 +39,8 @@ interface VisibleTreeRow {
   hasChildren: boolean
   collapsed: boolean
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000
 
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
@@ -57,6 +65,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [nextActionItems, setNextActionItems] = React.useState<NextActionItem[]>([])
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
   const [selectedTaskId, setSelectedTaskId] = React.useState<DbId | null>(null)
+  const [panelSettings, setPanelSettings] = React.useState<MyLifeOrganizedSettings>(() =>
+    getPluginSettings(props.pluginName)
+  )
 
   const loadByTab = React.useCallback(
     async (
@@ -95,6 +106,20 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       setTab(nextTab)
     })
   }, [])
+
+  React.useEffect(() => {
+    const pluginState = orca.state.plugins[props.pluginName]
+    if (pluginState == null) {
+      setPanelSettings(getPluginSettings(props.pluginName))
+      return
+    }
+
+    const { subscribe } = window.Valtio
+    setPanelSettings(getPluginSettings(props.pluginName))
+    return subscribe(pluginState, () => {
+      setPanelSettings(getPluginSettings(props.pluginName))
+    })
+  }, [props.pluginName])
 
   React.useEffect(() => {
     void loadByTab(tab)
@@ -251,6 +276,42 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const filteredNextActionItems = React.useMemo(() => {
     return nextActionItems.filter(matchesItem)
   }, [matchesItem, nextActionItems])
+  const filteredStarredTaskItems = React.useMemo(() => {
+    return allTaskItems
+      .filter((item: AllTaskItem) => item.star)
+      .filter(matchesItem)
+  }, [allTaskItems, matchesItem])
+  const filteredDueSoonTaskItems = React.useMemo(() => {
+    const nowMs = Date.now()
+    const endMs = nowMs + panelSettings.dueSoonDays * DAY_MS
+    return allTaskItems
+      .filter((item: AllTaskItem) =>
+        isDueSoon(
+          item.endTime,
+          nowMs,
+          endMs,
+          panelSettings.dueSoonIncludeOverdue,
+        ))
+      .filter(matchesItem)
+      .sort(compareDueSoonItems)
+  }, [allTaskItems, matchesItem, panelSettings.dueSoonDays, panelSettings.dueSoonIncludeOverdue])
+  const isAllTasksTab = tab === "all-tasks"
+  const showParentTaskContext = tab === "next-actions"
+  const flatVisibleItems = React.useMemo((): TaskListRowItem[] => {
+    if (tab === "next-actions") {
+      return filteredNextActionItems
+    }
+
+    if (tab === "starred-tasks") {
+      return filteredStarredTaskItems
+    }
+
+    if (tab === "due-soon") {
+      return filteredDueSoonTaskItems
+    }
+
+    return []
+  }, [filteredDueSoonTaskItems, filteredNextActionItems, filteredStarredTaskItems, tab])
 
   const doneStatus = props.schema.statusChoices[2]
   const allTaskItemsForTree = React.useMemo(() => {
@@ -297,11 +358,40 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
   const viewName = tab === "next-actions"
     ? t("Active Tasks")
-    : t("All Tasks")
-
-  const visibleCount = tab === "next-actions"
-    ? filteredNextActionItems.length
-    : visibleAllTaskRows.length
+    : tab === "all-tasks"
+      ? t("All Tasks")
+      : tab === "starred-tasks"
+        ? t("Starred Tasks")
+        : t("Due Soon")
+  const visibleCount = isAllTasksTab
+    ? visibleAllTaskRows.length
+    : flatVisibleItems.length
+  const currentStatusLabel =
+    statusOptions.find((option: { value: string; label: string }) => option.value === statusFilter)?.label ??
+    t("All statuses")
+  const emptyText = tab === "next-actions"
+    ? t("No actionable tasks")
+    : tab === "all-tasks"
+      ? t("No matched tasks")
+      : tab === "starred-tasks"
+        ? t("No starred tasks")
+        : t("No due soon tasks")
+  const panelAccentColor = tab === "next-actions"
+    ? "var(--orca-color-text-blue, #2563eb)"
+    : tab === "all-tasks"
+      ? "var(--orca-color-text-yellow, #b7791f)"
+      : tab === "starred-tasks"
+        ? "var(--orca-color-text-yellow, #d69e2e)"
+        : "var(--orca-color-text-orange, #dd6b20)"
+  const panelAccentGlow = tab === "next-actions"
+    ? "rgba(37, 99, 235, 0.18)"
+    : tab === "all-tasks"
+      ? "rgba(183, 121, 31, 0.2)"
+      : tab === "starred-tasks"
+        ? "rgba(214, 158, 46, 0.18)"
+        : "rgba(221, 107, 32, 0.18)"
+  const hasKeywordFilter = normalizedKeyword !== ""
+  const countText = t("Showing ${count} items", { count: String(visibleCount) })
 
   return React.createElement(
     "div",
@@ -312,8 +402,12 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         minWidth: 0,
         display: "flex",
         flexDirection: "column",
+        gap: "10px",
         padding: "12px",
         boxSizing: "border-box",
+        background:
+          "radial-gradient(circle at 10% 0%, rgba(15, 23, 42, 0.05), transparent 46%), var(--orca-color-bg-1)",
+        fontFamily: "\"Avenir Next\", \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
       },
     },
     React.createElement(
@@ -321,58 +415,185 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       {
         style: {
           display: "flex",
-          alignItems: "center",
-          marginBottom: "8px",
+          flexDirection: "column",
+          gap: "10px",
+          border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+          borderRadius: "16px",
+          padding: "12px 14px",
+          background:
+            `radial-gradient(circle at 82% 20%, ${panelAccentGlow}, transparent 48%), ` +
+            "linear-gradient(150deg, var(--orca-color-bg-1), var(--orca-color-bg-2))",
+          boxShadow: "0 10px 24px rgba(15, 23, 42, 0.1)",
         },
       },
       React.createElement(
         "div",
         {
           style: {
-            fontSize: "16px",
-            fontWeight: 600,
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "10px",
+            flexWrap: "wrap",
           },
         },
-        viewName,
+        React.createElement(
+          "div",
+          {
+            style: {
+              minWidth: 0,
+            },
+          },
+          React.createElement(
+            "div",
+            {
+              style: {
+                fontSize: "17px",
+                fontWeight: 700,
+                letterSpacing: "0.01em",
+                color: "var(--orca-color-text-1, var(--orca-color-text))",
+              },
+            },
+            viewName,
+          ),
+          React.createElement(
+            "div",
+            {
+              style: {
+                marginTop: "4px",
+                fontSize: "12px",
+                color: "var(--orca-color-text-2)",
+              },
+            },
+            countText,
+          ),
+        ),
+        React.createElement(Segmented, {
+          selected: tab,
+          options: [
+            {
+              value: "next-actions",
+              label: t("Active Tasks"),
+            },
+            {
+              value: "all-tasks",
+              label: t("All Tasks"),
+            },
+            {
+              value: "starred-tasks",
+              label: t("Starred Tasks"),
+            },
+            {
+              value: "due-soon",
+              label: t("Due Soon"),
+            },
+          ],
+          onChange: (value: string) => {
+            if (isTaskViewsTab(value)) {
+              setPreferredTaskViewsTab(value)
+            }
+          },
+          style: {
+            minWidth: "300px",
+            flex: "1 1 340px",
+            maxWidth: "620px",
+          },
+        }),
+      ),
+      React.createElement(
+        "div",
+        {
+          style: {
+            width: "100%",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "8px",
+            alignItems: "center",
+          },
+        },
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "4px 10px",
+              borderRadius: "999px",
+              background: "rgba(15, 23, 42, 0.06)",
+              color: "var(--orca-color-text-2)",
+              fontSize: "11px",
+              letterSpacing: "0.02em",
+            },
+          },
+          React.createElement("span", null, t("Status")),
+          React.createElement(
+            "span",
+            {
+              style: {
+                color: panelAccentColor,
+                fontWeight: 600,
+              },
+            },
+            currentStatusLabel,
+          ),
+        ),
+        hasKeywordFilter
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "4px 10px",
+                  borderRadius: "999px",
+                  background: "rgba(15, 23, 42, 0.06)",
+                  color: "var(--orca-color-text-2)",
+                  fontSize: "11px",
+                  letterSpacing: "0.02em",
+                },
+              },
+              React.createElement("span", null, t("Filter by keyword")),
+              React.createElement(
+                "span",
+                {
+                  style: {
+                    color: "var(--orca-color-text-1, var(--orca-color-text))",
+                    fontWeight: 600,
+                    maxWidth: "180px",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  },
+                },
+                keyword.trim(),
+              ),
+            )
+          : null,
       ),
     ),
-    React.createElement(Segmented, {
-      selected: tab,
-      options: [
-        {
-          value: "next-actions",
-          label: t("Active Tasks"),
-        },
-        {
-          value: "all-tasks",
-          label: t("All Tasks"),
-        },
-      ],
-      onChange: (value: string) => {
-        if (value === "next-actions" || value === "all-tasks") {
-          setPreferredTaskViewsTab(value)
-        }
-      },
-      style: {
-        marginBottom: "8px",
-      },
-    }),
     React.createElement(
       "div",
       {
         style: {
           display: "flex",
           flexWrap: "wrap",
-          gap: "8px",
-          marginBottom: "8px",
+          gap: "10px",
           alignItems: "center",
+          border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+          borderRadius: "14px",
+          padding: "10px 12px",
+          background:
+            "linear-gradient(145deg, rgba(15, 23, 42, 0.03), var(--orca-color-bg-1) 45%, rgba(148, 163, 184, 0.1))",
         },
       },
       React.createElement(Select, {
         selected: [statusFilter],
         options: statusOptions,
         onChange: (selected: string[]) => setStatusFilter(selected[0] ?? "all"),
-        width: 150,
+        width: 170,
       }),
       React.createElement(Input, {
         value: keyword,
@@ -386,7 +607,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           flex: 1,
         },
       }),
-      tab === "all-tasks"
+      isAllTasksTab
         ? React.createElement(
             "label",
             {
@@ -395,8 +616,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 alignItems: "center",
                 gap: "6px",
                 fontSize: "12px",
-                color: "var(--orca-color-text-2)",
+                color: "var(--orca-color-text)",
                 whiteSpace: "nowrap",
+                padding: "0 4px",
               },
             },
             React.createElement(Switch, {
@@ -408,7 +630,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             t("Show completed tasks"),
           )
         : null,
-      tab === "all-tasks"
+      isAllTasksTab
         ? React.createElement(
             Button,
             {
@@ -421,6 +643,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 alignItems: "center",
                 gap: "4px",
                 whiteSpace: "nowrap",
+                borderRadius: "8px",
               },
             },
             React.createElement("i", {
@@ -437,17 +660,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             ),
           )
         : null,
-      React.createElement(
-        "div",
-        {
-          style: {
-            fontSize: "12px",
-            color: "var(--orca-color-text-2)",
-            marginLeft: "auto",
-          },
-        },
-        t("Showing ${count} items", { count: String(visibleCount) }),
-      ),
+      React.createElement("div", { style: { marginLeft: "auto" } }),
     ),
     React.createElement(
       "div",
@@ -460,7 +673,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             selectedTaskId == null
               ? "minmax(0, 1fr)"
               : "minmax(0, 1fr) minmax(360px, 460px)",
-          gap: "10px",
+          gap: "12px",
           alignItems: "stretch",
         },
       },
@@ -472,6 +685,13 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
+            border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+            borderRadius: "14px",
+            background:
+              "radial-gradient(circle at 86% 8%, rgba(37, 99, 235, 0.08), transparent 45%), var(--orca-color-bg-1)",
+            padding: "10px",
+            boxSizing: "border-box",
+            overflow: "hidden",
           },
         },
         errorText !== ""
@@ -480,8 +700,12 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               {
                 style: {
                   color: "var(--orca-color-text-red)",
+                  border: "1px solid rgba(197, 48, 48, 0.25)",
+                  background: "rgba(197, 48, 48, 0.08)",
+                  borderRadius: "10px",
                   fontSize: "12px",
                   marginBottom: "8px",
+                  padding: "7px 10px",
                 },
               },
               errorText,
@@ -494,7 +718,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 style: {
                   color: "var(--orca-color-text-2)",
                   fontSize: "13px",
-                  padding: "4px 0",
+                  padding: "10px",
+                  borderRadius: "10px",
+                  background: "rgba(148, 163, 184, 0.08)",
                 },
               },
               t("Loading..."),
@@ -507,12 +733,12 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 style: {
                   color: "var(--orca-color-text-2)",
                   fontSize: "13px",
-                  padding: "4px 0",
+                  padding: "10px",
+                  borderRadius: "10px",
+                  background: "rgba(148, 163, 184, 0.08)",
                 },
               },
-              tab === "next-actions"
-                ? t("No actionable tasks")
-                : t("No matched tasks"),
+              emptyText,
             )
           : null,
         !loading && visibleCount > 0
@@ -520,42 +746,25 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               "div",
               {
                 style: {
+                  flex: 1,
                   overflow: "auto",
                   width: "100%",
                   minWidth: 0,
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "stretch",
-                  gap: "6px",
+                  gap: "8px",
+                  paddingRight: "2px",
                 },
               },
-              tab === "next-actions"
-                ? filteredNextActionItems.map((item: NextActionItem) => {
-                    return React.createElement(TaskListRow, {
-                      key: item.blockId,
-                      item,
-                      schema: props.schema,
-                      isChinese,
-                      depth: 0,
-                      contextOnly: false,
-                      loading,
-                      updating: updatingIds.has(item.blockId),
-                      showCollapseToggle: false,
-                      collapsed: false,
-                      showParentTaskContext: true,
-                      starUpdating: starringIds.has(item.blockId),
-                      onToggleStatus: () => toggleTaskStatus(item),
-                      onNavigate: () => navigateToTaskParent(item),
-                      onToggleStar: () => toggleTaskStar(item),
-                      onOpen: () => openTaskProperty(item.blockId),
-                    })
-                  })
-                : visibleAllTaskRows.map((row: VisibleTreeRow) => {
+              isAllTasksTab
+                ? visibleAllTaskRows.map((row: VisibleTreeRow, index: number) => {
                     return React.createElement(TaskListRow, {
                       key: row.node.item.blockId,
                       item: row.node.item,
                       schema: props.schema,
                       isChinese,
+                      rowIndex: index,
                       depth: row.depth,
                       contextOnly: row.node.contextOnly,
                       loading,
@@ -571,6 +780,27 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       onNavigate: () => navigateToTaskParent(row.node.item),
                       onToggleStar: () => toggleTaskStar(row.node.item),
                       onOpen: () => openTaskProperty(row.node.item.blockId),
+                    })
+                  })
+                : flatVisibleItems.map((item: TaskListRowItem, index: number) => {
+                    return React.createElement(TaskListRow, {
+                      key: item.blockId,
+                      item,
+                      schema: props.schema,
+                      isChinese,
+                      rowIndex: index,
+                      depth: 0,
+                      contextOnly: false,
+                      loading,
+                      updating: updatingIds.has(item.blockId),
+                      showCollapseToggle: false,
+                      collapsed: false,
+                      showParentTaskContext,
+                      starUpdating: starringIds.has(item.blockId),
+                      onToggleStatus: () => toggleTaskStatus(item),
+                      onNavigate: () => navigateToTaskParent(item),
+                      onToggleStar: () => toggleTaskStar(item),
+                      onOpen: () => openTaskProperty(item.blockId),
                     })
                   }),
             )
@@ -681,6 +911,38 @@ function filterTreeWithContext(
   return nodes
     .map(filterNode)
     .filter((item): item is TaskTreeNode => item != null)
+}
+
+function isDueSoon(
+  endTime: Date | null,
+  startMs: number,
+  endMs: number,
+  includeOverdue: boolean,
+): boolean {
+  if (endTime == null) {
+    return false
+  }
+
+  const dueMs = endTime.getTime()
+  if (Number.isNaN(dueMs)) {
+    return false
+  }
+
+  if (dueMs < startMs) {
+    return includeOverdue
+  }
+
+  return dueMs <= endMs
+}
+
+function compareDueSoonItems(left: AllTaskItem, right: AllTaskItem): number {
+  const leftDue = left.endTime?.getTime() ?? Number.MAX_SAFE_INTEGER
+  const rightDue = right.endTime?.getTime() ?? Number.MAX_SAFE_INTEGER
+  if (leftDue !== rightDue) {
+    return leftDue - rightDue
+  }
+
+  return left.blockId - right.blockId
 }
 
 function flattenVisibleTree(
