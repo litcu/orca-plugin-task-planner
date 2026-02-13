@@ -564,18 +564,61 @@ function TaskPropertyPopupView(props: {
   }, [currentSnapshot, handleSave, lastFailedSnapshot, lastSavedSnapshot, taskRef])
 
   // Use a consistent 2-column row layout: label + control.
-  const rowLabelWidth = isChinese ? "88px" : "110px"
+  const rowLabelWidth = isChinese ? "92px" : "114px"
   const rowStyle = {
     display: "grid",
     gridTemplateColumns: `${rowLabelWidth} minmax(0, 1fr)`,
-    columnGap: "10px",
+    columnGap: "12px",
     alignItems: "center",
-    marginBottom: "8px",
+    marginBottom: "10px",
   }
   const rowLabelStyle = {
     fontSize: "12px",
+    fontWeight: 500,
     color: "var(--orca-color-text-2)",
     lineHeight: "30px",
+    letterSpacing: "0.01em",
+  }
+  const readOnlyFieldStyle = {
+    minHeight: "30px",
+    display: "flex",
+    alignItems: "center",
+    padding: "0 10px",
+    border: "1px solid var(--orca-color-border-1)",
+    borderRadius: "8px",
+    background: "var(--orca-color-bg-1)",
+    color: "var(--orca-color-text-1)",
+    fontSize: "12px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  }
+  const hintTextStyle = {
+    fontSize: "11px",
+    color: "var(--orca-color-text-2)",
+    whiteSpace: "nowrap",
+  }
+  const sectionStyle = {
+    padding: "12px 12px 2px",
+    marginBottom: "10px",
+    borderRadius: "10px",
+    border: "1px solid var(--orca-color-border-1)",
+    background: "var(--orca-color-bg-2)",
+  }
+  const inlineTimeFieldLayoutStyle = {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto auto",
+    gap: "6px",
+    alignItems: "center",
+  }
+  const inlineDualControlLayoutStyle = {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "8px",
+    alignItems: "center",
+  }
+  const renderSection = (...children: unknown[]) => {
+    return React.createElement("div", { style: sectionStyle }, ...children)
   }
 
   const renderFormRow = (label: string, control: unknown) => {
@@ -598,29 +641,14 @@ function TaskPropertyPopupView(props: {
       React.createElement(
         "div",
         {
-          style: {
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) auto auto",
-            gap: "6px",
-            alignItems: "center",
-          },
+          style: inlineTimeFieldLayoutStyle,
         },
         React.createElement(
           "div",
           {
             style: {
-              minHeight: "30px",
-              display: "flex",
-              alignItems: "center",
-              padding: "0 10px",
-              border: "1px solid var(--orca-color-border-1)",
-              borderRadius: "6px",
-              background: "var(--orca-color-bg-2)",
-              color: "var(--orca-color-text-1)",
-              fontSize: "12px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              ...readOnlyFieldStyle,
+              fontVariantNumeric: "tabular-nums",
             },
           },
           value == null ? (t("Not set")) : value.toLocaleString(),
@@ -629,7 +657,7 @@ function TaskPropertyPopupView(props: {
           Button,
           {
             variant: "outline",
-            style: { minWidth: "60px" },
+            style: { minWidth: "62px", height: "30px" },
             onClick: (event: MouseEvent) => {
               dateAnchorRef.current = event.currentTarget as HTMLButtonElement
               setEditingDateField(key)
@@ -641,7 +669,7 @@ function TaskPropertyPopupView(props: {
           Button,
           {
             variant: "plain",
-            style: { minWidth: "60px" },
+            style: { minWidth: "62px", height: "30px" },
             onClick: () => setValue(null),
           },
           t("Clear"),
@@ -675,7 +703,11 @@ function TaskPropertyPopupView(props: {
           max: 100,
           step: 1,
           value,
-          style: { width: "100%", margin: 0 },
+          style: {
+            width: "100%",
+            margin: 0,
+            accentColor: "var(--orca-color-text-blue, #2b6cb0)",
+          },
           onChange: (event: Event) => {
             const next = Number((event.target as HTMLInputElement).value)
             if (Number.isNaN(next)) {
@@ -717,11 +749,12 @@ function TaskPropertyPopupView(props: {
   const activationBadgeStyle = {
     display: "inline-flex",
     alignItems: "center",
-    minHeight: "22px",
-    padding: "0 8px",
+    minHeight: "24px",
+    padding: "0 10px",
     borderRadius: "999px",
     fontSize: "11px",
     fontWeight: 600,
+    letterSpacing: "0.01em",
     border: "1px solid var(--orca-color-border-1)",
     color:
       activationLoading || activationInfo == null
@@ -742,7 +775,7 @@ function TaskPropertyPopupView(props: {
       visible: props.visible,
       blurred: false,
       style: {
-        background: "rgba(0, 0, 0, 0.30)",
+        background: "rgba(0, 0, 0, 0.38)",
         backdropFilter: "none",
       },
       canClose: true,
@@ -762,360 +795,340 @@ function TaskPropertyPopupView(props: {
       React.createElement(
         "div",
         {
-        style: {
-          width: "calc(100vw - 40px)",
-          maxWidth: "520px",
-          minWidth: 0,
-          maxHeight: "calc(100vh - 56px)",
-          overflow: "auto",
-          padding: "16px",
-          boxSizing: "border-box",
-          background: "var(--orca-color-bg-1)",
-          border: "1px solid var(--orca-color-border-1)",
-          borderRadius: "10px",
-        },
-        onClick: (event: MouseEvent) => event.stopPropagation(),
-      },
-      React.createElement(
-        "div",
-        {
           style: {
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            marginBottom: "10px",
+            width: "calc(100vw - 40px)",
+            maxWidth: "560px",
+            minWidth: 0,
+            maxHeight: "calc(100vh - 48px)",
+            overflow: "auto",
+            padding: "18px",
+            boxSizing: "border-box",
+            background: "var(--orca-color-bg-1)",
+            border: "1px solid var(--orca-color-border-1)",
+            borderRadius: "14px",
+            boxShadow: "0 18px 42px rgba(10, 18, 30, 0.26)",
           },
+          onClick: (event: MouseEvent) => event.stopPropagation(),
         },
         React.createElement(
           "div",
           {
             style: {
-              fontSize: "17px",
-              fontWeight: 600,
-            },
-          },
-          labels.title,
-        ),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            onClick: () => setStarValue((prev: boolean) => !prev),
-            title: starValue ? t("Starred") : t("Not starred"),
-            style: {
-              width: "24px",
-              height: "24px",
-              padding: 0,
-              border: "none",
-              background: "transparent",
-              color: starValue
-                ? "var(--orca-color-text-yellow, #d69e2e)"
-                : "var(--orca-color-text-2)",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-            },
-          },
-          React.createElement(StarIcon, { filled: starValue }),
-        ),
-      ),
-      renderFormRow(
-        t("Activation"),
-        React.createElement("span", { style: activationBadgeStyle }, activationBadgeText),
-      ),
-      renderFormRow(
-        t("Task name"),
-        React.createElement(
-          "div",
-          {
-            style: {
-              minHeight: "30px",
               display: "flex",
               alignItems: "center",
-              padding: "0 10px",
-              border: "1px solid var(--orca-color-border-1)",
-              borderRadius: "6px",
-              background: "var(--orca-color-bg-2)",
-              color: "var(--orca-color-text-1)",
-              fontSize: "12px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              justifyContent: "space-between",
+              gap: "8px",
+              marginBottom: "12px",
+              paddingBottom: "10px",
+              borderBottom: "1px solid var(--orca-color-border-1)",
             },
           },
-          taskName,
-        ),
-      ),
-      renderFormRow(
-        labels.status,
-        React.createElement(Select, {
-          selected: [statusValue],
-          options: statusOptions,
-          onChange: (selected: string[]) => {
-            setStatusValue(selected[0] ?? props.schema.statusChoices[0])
-          },
-          menuContainer: popupMenuContainerRef,
-          width: "100%",
-        }),
-      ),
-      renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
-      renderTimeField("end", labels.endTime, endTimeValue, setEndTimeValue),
-      renderScoreField(
-        labels.importance,
-        importanceValue,
-        importanceText,
-        setImportanceValue,
-        setImportanceText,
-      ),
-      renderScoreField(
-        labels.urgency,
-        urgencyValue,
-        urgencyText,
-        setUrgencyValue,
-        setUrgencyText,
-      ),
-      renderScoreField(
-        labels.effort,
-        effortValue,
-        effortText,
-        setEffortValue,
-        setEffortText,
-      ),
-      renderFormRow(
-        labels.repeatRule,
-        React.createElement(Select, {
-          selected: [repeatModeValue],
-          options: repeatModeOptions,
-          onChange: (selected: string[]) => {
-            updateRepeatEditor({
-              mode: (selected[0] ?? "none") as RepeatMode,
-            })
-          },
-          menuContainer: popupMenuContainerRef,
-          width: "100%",
-        }),
-      ),
-      repeatModeValue !== "none"
-        ? renderFormRow(
-            t("Repeat every"),
+          React.createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              },
+            },
             React.createElement(
               "div",
               {
                 style: {
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) auto",
-                  gap: "8px",
-                  alignItems: "center",
+                  fontSize: "17px",
+                  fontWeight: 600,
+                  lineHeight: 1.2,
                 },
               },
-              React.createElement(Input, {
-                value: repeatIntervalText,
-                placeholder: "1",
-                onChange: (event: Event) => {
-                  updateRepeatEditor({
-                    intervalText: (event.target as HTMLInputElement).value,
-                  })
-                },
-              }),
-              React.createElement(
-                "span",
-                {
-                  style: {
-                    fontSize: "11px",
-                    color: "var(--orca-color-text-2)",
-                    whiteSpace: "nowrap",
-                  },
-                },
-                repeatModeValue === "day"
-                  ? t("day(s)")
-                  : repeatModeValue === "week"
-                    ? t("week(s)")
-                    : t("month(s)"),
-              ),
+              labels.title,
             ),
-          )
-        : null,
-      repeatModeValue === "week"
-        ? renderFormRow(
-            t("Repeat weekday"),
+            React.createElement("span", { style: activationBadgeStyle }, activationBadgeText),
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => setStarValue((prev: boolean) => !prev),
+              title: starValue ? t("Starred") : t("Not starred"),
+              style: {
+                width: "26px",
+                height: "26px",
+                padding: 0,
+                border: "1px solid var(--orca-color-border-1)",
+                borderRadius: "7px",
+                background: "var(--orca-color-bg-2)",
+                color: starValue
+                  ? "var(--orca-color-text-yellow, #d69e2e)"
+                  : "var(--orca-color-text-2)",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+              },
+            },
+            React.createElement(StarIcon, { filled: starValue }),
+          ),
+        ),
+        renderSection(
+          renderFormRow(
+            t("Task name"),
+            React.createElement("div", { style: readOnlyFieldStyle }, taskName),
+          ),
+          renderFormRow(
+            labels.status,
             React.createElement(Select, {
-              selected: [repeatWeekdayValue],
-              options: repeatWeekdayOptions,
+              selected: [statusValue],
+              options: statusOptions,
+              onChange: (selected: string[]) => {
+                setStatusValue(selected[0] ?? props.schema.statusChoices[0])
+              },
+              menuContainer: popupMenuContainerRef,
+              width: "100%",
+            }),
+          ),
+        ),
+        renderSection(
+          renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
+          renderTimeField("end", labels.endTime, endTimeValue, setEndTimeValue),
+          renderScoreField(
+            labels.importance,
+            importanceValue,
+            importanceText,
+            setImportanceValue,
+            setImportanceText,
+          ),
+          renderScoreField(
+            labels.urgency,
+            urgencyValue,
+            urgencyText,
+            setUrgencyValue,
+            setUrgencyText,
+          ),
+          renderScoreField(
+            labels.effort,
+            effortValue,
+            effortText,
+            setEffortValue,
+            setEffortText,
+          ),
+        ),
+        renderSection(
+          renderFormRow(
+            labels.repeatRule,
+            React.createElement(Select, {
+              selected: [repeatModeValue],
+              options: repeatModeOptions,
               onChange: (selected: string[]) => {
                 updateRepeatEditor({
-                  weekdayValue: selected[0] ?? "",
+                  mode: (selected[0] ?? "none") as RepeatMode,
                 })
               },
               menuContainer: popupMenuContainerRef,
               width: "100%",
             }),
-          )
-        : null,
-      repeatModeValue !== "none"
-        ? renderFormRow(
-            t("Repeat max count"),
-            React.createElement(Input, {
-              value: repeatMaxCountText,
-              placeholder: t("No limit"),
-              onChange: (event: Event) => {
-                updateRepeatEditor({
-                  maxCountText: (event.target as HTMLInputElement).value,
-                })
-              },
-            }),
-          )
-        : null,
-      repeatModeValue !== "none"
-        ? renderTimeField(
-            "repeatEnd",
-            t("Repeat ends at"),
-            repeatEndAtValue,
-            (next: Date | null) => {
-              updateRepeatEditor({
-                endAtValue: next,
-              })
-            },
-          )
-        : null,
-      !repeatRuleParseable && repeatRuleText.trim() !== ""
-        ? renderFormRow(
-            t("Repeat rule (raw)"),
-            React.createElement(Input, {
-              value: repeatRuleText,
-              onChange: (event: Event) => {
-                setRepeatRuleText((event.target as HTMLInputElement).value)
-                setRepeatRuleParseable(false)
-              },
-            }),
-          )
-        : null,
-      !repeatRuleParseable && repeatRuleText.trim() !== ""
-        ? React.createElement(
-            "div",
-            {
-              style: {
-                color: "var(--orca-color-text-2)",
-                marginBottom: "8px",
-                fontSize: "11px",
-              },
-            },
-            t("Legacy repeat rule detected. Change options above to replace it."),
-          )
-        : null,
-      renderFormRow(
-        labels.dependsOn,
-        React.createElement(BlockSelect, {
-          mode: "block",
-          scope: props.schema.tagAlias,
-          selected: dependsOnValues,
-          multiSelection: true,
-          width: "100%",
-          menuContainer: popupMenuContainerRef,
-          onChange: (selected: string[]) => {
-            const normalized = selected
-              .map((item) => Number(item))
-              .filter((item) => !Number.isNaN(item))
-              .map((item) => getMirrorId(item))
-              .filter((item, index, all) => all.indexOf(item) === index)
-
-            setDependsOnValues(normalized)
-            if (normalized.length === 0) {
-              setDependsModeValue("ALL")
-              setDependencyDelayText("")
-            }
-          },
-        }),
-      ),
-      // Show dependency mode/delay only when dependency targets exist.
-      hasDependencies
-        ? React.createElement(
-            React.Fragment,
-            null,
-            renderFormRow(
-              labels.dependsMode,
-              React.createElement(Select, {
-                selected: [dependsModeValue],
-                options: dependsModeOptions,
-                onChange: (selected: string[]) => {
-                  setDependsModeValue(selected[0] ?? "ALL")
+          ),
+          repeatModeValue !== "none"
+            ? renderFormRow(
+                t("Repeat every"),
+                React.createElement(
+                  "div",
+                  {
+                    style: inlineDualControlLayoutStyle,
+                  },
+                  React.createElement(Input, {
+                    value: repeatIntervalText,
+                    placeholder: "1",
+                    onChange: (event: Event) => {
+                      updateRepeatEditor({
+                        intervalText: (event.target as HTMLInputElement).value,
+                      })
+                    },
+                  }),
+                  React.createElement(
+                    "span",
+                    {
+                      style: hintTextStyle,
+                    },
+                    repeatModeValue === "day"
+                      ? t("day(s)")
+                      : repeatModeValue === "week"
+                        ? t("week(s)")
+                        : t("month(s)"),
+                  ),
+                ),
+              )
+            : null,
+          repeatModeValue === "week"
+            ? renderFormRow(
+                t("Repeat weekday"),
+                React.createElement(Select, {
+                  selected: [repeatWeekdayValue],
+                  options: repeatWeekdayOptions,
+                  onChange: (selected: string[]) => {
+                    updateRepeatEditor({
+                      weekdayValue: selected[0] ?? "",
+                    })
+                  },
+                  menuContainer: popupMenuContainerRef,
+                  width: "100%",
+                }),
+              )
+            : null,
+          repeatModeValue !== "none"
+            ? renderFormRow(
+                t("Repeat max count"),
+                React.createElement(Input, {
+                  value: repeatMaxCountText,
+                  placeholder: t("No limit"),
+                  onChange: (event: Event) => {
+                    updateRepeatEditor({
+                      maxCountText: (event.target as HTMLInputElement).value,
+                    })
+                  },
+                }),
+              )
+            : null,
+          repeatModeValue !== "none"
+            ? renderTimeField(
+                "repeatEnd",
+                t("Repeat ends at"),
+                repeatEndAtValue,
+                (next: Date | null) => {
+                  updateRepeatEditor({
+                    endAtValue: next,
+                  })
                 },
-                menuContainer: popupMenuContainerRef,
-                width: "100%",
-              }),
-            ),
-            renderFormRow(
-              labels.dependencyDelay,
-              React.createElement(
+              )
+            : null,
+          !repeatRuleParseable && repeatRuleText.trim() !== ""
+            ? renderFormRow(
+                t("Repeat rule (raw)"),
+                React.createElement(Input, {
+                  value: repeatRuleText,
+                  onChange: (event: Event) => {
+                    setRepeatRuleText((event.target as HTMLInputElement).value)
+                    setRepeatRuleParseable(false)
+                  },
+                }),
+              )
+            : null,
+          !repeatRuleParseable && repeatRuleText.trim() !== ""
+            ? React.createElement(
                 "div",
                 {
                   style: {
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0, 1fr) auto",
-                    gap: "8px",
-                    alignItems: "center",
+                    ...hintTextStyle,
+                    marginBottom: "10px",
                   },
                 },
-                React.createElement(Input, {
-                  value: dependencyDelayText,
-                  placeholder: t("e.g. 24 hours"),
-                  onChange: (event: Event) => {
-                    setDependencyDelayText((event.target as HTMLInputElement).value)
-                  },
-                }),
-                React.createElement(
-                  "span",
-                  {
-                    style: {
-                      fontSize: "11px",
-                      color: "var(--orca-color-text-2)",
-                      whiteSpace: "nowrap",
-                    },
-                  },
-                  t("Hours"),
-                ),
-              ),
-            ),
-          )
-        : null,
-      editingDateField != null
-        ? React.createElement(DatePicker, {
-            mode: "datetime",
-            visible: true,
-            value: selectedDateValue ?? new Date(),
-            refElement: dateAnchorRef,
-            menuContainer: popupMenuContainerRef,
-            onChange: (next: Date | [Date, Date]) => {
-              if (!(next instanceof Date)) {
-                return
-              }
-              if (editingDateField === "start") {
-                setStartTimeValue(next)
-              } else if (editingDateField === "end") {
-                setEndTimeValue(next)
-              } else {
-                updateRepeatEditor({ endAtValue: next })
-              }
-              setEditingDateField(null)
-            },
-            onClose: () => setEditingDateField(null),
-          })
-        : null,
-      errorText.trim() !== ""
-        ? React.createElement(
-            "div",
-            {
-              style: {
-                color: "var(--orca-color-text-red)",
-                marginBottom: "10px",
-                fontSize: "12px",
+                t("Legacy repeat rule detected. Change options above to replace it."),
+              )
+            : null,
+        ),
+        renderSection(
+          renderFormRow(
+            labels.dependsOn,
+            React.createElement(BlockSelect, {
+              mode: "block",
+              scope: props.schema.tagAlias,
+              selected: dependsOnValues,
+              multiSelection: true,
+              width: "100%",
+              menuContainer: popupMenuContainerRef,
+              onChange: (selected: string[]) => {
+                const normalized = selected
+                  .map((item) => Number(item))
+                  .filter((item) => !Number.isNaN(item))
+                  .map((item) => getMirrorId(item))
+                  .filter((item, index, all) => all.indexOf(item) === index)
+
+                setDependsOnValues(normalized)
+                if (normalized.length === 0) {
+                  setDependsModeValue("ALL")
+                  setDependencyDelayText("")
+                }
               },
-            },
-            errorText,
-          )
-        : null,
-    ),
-  )
+            }),
+          ),
+          hasDependencies
+            ? renderFormRow(
+                labels.dependsMode,
+                React.createElement(Select, {
+                  selected: [dependsModeValue],
+                  options: dependsModeOptions,
+                  onChange: (selected: string[]) => {
+                    setDependsModeValue(selected[0] ?? "ALL")
+                  },
+                  menuContainer: popupMenuContainerRef,
+                  width: "100%",
+                }),
+              )
+            : null,
+          hasDependencies
+            ? renderFormRow(
+                labels.dependencyDelay,
+                React.createElement(
+                  "div",
+                  {
+                    style: inlineDualControlLayoutStyle,
+                  },
+                  React.createElement(Input, {
+                    value: dependencyDelayText,
+                    placeholder: t("e.g. 24 hours"),
+                    onChange: (event: Event) => {
+                      setDependencyDelayText((event.target as HTMLInputElement).value)
+                    },
+                  }),
+                  React.createElement(
+                    "span",
+                    {
+                      style: hintTextStyle,
+                    },
+                    t("Hours"),
+                  ),
+                ),
+              )
+            : null,
+        ),
+        editingDateField != null
+          ? React.createElement(DatePicker, {
+              mode: "datetime",
+              visible: true,
+              value: selectedDateValue ?? new Date(),
+              refElement: dateAnchorRef,
+              menuContainer: popupMenuContainerRef,
+              onChange: (next: Date | [Date, Date]) => {
+                if (!(next instanceof Date)) {
+                  return
+                }
+                if (editingDateField === "start") {
+                  setStartTimeValue(next)
+                } else if (editingDateField === "end") {
+                  setEndTimeValue(next)
+                } else {
+                  updateRepeatEditor({ endAtValue: next })
+                }
+                setEditingDateField(null)
+              },
+              onClose: () => setEditingDateField(null),
+            })
+          : null,
+        errorText.trim() !== ""
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  color: "var(--orca-color-text-red)",
+                  marginTop: "8px",
+                  fontSize: "12px",
+                },
+              },
+              errorText,
+            )
+          : null,
+      ),
+    )
 }
 
 interface TaskEditorSnapshotInput {

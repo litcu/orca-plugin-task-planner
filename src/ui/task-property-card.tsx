@@ -469,18 +469,61 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     }
   }, [currentSnapshot, lastFailedSnapshot, lastSavedSnapshot, saving, taskRef])
 
-  const rowLabelWidth = isChinese ? "88px" : "110px"
+  const rowLabelWidth = isChinese ? "92px" : "114px"
   const rowStyle = {
     display: "grid",
     gridTemplateColumns: `${rowLabelWidth} minmax(0, 1fr)`,
-    columnGap: "10px",
+    columnGap: "12px",
     alignItems: "center",
-    marginBottom: "8px",
+    marginBottom: "10px",
   }
   const rowLabelStyle = {
     fontSize: "12px",
+    fontWeight: 500,
     color: "var(--orca-color-text-2)",
     lineHeight: "30px",
+    letterSpacing: "0.01em",
+  }
+  const readOnlyFieldStyle = {
+    minHeight: "30px",
+    display: "flex",
+    alignItems: "center",
+    padding: "0 10px",
+    border: "1px solid var(--orca-color-border-1)",
+    borderRadius: "8px",
+    background: "var(--orca-color-bg-1)",
+    color: "var(--orca-color-text-1)",
+    fontSize: "12px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  }
+  const hintTextStyle = {
+    fontSize: "11px",
+    color: "var(--orca-color-text-2)",
+    whiteSpace: "nowrap",
+  }
+  const sectionStyle = {
+    padding: "12px 12px 2px",
+    marginBottom: "10px",
+    borderRadius: "10px",
+    border: "1px solid var(--orca-color-border-1)",
+    background: "var(--orca-color-bg-2)",
+  }
+  const inlineTimeFieldLayoutStyle = {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto auto",
+    gap: "6px",
+    alignItems: "center",
+  }
+  const inlineDualControlLayoutStyle = {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "8px",
+    alignItems: "center",
+  }
+  const renderSection = (...children: unknown[]) => {
+    return React.createElement("div", { style: sectionStyle }, ...children)
   }
   const renderFormRow = (label: string, control: unknown) => {
     return React.createElement(
@@ -502,29 +545,14 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       React.createElement(
         "div",
         {
-          style: {
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) auto auto",
-            gap: "6px",
-            alignItems: "center",
-          },
+          style: inlineTimeFieldLayoutStyle,
         },
         React.createElement(
           "div",
           {
             style: {
-              minHeight: "30px",
-              display: "flex",
-              alignItems: "center",
-              padding: "0 10px",
-              border: "1px solid var(--orca-color-border-1)",
-              borderRadius: "6px",
-              background: "var(--orca-color-bg-2)",
-              color: "var(--orca-color-text-1)",
-              fontSize: "12px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              ...readOnlyFieldStyle,
+              fontVariantNumeric: "tabular-nums",
             },
           },
           value == null ? (t("Not set")) : value.toLocaleString(),
@@ -533,7 +561,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
           Button,
           {
             variant: "outline",
-            style: { minWidth: "60px" },
+            style: { minWidth: "62px", height: "30px" },
             onClick: (event: MouseEvent) => {
               dateAnchorRef.current = event.currentTarget as HTMLButtonElement
               setEditingDateField(key)
@@ -545,7 +573,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
           Button,
           {
             variant: "plain",
-            style: { minWidth: "60px" },
+            style: { minWidth: "62px", height: "30px" },
             onClick: () => setValue(null),
           },
           t("Clear"),
@@ -579,7 +607,11 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
           max: 100,
           step: 1,
           value,
-          style: { width: "100%", margin: 0 },
+          style: {
+            width: "100%",
+            margin: 0,
+            accentColor: "var(--orca-color-text-blue, #2b6cb0)",
+          },
           onChange: (event: Event) => {
             const next = Number((event.target as HTMLInputElement).value)
             if (Number.isNaN(next)) {
@@ -621,11 +653,12 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   const activationBadgeStyle = {
     display: "inline-flex",
     alignItems: "center",
-    minHeight: "22px",
-    padding: "0 8px",
+    minHeight: "24px",
+    padding: "0 10px",
     borderRadius: "999px",
     fontSize: "11px",
     fontWeight: 600,
+    letterSpacing: "0.01em",
     border: "1px solid var(--orca-color-border-1)",
     color:
       activationLoading || activationInfo == null
@@ -647,10 +680,10 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         minHeight: 0,
         height: "100%",
         overflow: "auto",
-        border: "1px solid var(--orca-color-border)",
-        borderRadius: "8px",
-        background: "var(--orca-color-bg-2)",
-        padding: "10px",
+        border: "1px solid var(--orca-color-border-1)",
+        borderRadius: "12px",
+        background: "var(--orca-color-bg-1)",
+        padding: "12px",
         boxSizing: "border-box",
       },
     },
@@ -662,7 +695,9 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: "8px",
-          marginBottom: "10px",
+          marginBottom: "12px",
+          paddingBottom: "10px",
+          borderBottom: "1px solid var(--orca-color-border-1)",
         },
       },
       React.createElement(
@@ -678,11 +713,23 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
           "div",
           {
             style: {
-              fontSize: "14px",
-              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
             },
           },
-          labels.title,
+          React.createElement(
+            "div",
+            {
+              style: {
+                fontSize: "15px",
+                fontWeight: 600,
+                lineHeight: 1.2,
+              },
+            },
+            labels.title,
+          ),
+          React.createElement("span", { style: activationBadgeStyle }, activationBadgeText),
         ),
         React.createElement(
           "button",
@@ -691,11 +738,12 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
             onClick: () => setStarValue((prev: boolean) => !prev),
             title: starValue ? t("Starred") : t("Not starred"),
             style: {
-              width: "24px",
-              height: "24px",
+              width: "26px",
+              height: "26px",
               padding: 0,
-              border: "none",
-              background: "transparent",
+              border: "1px solid var(--orca-color-border-1)",
+              borderRadius: "7px",
+              background: "var(--orca-color-bg-2)",
               color: starValue
                 ? "var(--orca-color-text-yellow, #d69e2e)"
                 : "var(--orca-color-text-2)",
@@ -719,221 +767,191 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
           className: "ti ti-x",
           style: { fontSize: "16px" },
         }),
+        ),
       ),
-    ),
-    renderFormRow(
-      t("Activation"),
-      React.createElement("span", { style: activationBadgeStyle }, activationBadgeText),
-    ),
-    renderFormRow(
-      t("Task name"),
-      React.createElement(
-        "div",
-        {
-          style: {
-            minHeight: "30px",
-            display: "flex",
-            alignItems: "center",
-            padding: "0 10px",
-            border: "1px solid var(--orca-color-border-1)",
-            borderRadius: "6px",
-            background: "var(--orca-color-bg-2)",
-            color: "var(--orca-color-text-1)",
-            fontSize: "12px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+    renderSection(
+      renderFormRow(
+        t("Task name"),
+        React.createElement("div", { style: readOnlyFieldStyle }, taskName),
+      ),
+      renderFormRow(
+        labels.status,
+        React.createElement(Select, {
+          selected: [statusValue],
+          options: statusOptions,
+          onChange: (selected: string[]) => {
+            setStatusValue(selected[0] ?? props.schema.statusChoices[0])
           },
-        },
-        taskName,
+          menuContainer: popupMenuContainerRef,
+          width: "100%",
+        }),
       ),
     ),
-    renderFormRow(
-      labels.status,
-      React.createElement(Select, {
-        selected: [statusValue],
-        options: statusOptions,
-        onChange: (selected: string[]) => {
-          setStatusValue(selected[0] ?? props.schema.statusChoices[0])
-        },
-        menuContainer: popupMenuContainerRef,
-        width: "100%",
-      }),
+    renderSection(
+      renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
+      renderTimeField("end", labels.endTime, endTimeValue, setEndTimeValue),
+      renderScoreField(
+        labels.importance,
+        importanceValue,
+        importanceText,
+        setImportanceValue,
+        setImportanceText,
+      ),
+      renderScoreField(
+        labels.urgency,
+        urgencyValue,
+        urgencyText,
+        setUrgencyValue,
+        setUrgencyText,
+      ),
+      renderScoreField(
+        labels.effort,
+        effortValue,
+        effortText,
+        setEffortValue,
+        setEffortText,
+      ),
     ),
-    renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
-    renderTimeField("end", labels.endTime, endTimeValue, setEndTimeValue),
-    renderScoreField(
-      labels.importance,
-      importanceValue,
-      importanceText,
-      setImportanceValue,
-      setImportanceText,
-    ),
-    renderScoreField(
-      labels.urgency,
-      urgencyValue,
-      urgencyText,
-      setUrgencyValue,
-      setUrgencyText,
-    ),
-    renderScoreField(
-      labels.effort,
-      effortValue,
-      effortText,
-      setEffortValue,
-      setEffortText,
-    ),
-    renderFormRow(
-      labels.repeatRule,
-      React.createElement(Select, {
-        selected: [repeatModeValue],
-        options: repeatModeOptions,
-        onChange: (selected: string[]) => {
-          updateRepeatEditor({
-            mode: (selected[0] ?? "none") as RepeatMode,
-          })
-        },
-        menuContainer: popupMenuContainerRef,
-        width: "100%",
-      }),
-    ),
-    repeatModeValue !== "none"
-      ? renderFormRow(
-          t("Repeat every"),
-          React.createElement(
-            "div",
-            {
-              style: {
-                display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr) auto",
-                gap: "8px",
-                alignItems: "center",
+    renderSection(
+      renderFormRow(
+        labels.repeatRule,
+        React.createElement(Select, {
+          selected: [repeatModeValue],
+          options: repeatModeOptions,
+          onChange: (selected: string[]) => {
+            updateRepeatEditor({
+              mode: (selected[0] ?? "none") as RepeatMode,
+            })
+          },
+          menuContainer: popupMenuContainerRef,
+          width: "100%",
+        }),
+      ),
+      repeatModeValue !== "none"
+        ? renderFormRow(
+            t("Repeat every"),
+            React.createElement(
+              "div",
+              {
+                style: inlineDualControlLayoutStyle,
               },
-            },
+              React.createElement(Input, {
+                value: repeatIntervalText,
+                placeholder: "1",
+                onChange: (event: Event) => {
+                  updateRepeatEditor({
+                    intervalText: (event.target as HTMLInputElement).value,
+                  })
+                },
+              }),
+              React.createElement(
+                "span",
+                {
+                  style: hintTextStyle,
+                },
+                repeatModeValue === "day"
+                  ? t("day(s)")
+                  : repeatModeValue === "week"
+                    ? t("week(s)")
+                    : t("month(s)"),
+              ),
+            ),
+          )
+        : null,
+      repeatModeValue === "week"
+        ? renderFormRow(
+            t("Repeat weekday"),
+            React.createElement(Select, {
+              selected: [repeatWeekdayValue],
+              options: repeatWeekdayOptions,
+              onChange: (selected: string[]) => {
+                updateRepeatEditor({
+                  weekdayValue: selected[0] ?? "",
+                })
+              },
+              menuContainer: popupMenuContainerRef,
+              width: "100%",
+            }),
+          )
+        : null,
+      repeatModeValue !== "none"
+        ? renderFormRow(
+            t("Repeat max count"),
             React.createElement(Input, {
-              value: repeatIntervalText,
-              placeholder: "1",
+              value: repeatMaxCountText,
+              placeholder: t("No limit"),
               onChange: (event: Event) => {
                 updateRepeatEditor({
-                  intervalText: (event.target as HTMLInputElement).value,
+                  maxCountText: (event.target as HTMLInputElement).value,
                 })
               },
             }),
-            React.createElement(
-              "span",
-              {
-                style: {
-                  fontSize: "11px",
-                  color: "var(--orca-color-text-2)",
-                  whiteSpace: "nowrap",
-                },
+          )
+        : null,
+      repeatModeValue !== "none"
+        ? renderTimeField(
+            "repeatEnd",
+            t("Repeat ends at"),
+            repeatEndAtValue,
+            (next: Date | null) => {
+              updateRepeatEditor({
+                endAtValue: next,
+              })
+            },
+          )
+        : null,
+      !repeatRuleParseable && repeatRuleText.trim() !== ""
+        ? renderFormRow(
+            t("Repeat rule (raw)"),
+            React.createElement(Input, {
+              value: repeatRuleText,
+              onChange: (event: Event) => {
+                setRepeatRuleText((event.target as HTMLInputElement).value)
+                setRepeatRuleParseable(false)
               },
-              repeatModeValue === "day"
-                ? t("day(s)")
-                : repeatModeValue === "week"
-                  ? t("week(s)")
-                  : t("month(s)"),
-            ),
-          ),
-        )
-      : null,
-    repeatModeValue === "week"
-      ? renderFormRow(
-          t("Repeat weekday"),
-          React.createElement(Select, {
-            selected: [repeatWeekdayValue],
-            options: repeatWeekdayOptions,
-            onChange: (selected: string[]) => {
-              updateRepeatEditor({
-                weekdayValue: selected[0] ?? "",
-              })
+            }),
+          )
+        : null,
+      !repeatRuleParseable && repeatRuleText.trim() !== ""
+        ? React.createElement(
+            "div",
+            {
+              style: {
+                ...hintTextStyle,
+                marginBottom: "10px",
+              },
             },
-            menuContainer: popupMenuContainerRef,
-            width: "100%",
-          }),
-        )
-      : null,
-    repeatModeValue !== "none"
-      ? renderFormRow(
-          t("Repeat max count"),
-          React.createElement(Input, {
-            value: repeatMaxCountText,
-            placeholder: t("No limit"),
-            onChange: (event: Event) => {
-              updateRepeatEditor({
-                maxCountText: (event.target as HTMLInputElement).value,
-              })
-            },
-          }),
-        )
-      : null,
-    repeatModeValue !== "none"
-      ? renderTimeField(
-          "repeatEnd",
-          t("Repeat ends at"),
-          repeatEndAtValue,
-          (next: Date | null) => {
-            updateRepeatEditor({
-              endAtValue: next,
-            })
-          },
-        )
-      : null,
-    !repeatRuleParseable && repeatRuleText.trim() !== ""
-      ? renderFormRow(
-          t("Repeat rule (raw)"),
-          React.createElement(Input, {
-            value: repeatRuleText,
-            onChange: (event: Event) => {
-              setRepeatRuleText((event.target as HTMLInputElement).value)
-              setRepeatRuleParseable(false)
-            },
-          }),
-        )
-      : null,
-    !repeatRuleParseable && repeatRuleText.trim() !== ""
-      ? React.createElement(
-          "div",
-          {
-            style: {
-              color: "var(--orca-color-text-2)",
-              marginTop: "2px",
-              marginBottom: "8px",
-              fontSize: "11px",
-            },
-          },
-          t("Legacy repeat rule detected. Change options above to replace it."),
-        )
-      : null,
-    renderFormRow(
-      labels.dependsOn,
-      React.createElement(BlockSelect, {
-        mode: "block",
-        scope: props.schema.tagAlias,
-        selected: dependsOnValues,
-        multiSelection: true,
-        width: "100%",
-        menuContainer: popupMenuContainerRef,
-        onChange: (selected: string[]) => {
-          const normalized = selected
-            .map((item) => Number(item))
-            .filter((item) => !Number.isNaN(item))
-            .map((item) => getMirrorId(item))
-            .filter((item, index, all) => all.indexOf(item) === index)
-
-          setDependsOnValues(normalized)
-          if (normalized.length === 0) {
-            setDependsModeValue("ALL")
-            setDependencyDelayText("")
-          }
-        },
-      }),
+            t("Legacy repeat rule detected. Change options above to replace it."),
+          )
+        : null,
     ),
-    hasDependencies
-      ? React.createElement(
-          React.Fragment,
-          null,
-          renderFormRow(
+    renderSection(
+      renderFormRow(
+        labels.dependsOn,
+        React.createElement(BlockSelect, {
+          mode: "block",
+          scope: props.schema.tagAlias,
+          selected: dependsOnValues,
+          multiSelection: true,
+          width: "100%",
+          menuContainer: popupMenuContainerRef,
+          onChange: (selected: string[]) => {
+            const normalized = selected
+              .map((item) => Number(item))
+              .filter((item) => !Number.isNaN(item))
+              .map((item) => getMirrorId(item))
+              .filter((item, index, all) => all.indexOf(item) === index)
+
+            setDependsOnValues(normalized)
+            if (normalized.length === 0) {
+              setDependsModeValue("ALL")
+              setDependencyDelayText("")
+            }
+          },
+        }),
+      ),
+      hasDependencies
+        ? renderFormRow(
             labels.dependsMode,
             React.createElement(Select, {
               selected: [dependsModeValue],
@@ -944,18 +962,15 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
               menuContainer: popupMenuContainerRef,
               width: "100%",
             }),
-          ),
-          renderFormRow(
+          )
+        : null,
+      hasDependencies
+        ? renderFormRow(
             labels.dependencyDelay,
             React.createElement(
               "div",
               {
-                style: {
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) auto",
-                  gap: "8px",
-                  alignItems: "center",
-                },
+                style: inlineDualControlLayoutStyle,
               },
               React.createElement(Input, {
                 value: dependencyDelayText,
@@ -967,18 +982,14 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
               React.createElement(
                 "span",
                 {
-                  style: {
-                    fontSize: "11px",
-                    color: "var(--orca-color-text-2)",
-                    whiteSpace: "nowrap",
-                  },
+                  style: hintTextStyle,
                 },
                 t("Hours"),
               ),
             ),
-          ),
-        )
-      : null,
+          )
+        : null,
+    ),
     editingDateField != null
       ? React.createElement(DatePicker, {
           mode: "datetime",
