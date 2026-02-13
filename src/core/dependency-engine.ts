@@ -2,6 +2,7 @@ import type { Block, BlockProperty, DbId } from "../orca.d.ts"
 import { getTaskPropertiesFromRef } from "./task-properties"
 import type { DependencyMode, TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId } from "./block-utils"
+import { calculateTaskScoreFromValues } from "./score-engine"
 
 const TAG_REF_TYPE = 2
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -12,6 +13,7 @@ export interface NextActionItem {
   text: string
   status: string
   endTime: Date | null
+  score: number
 }
 
 export type NextActionBlockedReason =
@@ -59,6 +61,7 @@ export async function collectNextActions(
   return evaluations
     .filter((evaluation) => evaluation.isNextAction)
     .map((evaluation) => evaluation.item)
+    .sort(compareNextActionItems)
 }
 
 export async function collectNextActionEvaluations(
@@ -136,12 +139,15 @@ export function evaluateNextAction(
     blockedReason.push("dependency-delayed")
   }
 
+  const score = calculateTaskScoreFromValues(values, now)
+
   return {
     item: {
       blockId: getMirrorId(block.id),
       text: resolveTaskText(block, schema.tagAlias),
       status,
       endTime: values.endTime,
+      score,
     },
     isNextAction: blockedReason.length === 0,
     blockedReason,
@@ -634,6 +640,29 @@ function normalizeDateTimeToTimestamp(
   const date = value instanceof Date ? value : new Date(value)
   const timestamp = date.getTime()
   return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function compareNextActionItems(left: NextActionItem, right: NextActionItem): number {
+  if (left.score !== right.score) {
+    return right.score - left.score
+  }
+
+  const leftDueTime = normalizeDueTime(left.endTime)
+  const rightDueTime = normalizeDueTime(right.endTime)
+  if (leftDueTime !== rightDueTime) {
+    return leftDueTime - rightDueTime
+  }
+
+  return left.blockId - right.blockId
+}
+
+function normalizeDueTime(endTime: Date | null): number {
+  if (endTime == null) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  const timestamp = endTime.getTime()
+  return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp
 }
 
 function findTaskTagRef(
