@@ -2,8 +2,10 @@ import type { BlockProperty, DbId } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "./task-schema"
 
 const PROP_TYPE = {
+  TEXT: 1,
   BLOCK_REFS: 2,
   NUMBER: 3,
+  BOOLEAN: 4,
   DATE_TIME: 5,
   TEXT_CHOICES: 6,
 } as const
@@ -14,6 +16,9 @@ export interface TaskPropertyValues {
   endTime: Date | null
   importance: number | null
   urgency: number | null
+  effort: number | null
+  star: boolean
+  repeatRule: string
   dependsOn: DbId[]
   dependsMode: string
   dependencyDelay: number | null
@@ -26,6 +31,9 @@ export interface TaskFieldLabels {
   endTime: string
   importance: string
   urgency: string
+  effort: string
+  star: string
+  repeatRule: string
   dependsOn: string
   dependsMode: string
   dependencyDelay: string
@@ -42,6 +50,9 @@ export function buildTaskFieldLabels(locale: string): TaskFieldLabels {
       endTime: "结束时间",
       importance: "重要性",
       urgency: "紧急度",
+      effort: "工作量",
+      star: "收藏",
+      repeatRule: "重复规则",
       dependsOn: "依赖任务",
       dependsMode: "依赖模式",
       dependencyDelay: "依赖延迟",
@@ -57,6 +68,9 @@ export function buildTaskFieldLabels(locale: string): TaskFieldLabels {
     endTime: "End time",
     importance: "Importance",
     urgency: "Urgency",
+    effort: "Effort",
+    star: "Star",
+    repeatRule: "Repeat rule",
     dependsOn: "Depends on",
     dependsMode: "Depends mode",
     dependencyDelay: "Dependency delay",
@@ -79,6 +93,9 @@ export function getTaskPropertiesFromRef(
     endTime: getDate(refData, names.endTime),
     importance: getNumber(refData, names.importance),
     urgency: getNumber(refData, names.urgency),
+    effort: getNumber(refData, names.effort),
+    star: getBoolean(refData, names.star),
+    repeatRule: getString(refData, names.repeatRule) ?? "",
     dependsOn: getDbIdArray(refData, names.dependsOn),
     dependsMode:
       getString(refData, names.dependsMode) ??
@@ -118,6 +135,21 @@ export function toRefDataForSave(
       name: names.urgency,
       type: PROP_TYPE.NUMBER,
       value: values.urgency,
+    },
+    {
+      name: names.effort,
+      type: PROP_TYPE.NUMBER,
+      value: values.effort,
+    },
+    {
+      name: names.star,
+      type: PROP_TYPE.BOOLEAN,
+      value: values.star,
+    },
+    {
+      name: names.repeatRule,
+      type: PROP_TYPE.TEXT,
+      value: values.repeatRule.trim() === "" ? null : values.repeatRule.trim(),
     },
     {
       name: names.dependsOn,
@@ -188,6 +220,14 @@ function getDate(
     : new Date(property.value)
 
   return Number.isNaN(date.getTime()) ? null : date
+}
+
+function getBoolean(
+  refData: BlockProperty[] | undefined,
+  name: string,
+): boolean {
+  const property = refData?.find((item) => item.name === name)
+  return property?.value === true
 }
 
 function getDbIdArray(

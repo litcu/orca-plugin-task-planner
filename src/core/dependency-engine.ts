@@ -10,6 +10,7 @@ export interface NextActionItem {
   blockId: DbId
   text: string
   status: string
+  endTime: Date | null
 }
 
 export interface NextActionEvaluation {
@@ -100,8 +101,9 @@ export function evaluateNextAction(
   return {
     item: {
       blockId: getMirrorId(block.id),
-      text: resolveTaskText(block),
+      text: resolveTaskText(block, schema.tagAlias),
       status,
+      endTime: values.endTime,
     },
     isNextAction: blockedReason.length === 0,
     blockedReason,
@@ -530,9 +532,10 @@ function isCanceledStatus(status: string): boolean {
   )
 }
 
-function resolveTaskText(block: Block): string {
+function resolveTaskText(block: Block, tagAlias: string): string {
   if (typeof block.text === "string" && block.text.trim() !== "") {
-    return block.text.trim()
+    const normalized = stripTaskTagFromText(block.text, tagAlias)
+    return normalized === "" ? "(无标题任务)" : normalized
   }
 
   if (!Array.isArray(block.content) || block.content.length === 0) {
@@ -544,5 +547,24 @@ function resolveTaskText(block: Block): string {
     .join("")
     .trim()
 
-  return text === "" ? "(无标题任务)" : text
+  const normalized = stripTaskTagFromText(text, tagAlias)
+  return normalized === "" ? "(无标题任务)" : normalized
+}
+
+function stripTaskTagFromText(text: string, tagAlias: string): string {
+  if (text.trim() === "") {
+    return ""
+  }
+
+  const escapedAlias = tagAlias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const normalized = text
+    .replace(
+      new RegExp(`(^|[\\s,，;；、])#${escapedAlias}(?=[\\s,，;；、]|$)`, "gi"),
+      " ",
+    )
+    .replace(/(^|[\s,，;；、])#[^\s#,，;；、]+(?=[\s,，;；、]|$)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  return normalized
 }

@@ -12,7 +12,7 @@ import {
   cycleTaskStatusInView,
   type AllTaskItem,
 } from "../core/all-tasks-engine"
-import { openTaskPropertyPopup } from "./task-property-panel"
+import { TaskPropertyPanelCard } from "./task-property-card"
 import { TaskListRow } from "./task-list-row"
 
 interface TaskViewsPanelProps extends PanelProps {
@@ -34,7 +34,6 @@ interface VisibleTreeRow {
 
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
-  const Button = orca.components.Button
   const Input = orca.components.Input
   const Select = orca.components.Select
   const Segmented = orca.components.Segmented
@@ -51,10 +50,17 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [collapsedIds, setCollapsedIds] = React.useState<Set<DbId>>(new Set())
   const [nextActionItems, setNextActionItems] = React.useState<NextActionItem[]>([])
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
+  const [selectedTaskId, setSelectedTaskId] = React.useState<DbId | null>(null)
 
   const loadByTab = React.useCallback(
-    async (targetTab: TaskViewsTab) => {
-      setLoading(true)
+    async (
+      targetTab: TaskViewsTab,
+      options?: { silent?: boolean },
+    ) => {
+      const silent = options?.silent === true
+      if (!silent) {
+        setLoading(true)
+      }
 
       try {
         if (targetTab === "next-actions") {
@@ -74,7 +80,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             : "Failed to load task view",
         )
       } finally {
-        setLoading(false)
+        if (!silent) {
+          setLoading(false)
+        }
       }
     },
     [isChinese, props.schema],
@@ -95,13 +103,17 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     const { subscribe } = window.Valtio
     let refreshTimer: number | null = null
     const unsubscribe = subscribe(orca.state.blocks, () => {
+      if (selectedTaskId != null) {
+        return
+      }
+
       if (refreshTimer != null) {
         window.clearTimeout(refreshTimer)
       }
 
       refreshTimer = window.setTimeout(() => {
-        void loadByTab(tab)
-      }, 120)
+        void loadByTab(tab, { silent: true })
+      }, 180)
     })
 
     return () => {
@@ -110,7 +122,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       }
       unsubscribe()
     }
-  }, [loadByTab, tab])
+  }, [loadByTab, selectedTaskId, tab])
 
   const toggleTaskStatus = React.useCallback(
     async (blockId: DbId) => {
@@ -123,7 +135,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       try {
         await cycleTaskStatusInView(blockId, props.schema)
         setErrorText("")
-        await loadByTab(tab)
+        await loadByTab(tab, { silent: true })
       } catch (error) {
         console.error(error)
         setErrorText(isChinese ? "切换任务状态失败" : "Failed to toggle task status")
@@ -140,14 +152,14 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
   const openTaskProperty = React.useCallback(
     (blockId: DbId) => {
-      openTaskPropertyPopup({
-        blockId,
-        schema: props.schema,
-        triggerSource: "panel-view",
-      })
+      setSelectedTaskId(blockId)
     },
-    [props.schema],
+    [],
   )
+  const closeTaskProperty = React.useCallback(() => {
+    setSelectedTaskId(null)
+    void loadByTab(tab, { silent: true })
+  }, [loadByTab, tab])
 
   const toggleCollapsed = React.useCallback((blockId: DbId) => {
     setCollapsedIds((prev: Set<DbId>) => {
@@ -204,8 +216,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   }, [collapsedIds, filteredAllTaskTree])
 
   const viewName = tab === "next-actions"
-    ? "Next Actions"
-    : (isChinese ? "全量任务列表" : "All Tasks")
+    ? (isChinese ? "激活任务" : "Active Tasks")
+    : (isChinese ? "全部任务" : "All Tasks")
 
   const visibleCount = tab === "next-actions"
     ? filteredNextActionItems.length
@@ -229,10 +241,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       {
         style: {
           display: "flex",
-          justifyContent: "space-between",
           alignItems: "center",
           marginBottom: "8px",
-          gap: "8px",
         },
       },
       React.createElement(
@@ -245,26 +255,17 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         },
         viewName,
       ),
-      React.createElement(
-        Button,
-        {
-          variant: "outline",
-          onClick: () => void loadByTab(tab),
-          disabled: loading,
-        },
-        isChinese ? "刷新" : "Refresh",
-      ),
     ),
     React.createElement(Segmented, {
       selected: tab,
       options: [
         {
           value: "next-actions",
-          label: isChinese ? "Next Actions" : "Next Actions",
+          label: isChinese ? "激活任务" : "Active Tasks",
         },
         {
           value: "all-tasks",
-          label: isChinese ? "全量任务" : "All Tasks",
+          label: isChinese ? "全部任务" : "All Tasks",
         },
       ],
       onChange: (value: string) => {
@@ -317,99 +318,133 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         isChinese ? `显示 ${visibleCount} 项` : `${visibleCount} items`,
       ),
     ),
-    errorText !== ""
-      ? React.createElement(
-          "div",
-          {
-            style: {
-              color: "var(--orca-color-text-red)",
-              fontSize: "12px",
-              marginBottom: "8px",
-            },
+    React.createElement(
+      "div",
+      {
+        style: {
+          flex: 1,
+          minHeight: 0,
+          display: "grid",
+          gridTemplateColumns:
+            selectedTaskId == null
+              ? "minmax(0, 1fr)"
+              : "minmax(0, 1fr) minmax(360px, 460px)",
+          gap: "10px",
+          alignItems: "stretch",
+        },
+      },
+      React.createElement(
+        "div",
+        {
+          style: {
+            minWidth: 0,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
           },
-          errorText,
-        )
-      : null,
-    loading
-      ? React.createElement(
-          "div",
-          {
-            style: {
-              color: "var(--orca-color-text-2)",
-              fontSize: "13px",
-              padding: "4px 0",
-            },
-          },
-          isChinese ? "加载中..." : "Loading...",
-        )
-      : null,
-    !loading && visibleCount === 0
-      ? React.createElement(
-          "div",
-          {
-            style: {
-              color: "var(--orca-color-text-2)",
-              fontSize: "13px",
-              padding: "4px 0",
-            },
-          },
-          tab === "next-actions"
-            ? (isChinese ? "当前没有可执行任务" : "No actionable tasks")
-            : (isChinese ? "没有匹配的任务" : "No matched tasks"),
-        )
-      : null,
-    !loading && visibleCount > 0
-      ? React.createElement(
-          "div",
-          {
-            style: {
-              overflow: "auto",
-              width: "100%",
-              minWidth: 0,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "stretch",
-              gap: "6px",
-            },
-          },
-          tab === "next-actions"
-            ? filteredNextActionItems.map((item: NextActionItem) => {
-                return React.createElement(TaskListRow, {
-                  key: item.blockId,
-                  item,
-                  schema: props.schema,
-                  isChinese,
-                  depth: 0,
-                  contextOnly: false,
-                  loading,
-                  updating: updatingIds.has(item.blockId),
-                  showCollapseToggle: false,
-                  collapsed: false,
-                  onToggleStatus: () => toggleTaskStatus(item.blockId),
-                  onOpen: () => openTaskProperty(item.blockId),
-                })
-              })
-            : visibleAllTaskRows.map((row: VisibleTreeRow) => {
-                return React.createElement(TaskListRow, {
-                  key: row.node.item.blockId,
-                  item: row.node.item,
-                  schema: props.schema,
-                  isChinese,
-                  depth: row.depth,
-                  contextOnly: row.node.contextOnly,
-                  loading,
-                  updating: updatingIds.has(row.node.item.blockId),
-                  showCollapseToggle: row.hasChildren,
-                  collapsed: row.collapsed,
-                  onToggleCollapse: row.hasChildren
-                    ? () => toggleCollapsed(row.node.item.blockId)
-                    : undefined,
-                  onToggleStatus: () => toggleTaskStatus(row.node.item.blockId),
-                  onOpen: () => openTaskProperty(row.node.item.blockId),
-                })
-              }),
-        )
-      : null,
+        },
+        errorText !== ""
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  color: "var(--orca-color-text-red)",
+                  fontSize: "12px",
+                  marginBottom: "8px",
+                },
+              },
+              errorText,
+            )
+          : null,
+        loading
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  color: "var(--orca-color-text-2)",
+                  fontSize: "13px",
+                  padding: "4px 0",
+                },
+              },
+              isChinese ? "加载中..." : "Loading...",
+            )
+          : null,
+        !loading && visibleCount === 0
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  color: "var(--orca-color-text-2)",
+                  fontSize: "13px",
+                  padding: "4px 0",
+                },
+              },
+              tab === "next-actions"
+                ? (isChinese ? "当前没有可执行任务" : "No actionable tasks")
+                : (isChinese ? "没有匹配的任务" : "No matched tasks"),
+            )
+          : null,
+        !loading && visibleCount > 0
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  overflow: "auto",
+                  width: "100%",
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "stretch",
+                  gap: "6px",
+                },
+              },
+              tab === "next-actions"
+                ? filteredNextActionItems.map((item: NextActionItem) => {
+                    return React.createElement(TaskListRow, {
+                      key: item.blockId,
+                      item,
+                      schema: props.schema,
+                      isChinese,
+                      depth: 0,
+                      contextOnly: false,
+                      loading,
+                      updating: updatingIds.has(item.blockId),
+                      showCollapseToggle: false,
+                      collapsed: false,
+                      onToggleStatus: () => toggleTaskStatus(item.blockId),
+                      onOpen: () => openTaskProperty(item.blockId),
+                    })
+                  })
+                : visibleAllTaskRows.map((row: VisibleTreeRow) => {
+                    return React.createElement(TaskListRow, {
+                      key: row.node.item.blockId,
+                      item: row.node.item,
+                      schema: props.schema,
+                      isChinese,
+                      depth: row.depth,
+                      contextOnly: row.node.contextOnly,
+                      loading,
+                      updating: updatingIds.has(row.node.item.blockId),
+                      showCollapseToggle: row.hasChildren,
+                      collapsed: row.collapsed,
+                      onToggleCollapse: row.hasChildren
+                        ? () => toggleCollapsed(row.node.item.blockId)
+                        : undefined,
+                      onToggleStatus: () => toggleTaskStatus(row.node.item.blockId),
+                      onOpen: () => openTaskProperty(row.node.item.blockId),
+                    })
+                  }),
+            )
+          : null,
+      ),
+      selectedTaskId != null
+        ? React.createElement(TaskPropertyPanelCard, {
+            blockId: selectedTaskId,
+            schema: props.schema,
+            onClose: closeTaskProperty,
+          })
+        : null,
+    ),
   )
 }
 

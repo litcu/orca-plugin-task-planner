@@ -5,6 +5,7 @@ export interface TaskListRowItem {
   blockId: DbId
   text: string
   status: string
+  endTime: Date | null
 }
 
 interface TaskListRowProps {
@@ -24,6 +25,7 @@ interface TaskListRowProps {
 
 export function TaskListRow(props: TaskListRowProps) {
   const React = window.React
+  const dueInfo = resolveDueInfo(props.item.endTime, props.isChinese)
 
   return React.createElement(
     "div",
@@ -92,12 +94,18 @@ export function TaskListRow(props: TaskListRowProps) {
         style: {
           width: "22px",
           height: "22px",
-          borderRadius: "999px",
-          border: "1px solid var(--orca-color-border)",
-          background: "var(--orca-color-bg)",
+          borderRadius: "4px",
+          border: "none",
+          background: "transparent",
           color: resolveStatusColor(props.item.status, props.schema),
           cursor: props.loading || props.updating ? "not-allowed" : "pointer",
           flexShrink: 0,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "15px",
+          lineHeight: 1,
+          padding: 0,
         },
       },
       resolveStatusGlyph(props.item.status, props.schema),
@@ -126,11 +134,12 @@ export function TaskListRow(props: TaskListRowProps) {
       {
         style: {
           fontSize: "11px",
-          color: "var(--orca-color-text-2)",
+          color: dueInfo.color,
+          fontWeight: dueInfo.strong ? 600 : 400,
           whiteSpace: "nowrap",
         },
       },
-      props.item.status,
+      dueInfo.text,
     ),
   )
 }
@@ -144,10 +153,10 @@ function resolveStatusGlyph(status: string, schema: TaskSchemaDefinition): strin
     return "◐"
   }
   if (status === todoStatus) {
-    return "○"
+    return "◯"
   }
 
-  return "○"
+  return "◯"
 }
 
 function resolveStatusColor(status: string, schema: TaskSchemaDefinition): string {
@@ -160,4 +169,65 @@ function resolveStatusColor(status: string, schema: TaskSchemaDefinition): strin
   }
 
   return "var(--orca-color-text-2)"
+}
+
+function resolveDueInfo(
+  endTime: Date | null,
+  isChinese: boolean,
+): { text: string; color: string; strong: boolean } {
+  if (endTime == null || Number.isNaN(endTime.getTime())) {
+    return {
+      text: isChinese ? "未设置" : "No due",
+      color: "var(--orca-color-text-2)",
+      strong: false,
+    }
+  }
+
+  const now = new Date()
+  const nowTime = now.getTime()
+  const dueTime = endTime.getTime()
+
+  if (dueTime < nowTime) {
+    const diffMs = nowTime - dueTime
+    const overdueDays = Math.max(1, Math.ceil(diffMs / (24 * 60 * 60 * 1000)))
+    return {
+      text: isChinese ? `超期${overdueDays}天` : `Overdue ${overdueDays}d`,
+      color: "var(--orca-color-text-red, #c53030)",
+      strong: true,
+    }
+  }
+
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfTomorrow = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+  )
+  const startOfAfterTomorrow = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 2,
+  )
+
+  if (dueTime >= startOfToday.getTime() && dueTime < startOfTomorrow.getTime()) {
+    return {
+      text: isChinese ? "今天" : "Today",
+      color: "var(--orca-color-text-yellow, #b7791f)",
+      strong: true,
+    }
+  }
+
+  if (dueTime >= startOfTomorrow.getTime() && dueTime < startOfAfterTomorrow.getTime()) {
+    return {
+      text: isChinese ? "明天" : "Tomorrow",
+      color: "var(--orca-color-text-yellow, #b7791f)",
+      strong: true,
+    }
+  }
+
+  return {
+    text: endTime.toLocaleDateString(isChinese ? "zh-CN" : undefined),
+    color: "var(--orca-color-text-2)",
+    strong: false,
+  }
 }

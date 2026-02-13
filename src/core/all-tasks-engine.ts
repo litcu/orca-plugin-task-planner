@@ -12,6 +12,7 @@ export interface AllTaskItem {
   children: DbId[]
   text: string
   status: string
+  endTime: Date | null
 }
 
 export async function collectAllTasks(
@@ -39,8 +40,9 @@ export async function collectAllTasks(
       blockId,
       parentId: liveBlock.parent != null ? getMirrorId(liveBlock.parent) : null,
       children: liveBlock.children.map((childId) => getMirrorId(childId)),
-      text: resolveTaskText(liveBlock),
+      text: resolveTaskText(liveBlock, schema.tagAlias),
       status: values.status,
+      endTime: values.endTime,
     })
   }
 
@@ -133,9 +135,10 @@ function getNextStatus(
   return todoStatus
 }
 
-function resolveTaskText(block: Block): string {
+function resolveTaskText(block: Block, tagAlias: string): string {
   if (typeof block.text === "string" && block.text.trim() !== "") {
-    return block.text.trim()
+    const normalized = stripTaskTagFromText(block.text, tagAlias)
+    return normalized === "" ? "(无标题任务)" : normalized
   }
 
   if (!Array.isArray(block.content) || block.content.length === 0) {
@@ -147,5 +150,24 @@ function resolveTaskText(block: Block): string {
     .join("")
     .trim()
 
-  return text === "" ? "(无标题任务)" : text
+  const normalized = stripTaskTagFromText(text, tagAlias)
+  return normalized === "" ? "(无标题任务)" : normalized
+}
+
+function stripTaskTagFromText(text: string, tagAlias: string): string {
+  if (text.trim() === "") {
+    return ""
+  }
+
+  const escapedAlias = tagAlias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const normalized = text
+    .replace(
+      new RegExp(`(^|[\\s,，;；、])#${escapedAlias}(?=[\\s,，;；、]|$)`, "gi"),
+      " ",
+    )
+    .replace(/(^|[\s,，;；、])#[^\s#,，;；、]+(?=[\s,，;；、]|$)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  return normalized
 }

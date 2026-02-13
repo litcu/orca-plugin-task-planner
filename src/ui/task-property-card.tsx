@@ -8,100 +8,16 @@ import {
   validateNumericField,
 } from "../core/task-properties"
 
-type PopupTriggerSource = "tag-click" | "tag-menu" | "panel-view"
-
-type ReactRootLike = {
-  render: (node: unknown) => void
-  unmount: () => void
-}
-
-interface PopupState {
-  root: ReactRootLike | null
-  containerEl: HTMLDivElement | null
-  options: OpenTaskPropertyPopupOptions | null
-  visible: boolean
-}
-
-interface OpenTaskPropertyPopupOptions {
+interface TaskPropertyPanelCardProps {
   blockId: DbId
   schema: TaskSchemaDefinition
-  triggerSource: PopupTriggerSource
-}
-
-const popupState: PopupState = {
-  root: null,
-  containerEl: null,
-  options: null,
-  visible: false,
+  onClose: () => void
 }
 
 const TAG_REF_TYPE = 2
 const REF_DATA_TYPE = 3
 
-export type { OpenTaskPropertyPopupOptions }
-
-export function openTaskPropertyPopup(options: OpenTaskPropertyPopupOptions) {
-  ensureRoot()
-  popupState.options = options
-  popupState.visible = true
-  renderCurrent()
-}
-
-export function closeTaskPropertyPopup() {
-  if (popupState.root == null || popupState.options == null) {
-    return
-  }
-
-  popupState.visible = false
-  renderCurrent()
-}
-
-export function disposeTaskPropertyPopup() {
-  popupState.root?.unmount()
-  popupState.containerEl?.remove()
-
-  popupState.root = null
-  popupState.containerEl = null
-  popupState.options = null
-  popupState.visible = false
-}
-
-function ensureRoot() {
-  if (popupState.root != null) {
-    return
-  }
-
-  const containerEl = document.createElement("div")
-  containerEl.dataset.role = "mlo-task-property-popup-root"
-  document.body.appendChild(containerEl)
-
-  popupState.containerEl = containerEl
-  popupState.root = window.createRoot(containerEl) as ReactRootLike
-}
-
-function renderCurrent() {
-  if (popupState.root == null || popupState.options == null) {
-    return
-  }
-
-  const React = window.React
-  popupState.root.render(
-    React.createElement(TaskPropertyPopupView, {
-      ...popupState.options,
-      visible: popupState.visible,
-      onClose: () => closeTaskPropertyPopup(),
-      onDispose: () => disposeTaskPropertyPopup(),
-    }),
-  )
-}
-
-function TaskPropertyPopupView(props: {
-  blockId: DbId
-  schema: TaskSchemaDefinition
-  visible: boolean
-  onClose: () => void
-  onDispose: () => void
-}) {
+export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   const React = window.React
   const Button = orca.components.Button
   const Checkbox = orca.components.Checkbox
@@ -109,19 +25,18 @@ function TaskPropertyPopupView(props: {
   const Select = orca.components.Select
   const DatePicker = orca.components.DatePicker
   const BlockSelect = orca.components.BlockSelect
-  const ModalOverlay = orca.components.ModalOverlay
 
   const labels = buildTaskFieldLabels(orca.state.locale)
   const isChinese = orca.state.locale === "zh-CN"
 
-  const block = orca.state.blocks[props.blockId]
+  const block =
+    orca.state.blocks[getMirrorId(props.blockId)] ?? orca.state.blocks[props.blockId]
   const taskRef = block?.refs.find(
     (ref) => ref.type === TAG_REF_TYPE && ref.alias === props.schema.tagAlias,
   )
   const initialValues = React.useMemo(() => {
     return getTaskPropertiesFromRef(taskRef?.data, props.schema)
-  }, [block, taskRef, props.schema])
-
+  }, [props.schema, taskRef])
   const initialDependsOnForEditor = React.useMemo(() => {
     return normalizeDependsOnForSelect(
       block,
@@ -177,10 +92,11 @@ function TaskPropertyPopupView(props: {
   const [errorText, setErrorText] = React.useState("")
   const [saving, setSaving] = React.useState(false)
   const [lastSavedSnapshot, setLastSavedSnapshot] = React.useState("")
-  const [lastFailedSnapshot, setLastFailedSnapshot] = React.useState<string | null>(null)
+  const [lastFailedSnapshot, setLastFailedSnapshot] = React.useState<string | null>(
+    null,
+  )
 
   const dateAnchorRef = React.useRef<HTMLButtonElement | null>(null)
-  // Mount dropdown and date picker overlays to body to avoid clipping by modal scroll.
   const popupMenuContainerRef = React.useRef<HTMLElement | null>(null)
   if (popupMenuContainerRef.current == null) {
     popupMenuContainerRef.current = document.body
@@ -278,13 +194,12 @@ function TaskPropertyPopupView(props: {
     setSaving(false)
     setLastSavedSnapshot(initialSnapshot)
     setLastFailedSnapshot(null)
-  }, [props.blockId, initialDependsOnForEditor, initialSnapshot, initialValues])
+  }, [initialDependsOnForEditor, initialSnapshot, initialValues, props.blockId])
 
   const statusOptions = props.schema.statusChoices.map((item) => ({
     value: item,
     label: item,
   }))
-
   const dependsModeOptions = isChinese
     ? [
         { value: "ALL", label: "所有依赖任务完成" },
@@ -360,11 +275,7 @@ function TaskPropertyPopupView(props: {
 
     try {
       const sourceBlockId = getMirrorId(props.blockId)
-      const dependencyRefIds = await ensureDependencyRefIds(
-        sourceBlockId,
-        dependsOnValues,
-      )
-
+      const dependencyRefIds = await ensureDependencyRefIds(sourceBlockId, dependsOnValues)
       const payload = toRefDataForSave(
         {
           status: statusValue,
@@ -392,21 +303,14 @@ function TaskPropertyPopupView(props: {
       setLastSavedSnapshot(snapshot)
       setLastFailedSnapshot(null)
     } catch (error) {
-      setErrorText(
+      const message =
         error instanceof Error
           ? error.message
           : isChinese
             ? "保存失败，请稍后重试"
-            : "Save failed",
-      )
-      orca.notify(
-        "error",
-        error instanceof Error
-          ? error.message
-          : isChinese
-            ? "保存失败，请稍后重试"
-            : "Save failed",
-      )
+            : "Save failed"
+      setErrorText(message)
+      orca.notify("error", message)
       setLastFailedSnapshot(snapshot)
     } finally {
       setSaving(false)
@@ -421,7 +325,7 @@ function TaskPropertyPopupView(props: {
     const unchanged = currentSnapshot === lastSavedSnapshot
     const failedAndUnchanged =
       lastFailedSnapshot != null && currentSnapshot === lastFailedSnapshot
-    if (unchanged || failedAndUnchanged) {
+    if (unchanged || failedAndUnchanged || saving) {
       return
     }
 
@@ -432,9 +336,8 @@ function TaskPropertyPopupView(props: {
     return () => {
       window.clearTimeout(timer)
     }
-  }, [currentSnapshot, handleSave, lastFailedSnapshot, lastSavedSnapshot, taskRef])
+  }, [currentSnapshot, lastFailedSnapshot, lastSavedSnapshot, saving, taskRef])
 
-  // Use a consistent 2-column row layout: label + control.
   const rowLabelWidth = isChinese ? "88px" : "110px"
   const rowStyle = {
     display: "grid",
@@ -448,7 +351,6 @@ function TaskPropertyPopupView(props: {
     color: "var(--orca-color-text-2)",
     lineHeight: "30px",
   }
-
   const renderFormRow = (label: string, control: unknown) => {
     return React.createElement(
       "div",
@@ -577,58 +479,97 @@ function TaskPropertyPopupView(props: {
   }
 
   return React.createElement(
-    ModalOverlay,
+    "div",
     {
-      visible: props.visible,
-      blurred: false,
       style: {
-        background: "rgba(0, 0, 0, 0.30)",
-        backdropFilter: "none",
-      },
-      canClose: true,
-      onClose: () => {
-        if (editingDateField != null) {
-          setEditingDateField(null)
-          return
-        }
-        props.onClose()
-      },
-      onClosed: () => {
-        if (!props.visible) {
-          props.onDispose()
-        }
+        minHeight: 0,
+        height: "100%",
+        overflow: "auto",
+        border: "1px solid var(--orca-color-border)",
+        borderRadius: "8px",
+        background: "var(--orca-color-bg-2)",
+        padding: "10px",
+        boxSizing: "border-box",
       },
     },
-      React.createElement(
-        "div",
-        {
+    React.createElement(
+      "div",
+      {
         style: {
-          width: "calc(100vw - 40px)",
-          maxWidth: "520px",
-          minWidth: 0,
-          maxHeight: "calc(100vh - 56px)",
-          overflow: "auto",
-          padding: "16px",
-          boxSizing: "border-box",
-          background: "var(--orca-color-bg-1)",
-          border: "1px solid var(--orca-color-border-1)",
-          borderRadius: "10px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px",
+          marginBottom: "10px",
         },
-        onClick: (event: MouseEvent) => event.stopPropagation(),
       },
       React.createElement(
         "div",
         {
           style: {
-            fontSize: "17px",
+            fontSize: "14px",
             fontWeight: 600,
-            marginBottom: "10px",
           },
         },
         labels.title,
       ),
-      renderFormRow(
-        isChinese ? "任务名称" : "Task name",
+      React.createElement(
+        Button,
+        {
+          variant: "plain",
+          title: isChinese ? "关闭属性面板" : "Close property panel",
+          onClick: props.onClose,
+        },
+        React.createElement("i", {
+          className: "ti ti-x",
+          style: { fontSize: "16px" },
+        }),
+      ),
+    ),
+    renderFormRow(
+      isChinese ? "任务名称" : "Task name",
+      React.createElement(
+        "div",
+        {
+          style: {
+            minHeight: "30px",
+            display: "flex",
+            alignItems: "center",
+            padding: "0 10px",
+            border: "1px solid var(--orca-color-border-1)",
+            borderRadius: "6px",
+            background: "var(--orca-color-bg-2)",
+            color: "var(--orca-color-text-1)",
+            fontSize: "12px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          },
+        },
+        taskName,
+      ),
+    ),
+    renderFormRow(
+      isChinese ? "状态 / 收藏" : "Status / Star",
+      React.createElement(
+        "div",
+        {
+          style: {
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+            gap: "10px",
+            alignItems: "center",
+          },
+        },
+        React.createElement(Select, {
+          selected: [statusValue],
+          options: statusOptions,
+          onChange: (selected: string[]) => {
+            setStatusValue(selected[0] ?? props.schema.statusChoices[0])
+          },
+          menuContainer: popupMenuContainerRef,
+          width: "100%",
+        }),
         React.createElement(
           "div",
           {
@@ -636,170 +577,126 @@ function TaskPropertyPopupView(props: {
               minHeight: "30px",
               display: "flex",
               alignItems: "center",
-              padding: "0 10px",
-              border: "1px solid var(--orca-color-border-1)",
-              borderRadius: "6px",
-              background: "var(--orca-color-bg-2)",
-              color: "var(--orca-color-text-1)",
-              fontSize: "12px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              gap: "8px",
             },
           },
-          taskName,
-        ),
-      ),
-      renderFormRow(
-        isChinese ? "状态 / 收藏" : "Status / Star",
-        React.createElement(
-          "div",
-          {
-            style: {
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
-              gap: "10px",
-              alignItems: "center",
+          React.createElement(Checkbox, {
+            checked: starValue,
+            onChange: (event: { checked: boolean }) => {
+              setStarValue(event.checked === true)
             },
-          },
-          React.createElement(Select, {
-            selected: [statusValue],
-            options: statusOptions,
-            onChange: (selected: string[]) => {
-              setStatusValue(selected[0] ?? props.schema.statusChoices[0])
-            },
-            menuContainer: popupMenuContainerRef,
-            width: "100%",
           }),
           React.createElement(
-            "div",
+            "span",
             {
               style: {
-                minHeight: "30px",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
+                fontSize: "12px",
+                color: "var(--orca-color-text-2)",
               },
             },
-            React.createElement(Checkbox, {
-              checked: starValue,
-              onChange: (event: { checked: boolean }) => {
-                setStarValue(event.checked === true)
-              },
-            }),
-            React.createElement(
-              "span",
-              {
-                style: {
-                  fontSize: "12px",
-                  color: "var(--orca-color-text-2)",
-                },
-              },
-              starValue
-                ? (isChinese ? "已收藏" : "Starred")
-                : (isChinese ? "未收藏" : "Not starred"),
-            ),
+            starValue
+              ? (isChinese ? "已收藏" : "Starred")
+              : (isChinese ? "未收藏" : "Not starred"),
           ),
         ),
       ),
-      renderFormRow(
-        labels.repeatRule,
-        React.createElement(Input, {
-          value: repeatRuleText,
-          placeholder: isChinese ? "例如：每周一 09:00" : "e.g. Every Monday 09:00",
-          onChange: (event: Event) => {
-            setRepeatRuleText((event.target as HTMLInputElement).value)
-          },
-        }),
-      ),
-      renderFormRow(
-        labels.dependsOn,
-        React.createElement(BlockSelect, {
-          mode: "block",
-          scope: props.schema.tagAlias,
-          selected: dependsOnValues,
-          multiSelection: true,
-          width: "100%",
-          menuContainer: popupMenuContainerRef,
-          onChange: (selected: string[]) => {
-            const normalized = selected
-              .map((item) => Number(item))
-              .filter((item) => !Number.isNaN(item))
-              .map((item) => getMirrorId(item))
-              .filter((item, index, all) => all.indexOf(item) === index)
-
-            setDependsOnValues(normalized)
-            if (normalized.length === 0) {
-              setDependsModeValue("ALL")
-              setDependencyDelayText("")
-            }
-          },
-        }),
-      ),
-      // Show dependency mode/delay only when dependency targets exist.
-      hasDependencies
-        ? React.createElement(
-            React.Fragment,
-            null,
-            renderFormRow(
-              labels.dependsMode,
-              React.createElement(Select, {
-                selected: [dependsModeValue],
-                options: dependsModeOptions,
-                onChange: (selected: string[]) => {
-                  setDependsModeValue(selected[0] ?? "ALL")
-                },
-                menuContainer: popupMenuContainerRef,
-                width: "100%",
-              }),
-            ),
-            renderFormRow(
-              labels.dependencyDelay,
-              React.createElement(Input, {
-                value: dependencyDelayText,
-                placeholder: isChinese ? "例如：24" : "e.g. 24",
-                onChange: (event: Event) => {
-                  setDependencyDelayText((event.target as HTMLInputElement).value)
-                },
-              }),
-            ),
-          )
-        : null,
-      editingDateField != null
-        ? React.createElement(DatePicker, {
-            mode: "datetime",
-            visible: true,
-            value: selectedDateValue ?? new Date(),
-            refElement: dateAnchorRef,
-            menuContainer: popupMenuContainerRef,
-            onChange: (next: Date | [Date, Date]) => {
-              if (!(next instanceof Date)) {
-                return
-              }
-              if (editingDateField === "start") {
-                setStartTimeValue(next)
-              } else {
-                setEndTimeValue(next)
-              }
-              setEditingDateField(null)
-            },
-            onClose: () => setEditingDateField(null),
-          })
-        : null,
-      errorText.trim() !== ""
-        ? React.createElement(
-            "div",
-            {
-              style: {
-                color: "var(--orca-color-text-red)",
-                marginBottom: "10px",
-                fontSize: "12px",
-              },
-            },
-            errorText,
-          )
-        : null,
     ),
+    renderFormRow(
+      labels.repeatRule,
+      React.createElement(Input, {
+        value: repeatRuleText,
+        placeholder: isChinese ? "例如：每周一 09:00" : "e.g. Every Monday 09:00",
+        onChange: (event: Event) => {
+          setRepeatRuleText((event.target as HTMLInputElement).value)
+        },
+      }),
+    ),
+    renderFormRow(
+      labels.dependsOn,
+      React.createElement(BlockSelect, {
+        mode: "block",
+        scope: props.schema.tagAlias,
+        selected: dependsOnValues,
+        multiSelection: true,
+        width: "100%",
+        menuContainer: popupMenuContainerRef,
+        onChange: (selected: string[]) => {
+          const normalized = selected
+            .map((item) => Number(item))
+            .filter((item) => !Number.isNaN(item))
+            .map((item) => getMirrorId(item))
+            .filter((item, index, all) => all.indexOf(item) === index)
+
+          setDependsOnValues(normalized)
+          if (normalized.length === 0) {
+            setDependsModeValue("ALL")
+            setDependencyDelayText("")
+          }
+        },
+      }),
+    ),
+    hasDependencies
+      ? React.createElement(
+          React.Fragment,
+          null,
+          renderFormRow(
+            labels.dependsMode,
+            React.createElement(Select, {
+              selected: [dependsModeValue],
+              options: dependsModeOptions,
+              onChange: (selected: string[]) => {
+                setDependsModeValue(selected[0] ?? "ALL")
+              },
+              menuContainer: popupMenuContainerRef,
+              width: "100%",
+            }),
+          ),
+          renderFormRow(
+            labels.dependencyDelay,
+            React.createElement(Input, {
+              value: dependencyDelayText,
+              placeholder: isChinese ? "例如：24" : "e.g. 24",
+              onChange: (event: Event) => {
+                setDependencyDelayText((event.target as HTMLInputElement).value)
+              },
+            }),
+          ),
+        )
+      : null,
+    editingDateField != null
+      ? React.createElement(DatePicker, {
+          mode: "datetime",
+          visible: true,
+          value: selectedDateValue ?? new Date(),
+          refElement: dateAnchorRef,
+          menuContainer: popupMenuContainerRef,
+          onChange: (next: Date | [Date, Date]) => {
+            if (!(next instanceof Date)) {
+              return
+            }
+            if (editingDateField === "start") {
+              setStartTimeValue(next)
+            } else {
+              setEndTimeValue(next)
+            }
+            setEditingDateField(null)
+          },
+          onClose: () => setEditingDateField(null),
+        })
+      : null,
+    errorText.trim() !== ""
+      ? React.createElement(
+          "div",
+          {
+            style: {
+              color: "var(--orca-color-text-red)",
+              marginTop: "8px",
+              fontSize: "12px",
+            },
+          },
+          errorText,
+        )
+      : null,
   )
 }
 
@@ -844,23 +741,17 @@ function resolveTaskName(
     return emptyText
   }
 
-  const source = typeof block.text === "string" ? block.text : ""
-  const normalized = stripTaskTagFromText(source, tagAlias)
+  const taskText = typeof block.text === "string" ? block.text : ""
+  const normalized = stripTaskTagFromText(taskText, tagAlias)
   if (normalized !== "") {
     return normalized
   }
 
-  if (Array.isArray(block.content) && block.content.length > 0) {
-    const contentText = block.content
-      .map((fragment) => (typeof fragment.v === "string" ? fragment.v : ""))
-      .join("")
-    const normalizedContent = stripTaskTagFromText(contentText, tagAlias)
-    if (normalizedContent !== "") {
-      return normalizedContent
-    }
-  }
-
-  return emptyText
+  const contentText = block.content
+    ?.map((fragment) => (typeof fragment.v === "string" ? fragment.v : ""))
+    .join("") ?? ""
+  const normalizedContent = stripTaskTagFromText(contentText, tagAlias)
+  return normalizedContent === "" ? emptyText : normalizedContent
 }
 
 function stripTaskTagFromText(text: string, tagAlias: string): string {
@@ -871,16 +762,10 @@ function stripTaskTagFromText(text: string, tagAlias: string): string {
   const escapedAlias = tagAlias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   return text
     .replace(
-      new RegExp(
-        `(^|[\\s,\\uFF0C;\\uFF1B\\u3001])#${escapedAlias}(?=[\\s,\\uFF0C;\\uFF1B\\u3001]|$)`,
-        "gi",
-      ),
+      new RegExp(`(^|[\\s,\\uFF0C;\\uFF1B\\u3001])#${escapedAlias}(?=[\\s,\\uFF0C;\\uFF1B\\u3001]|$)`, "gi"),
       " ",
     )
-    .replace(
-      /(^|[\s,\uFF0C;\uFF1B\u3001])#[^\s#,\uFF0C;\uFF1B\u3001]+(?=[\s,\uFF0C;\uFF1B\u3001]|$)/g,
-      " ",
-    )
+    .replace(/(^|[\s,\uFF0C;\uFF1B\u3001])#[^\s#,\uFF0C;\uFF1B\u3001]+(?=[\s,\uFF0C;\uFF1B\u3001]|$)/g, " ")
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -905,7 +790,6 @@ function normalizeDependsOnForSelect(
   _dependsOnPropertyName: string,
 ): DbId[] {
   const normalized: DbId[] = []
-
   for (const value of dependsOn) {
     const matchedRef = sourceBlock?.refs.find((ref) => ref.id === value)
     const targetId = getMirrorId(matchedRef?.to ?? value)
