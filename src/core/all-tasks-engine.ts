@@ -2,6 +2,7 @@ import type { Block, BlockProperty, BlockRef, DbId } from "../orca.d.ts"
 import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
 import { getTaskPropertiesFromRef } from "./task-properties"
 import type { TaskSchemaDefinition } from "./task-schema"
+import { createRecurringTaskInTodayJournal } from "./task-recurrence"
 
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
@@ -286,20 +287,26 @@ export async function cycleTaskStatusInView(
     values.dependsMode === "ALL" || values.dependsMode === "ANY"
       ? values.dependsMode
       : schema.dependencyModeChoices[0]
+  const nextValues = {
+    ...values,
+    status: nextStatus,
+    startTime:
+      nextStatus === doingStatus && values.startTime == null
+        ? new Date()
+        : values.startTime,
+    endTime: values.endTime,
+  }
   const payload = [
-    { name: schema.propertyNames.status, value: nextStatus },
+    { name: schema.propertyNames.status, value: nextValues.status },
     {
       name: schema.propertyNames.startTime,
       type: DATE_TIME_PROP_TYPE,
-      value:
-        nextStatus === doingStatus && values.startTime == null
-          ? new Date()
-          : values.startTime,
+      value: nextValues.startTime,
     },
     {
       name: schema.propertyNames.endTime,
       type: DATE_TIME_PROP_TYPE,
-      value: values.endTime,
+      value: nextValues.endTime,
     },
     {
       name: schema.propertyNames.dependsMode,
@@ -314,6 +321,12 @@ export async function cycleTaskStatusInView(
         null,
         effectiveTaskRef,
         payload,
+      )
+      await createRecurringTaskInTodayJournal(
+        values.status,
+        nextValues,
+        sourceBlockId ?? blockId,
+        schema,
       )
       return
     } catch (error) {
@@ -334,6 +347,12 @@ export async function cycleTaskStatusInView(
         targetId,
         schema.tagAlias,
         payload,
+      )
+      await createRecurringTaskInTodayJournal(
+        values.status,
+        nextValues,
+        sourceBlockId ?? blockId,
+        schema,
       )
       return
     } catch (error) {

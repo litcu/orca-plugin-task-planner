@@ -1,6 +1,8 @@
 import type { Block, BlockProperty, CursorData, DbId } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId } from "./block-utils"
+import { getTaskPropertiesFromRef } from "./task-properties"
+import { createRecurringTaskInTodayJournal } from "./task-recurrence"
 
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
@@ -136,12 +138,19 @@ async function cycleTaskTagStatus(
   schema: TaskSchemaDefinition,
 ) {
   const propertyNames = schema.propertyNames
-  const currentStatus = getRefPropertyString(taskTagRef.data, propertyNames.status)
-  const nextStatus = getNextStatus(currentStatus, schema)
-  const currentStartTime = getRefPropertyValue(taskTagRef.data, propertyNames.startTime)
-  const currentEndTime = getRefPropertyValue(taskTagRef.data, propertyNames.endTime)
+  const currentValues = getTaskPropertiesFromRef(taskTagRef.data, schema)
+  const nextStatus = getNextStatus(currentValues.status, schema)
   const dependsModeValue = getDependencyModeValue(taskTagRef.data, schema)
   const [, doingStatus] = schema.statusChoices
+  const nextValues = {
+    ...currentValues,
+    status: nextStatus,
+    startTime:
+      nextStatus === doingStatus && currentValues.startTime == null
+        ? new Date()
+        : currentValues.startTime,
+    endTime: currentValues.endTime,
+  }
 
   await orca.commands.invokeEditorCommand(
     "core.editor.insertTag",
@@ -149,25 +158,29 @@ async function cycleTaskTagStatus(
     blockId,
     schema.tagAlias,
     [
-      { name: propertyNames.status, value: nextStatus },
+      { name: propertyNames.status, value: nextValues.status },
       {
         name: propertyNames.startTime,
         type: DATE_TIME_PROP_TYPE,
-        value:
-          nextStatus === doingStatus && currentStartTime == null
-            ? new Date()
-            : currentStartTime,
+        value: nextValues.startTime,
       },
       {
         name: propertyNames.endTime,
         type: DATE_TIME_PROP_TYPE,
-        value: currentEndTime,
+        value: nextValues.endTime,
       },
       {
         name: propertyNames.dependsMode,
         value: dependsModeValue,
       },
     ],
+  )
+
+  await createRecurringTaskInTodayJournal(
+    currentValues.status,
+    nextValues,
+    blockId,
+    schema,
   )
 }
 

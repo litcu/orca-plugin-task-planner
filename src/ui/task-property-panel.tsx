@@ -7,6 +7,7 @@ import {
   toRefDataForSave,
   validateNumericField,
 } from "../core/task-properties"
+import { createRecurringTaskInTodayJournal } from "../core/task-recurrence"
 
 import { t } from "../libs/l10n"
 import {
@@ -14,6 +15,11 @@ import {
   resolveBlockedReasonTag,
   type TaskActivationInfo,
 } from "./task-activation-state"
+import {
+  buildRepeatRuleFromEditorState,
+  parseRepeatRuleToEditorState,
+  type RepeatMode,
+} from "./repeat-rule-editor"
 type PopupTriggerSource = "tag-click" | "tag-menu" | "panel-view"
 
 type ReactRootLike = {
@@ -137,6 +143,9 @@ function TaskPropertyPopupView(props: {
   const taskName = React.useMemo(() => {
     return resolveTaskName(block, props.schema.tagAlias, isChinese)
   }, [block, isChinese, props.schema.tagAlias])
+  const initialRepeatEditor = React.useMemo(() => {
+    return parseRepeatRuleToEditorState(initialValues.repeatRule)
+  }, [initialValues.repeatRule])
 
   const [statusValue, setStatusValue] = React.useState(initialValues.status)
   const [startTimeValue, setStartTimeValue] = React.useState<Date | null>(
@@ -165,6 +174,27 @@ function TaskPropertyPopupView(props: {
   )
   const [starValue, setStarValue] = React.useState(initialValues.star)
   const [repeatRuleText, setRepeatRuleText] = React.useState(initialValues.repeatRule)
+  const [repeatModeValue, setRepeatModeValue] = React.useState<RepeatMode>(
+    initialRepeatEditor.mode,
+  )
+  const [repeatIntervalText, setRepeatIntervalText] = React.useState(
+    initialRepeatEditor.intervalText,
+  )
+  const [repeatWeekdayValue, setRepeatWeekdayValue] = React.useState(
+    initialRepeatEditor.weekdayValue,
+  )
+  const [repeatMaxCountText, setRepeatMaxCountText] = React.useState(
+    initialRepeatEditor.maxCountText,
+  )
+  const [repeatEndAtValue, setRepeatEndAtValue] = React.useState<Date | null>(
+    initialRepeatEditor.endAtValue,
+  )
+  const [repeatOccurrence, setRepeatOccurrence] = React.useState(
+    initialRepeatEditor.occurrence,
+  )
+  const [repeatRuleParseable, setRepeatRuleParseable] = React.useState(
+    initialRepeatEditor.parseable,
+  )
   const [dependsOnValues, setDependsOnValues] = React.useState<DbId[]>(
     initialDependsOnForEditor,
   )
@@ -177,7 +207,7 @@ function TaskPropertyPopupView(props: {
       : String(initialValues.dependencyDelay),
   )
   const [editingDateField, setEditingDateField] = React.useState<
-    "start" | "end" | null
+    "start" | "end" | "repeatEnd" | null
   >(null)
   const [errorText, setErrorText] = React.useState("")
   const [saving, setSaving] = React.useState(false)
@@ -201,6 +231,8 @@ function TaskPropertyPopupView(props: {
       ? startTimeValue
       : editingDateField === "end"
         ? endTimeValue
+        : editingDateField === "repeatEnd"
+          ? repeatEndAtValue
         : null
   const initialSnapshot = React.useMemo(() => {
     return buildEditorSnapshot({
@@ -275,6 +307,13 @@ function TaskPropertyPopupView(props: {
     setEffortValue(clampScore(initialValues.effort))
     setStarValue(initialValues.star)
     setRepeatRuleText(initialValues.repeatRule)
+    setRepeatModeValue(initialRepeatEditor.mode)
+    setRepeatIntervalText(initialRepeatEditor.intervalText)
+    setRepeatWeekdayValue(initialRepeatEditor.weekdayValue)
+    setRepeatMaxCountText(initialRepeatEditor.maxCountText)
+    setRepeatEndAtValue(initialRepeatEditor.endAtValue)
+    setRepeatOccurrence(initialRepeatEditor.occurrence)
+    setRepeatRuleParseable(initialRepeatEditor.parseable)
     setDependsOnValues(initialDependsOnForEditor)
     setDependsModeValue(initialValues.dependsMode)
     setDependencyDelayText(
@@ -287,7 +326,19 @@ function TaskPropertyPopupView(props: {
     setSaving(false)
     setLastSavedSnapshot(initialSnapshot)
     setLastFailedSnapshot(null)
-  }, [props.blockId, initialDependsOnForEditor, initialSnapshot, initialValues])
+  }, [
+    props.blockId,
+    initialDependsOnForEditor,
+    initialRepeatEditor.intervalText,
+    initialRepeatEditor.mode,
+    initialRepeatEditor.maxCountText,
+    initialRepeatEditor.occurrence,
+    initialRepeatEditor.parseable,
+    initialRepeatEditor.endAtValue,
+    initialRepeatEditor.weekdayValue,
+    initialSnapshot,
+    initialValues,
+  ])
 
   const statusOptions = props.schema.statusChoices.map((item) => ({
     value: item,
@@ -298,6 +349,59 @@ function TaskPropertyPopupView(props: {
     { value: "ALL", label: t("All dependency tasks completed") },
     { value: "ANY", label: t("Any dependency task completed") },
   ]
+  const repeatModeOptions = [
+    { value: "none", label: t("No repeat") },
+    { value: "day", label: t("By day") },
+    { value: "week", label: t("By week") },
+    { value: "month", label: t("By month") },
+  ]
+  const repeatWeekdayOptions = [
+    { value: "", label: t("Not set") },
+    { value: "0", label: t("Sunday") },
+    { value: "1", label: t("Monday") },
+    { value: "2", label: t("Tuesday") },
+    { value: "3", label: t("Wednesday") },
+    { value: "4", label: t("Thursday") },
+    { value: "5", label: t("Friday") },
+    { value: "6", label: t("Saturday") },
+  ]
+
+  const updateRepeatEditor = React.useCallback((next: {
+    mode?: RepeatMode
+    intervalText?: string
+    weekdayValue?: string
+    maxCountText?: string
+    endAtValue?: Date | null
+  }) => {
+    const mode = next.mode ?? repeatModeValue
+    const intervalText = next.intervalText ?? repeatIntervalText
+    const weekdayValue = next.weekdayValue ?? repeatWeekdayValue
+    const maxCountText = next.maxCountText ?? repeatMaxCountText
+    const endAtValue = next.endAtValue !== undefined ? next.endAtValue : repeatEndAtValue
+    const nextRule = buildRepeatRuleFromEditorState({
+      mode,
+      intervalText,
+      weekdayValue,
+      maxCountText,
+      endAtValue,
+      occurrence: repeatOccurrence,
+    })
+
+    setRepeatModeValue(mode)
+    setRepeatIntervalText(intervalText)
+    setRepeatWeekdayValue(weekdayValue)
+    setRepeatMaxCountText(maxCountText)
+    setRepeatEndAtValue(endAtValue)
+    setRepeatRuleParseable(true)
+    setRepeatRuleText(nextRule)
+  }, [
+    repeatEndAtValue,
+    repeatIntervalText,
+    repeatMaxCountText,
+    repeatModeValue,
+    repeatOccurrence,
+    repeatWeekdayValue,
+  ])
 
   const refreshActivationInfo = React.useCallback(async () => {
     setActivationLoading(true)
@@ -384,21 +488,23 @@ function TaskPropertyPopupView(props: {
         sourceBlockId,
         dependsOnValues,
       )
+      const previousValues = getTaskPropertiesFromRef(taskRef.data, props.schema)
+      const valuesToSave = {
+        status: statusValue,
+        startTime: startTimeValue,
+        endTime: endTimeValue,
+        importance: importanceInRange,
+        urgency: urgencyInRange,
+        effort: effortInRange,
+        star: starValue,
+        repeatRule: repeatRuleText,
+        dependsOn: dependencyRefIds,
+        dependsMode: hasDependencies ? dependsModeValue : "ALL",
+        dependencyDelay: hasDependencies ? dependencyDelay.value : null,
+      }
 
       const payload = toRefDataForSave(
-        {
-          status: statusValue,
-          startTime: startTimeValue,
-          endTime: endTimeValue,
-          importance: importanceInRange,
-          urgency: urgencyInRange,
-          effort: effortInRange,
-          star: starValue,
-          repeatRule: repeatRuleText,
-          dependsOn: dependencyRefIds,
-          dependsMode: hasDependencies ? dependsModeValue : "ALL",
-          dependencyDelay: hasDependencies ? dependencyDelay.value : null,
-        },
+        valuesToSave,
         props.schema,
       )
 
@@ -408,6 +514,12 @@ function TaskPropertyPopupView(props: {
         sourceBlockId,
         props.schema.tagAlias,
         payload,
+      )
+      await createRecurringTaskInTodayJournal(
+        previousValues.status,
+        valuesToSave,
+        sourceBlockId,
+        props.schema,
       )
       setLastSavedSnapshot(snapshot)
       setLastFailedSnapshot(null)
@@ -476,7 +588,7 @@ function TaskPropertyPopupView(props: {
   }
 
   const renderTimeField = (
-    key: "start" | "end",
+    key: "start" | "end" | "repeatEnd",
     label: string,
     value: Date | null,
     setValue: (next: Date | null) => void,
@@ -772,14 +884,125 @@ function TaskPropertyPopupView(props: {
       ),
       renderFormRow(
         labels.repeatRule,
-        React.createElement(Input, {
-          value: repeatRuleText,
-          placeholder: t("e.g. Every Monday 09:00"),
-          onChange: (event: Event) => {
-            setRepeatRuleText((event.target as HTMLInputElement).value)
+        React.createElement(Select, {
+          selected: [repeatModeValue],
+          options: repeatModeOptions,
+          onChange: (selected: string[]) => {
+            updateRepeatEditor({
+              mode: (selected[0] ?? "none") as RepeatMode,
+            })
           },
+          menuContainer: popupMenuContainerRef,
+          width: "100%",
         }),
       ),
+      repeatModeValue !== "none"
+        ? renderFormRow(
+            t("Repeat every"),
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) auto",
+                  gap: "8px",
+                  alignItems: "center",
+                },
+              },
+              React.createElement(Input, {
+                value: repeatIntervalText,
+                placeholder: "1",
+                onChange: (event: Event) => {
+                  updateRepeatEditor({
+                    intervalText: (event.target as HTMLInputElement).value,
+                  })
+                },
+              }),
+              React.createElement(
+                "span",
+                {
+                  style: {
+                    fontSize: "11px",
+                    color: "var(--orca-color-text-2)",
+                    whiteSpace: "nowrap",
+                  },
+                },
+                repeatModeValue === "day"
+                  ? t("day(s)")
+                  : repeatModeValue === "week"
+                    ? t("week(s)")
+                    : t("month(s)"),
+              ),
+            ),
+          )
+        : null,
+      repeatModeValue === "week"
+        ? renderFormRow(
+            t("Repeat weekday"),
+            React.createElement(Select, {
+              selected: [repeatWeekdayValue],
+              options: repeatWeekdayOptions,
+              onChange: (selected: string[]) => {
+                updateRepeatEditor({
+                  weekdayValue: selected[0] ?? "",
+                })
+              },
+              menuContainer: popupMenuContainerRef,
+              width: "100%",
+            }),
+          )
+        : null,
+      repeatModeValue !== "none"
+        ? renderFormRow(
+            t("Repeat max count"),
+            React.createElement(Input, {
+              value: repeatMaxCountText,
+              placeholder: t("No limit"),
+              onChange: (event: Event) => {
+                updateRepeatEditor({
+                  maxCountText: (event.target as HTMLInputElement).value,
+                })
+              },
+            }),
+          )
+        : null,
+      repeatModeValue !== "none"
+        ? renderTimeField(
+            "repeatEnd",
+            t("Repeat ends at"),
+            repeatEndAtValue,
+            (next: Date | null) => {
+              updateRepeatEditor({
+                endAtValue: next,
+              })
+            },
+          )
+        : null,
+      !repeatRuleParseable && repeatRuleText.trim() !== ""
+        ? renderFormRow(
+            t("Repeat rule (raw)"),
+            React.createElement(Input, {
+              value: repeatRuleText,
+              onChange: (event: Event) => {
+                setRepeatRuleText((event.target as HTMLInputElement).value)
+                setRepeatRuleParseable(false)
+              },
+            }),
+          )
+        : null,
+      !repeatRuleParseable && repeatRuleText.trim() !== ""
+        ? React.createElement(
+            "div",
+            {
+              style: {
+                color: "var(--orca-color-text-2)",
+                marginBottom: "8px",
+                fontSize: "11px",
+              },
+            },
+            t("Legacy repeat rule detected. Change options above to replace it."),
+          )
+        : null,
       renderFormRow(
         labels.dependsOn,
         React.createElement(BlockSelect, {
@@ -868,8 +1091,10 @@ function TaskPropertyPopupView(props: {
               }
               if (editingDateField === "start") {
                 setStartTimeValue(next)
-              } else {
+              } else if (editingDateField === "end") {
                 setEndTimeValue(next)
+              } else {
+                updateRepeatEditor({ endAtValue: next })
               }
               setEditingDateField(null)
             },

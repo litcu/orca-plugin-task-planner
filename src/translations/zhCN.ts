@@ -1,4 +1,4 @@
-const zhCN = {
+﻿const zhCN = {
   "Task schema initialized": "任务 schema 已初始化（语言=${locale}，默认依赖模式=${mode}）",
   "Task tag name": "任务标签名称",
   "Name of the tag used to identify tasks. Changes apply after clicking Save.": "用于标识任务的标签名称。修改后点击保存才会生效。",
@@ -88,6 +88,29 @@ const zhCN = {
   "No task block found. Put cursor inside a task block first": "未定位到任务块，请先将光标放在任务块中",
   "Current block is not a task": "当前块不是任务，无法打开任务属性",
   "Open task properties": "打开任务属性",
+  "No repeat": "不重复",
+  "By day": "按天",
+  "By week": "按周",
+  "By month": "按月",
+  "Repeat by": "按",
+  "Repeat every": "每隔",
+  "day(s)": "天",
+  "week(s)": "周",
+  "month(s)": "月",
+  "Repeat weekday": "重复星期",
+  "Repeat time": "重复时间",
+  "Repeat max count": "最大重复次数",
+  "Repeat ends at": "结束时间",
+  "No limit": "不限制",
+  "Sunday": "周日",
+  "Monday": "周一",
+  "Tuesday": "周二",
+  "Wednesday": "周三",
+  "Thursday": "周四",
+  "Friday": "周五",
+  "Saturday": "周六",
+  "Repeat rule (raw)": "重复规则（原始）",
+  "Legacy repeat rule detected. Change options above to replace it.": "检测到旧格式重复规则，可使用上方选项重新生成。",
 }
 
 export default zhCN
