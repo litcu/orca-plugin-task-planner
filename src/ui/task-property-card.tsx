@@ -594,6 +594,29 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         ),
       ),
     ),
+    renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
+    renderTimeField("end", labels.endTime, endTimeValue, setEndTimeValue),
+    renderScoreField(
+      labels.importance,
+      importanceValue,
+      importanceText,
+      setImportanceValue,
+      setImportanceText,
+    ),
+    renderScoreField(
+      labels.urgency,
+      urgencyValue,
+      urgencyText,
+      setUrgencyValue,
+      setUrgencyText,
+    ),
+    renderScoreField(
+      labels.effort,
+      effortValue,
+      effortText,
+      setEffortValue,
+      setEffortText,
+    ),
     renderFormRow(
       labels.repeatRule,
       React.createElement(Input, {
