@@ -1,4 +1,5 @@
 import type { DbId } from "../orca.d.ts"
+import { t } from "../libs/l10n"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 
 export interface TaskListRowItem {
@@ -55,9 +56,7 @@ export function TaskListRow(props: TaskListRowProps) {
               event.stopPropagation()
               props.onToggleCollapse?.()
             },
-            title: props.collapsed
-              ? (props.isChinese ? "展开子任务" : "Expand subtasks")
-              : (props.isChinese ? "折叠子任务" : "Collapse subtasks"),
+            title: props.collapsed ? t("Expand subtasks") : t("Collapse subtasks"),
             style: {
               width: "18px",
               height: "18px",
@@ -72,7 +71,7 @@ export function TaskListRow(props: TaskListRowProps) {
               padding: 0,
             },
           },
-          props.collapsed ? "▸" : "▾",
+          props.collapsed ? "\u25B8" : "\u25BE",
         )
       : React.createElement("div", {
           style: {
@@ -90,7 +89,7 @@ export function TaskListRow(props: TaskListRowProps) {
           void props.onToggleStatus()
         },
         disabled: props.loading || props.updating,
-        title: props.isChinese ? "切换任务状态" : "Toggle task status",
+        title: t("Toggle task status"),
         style: {
           width: "22px",
           height: "22px",
@@ -147,16 +146,16 @@ export function TaskListRow(props: TaskListRowProps) {
 function resolveStatusGlyph(status: string, schema: TaskSchemaDefinition): string {
   const [todoStatus, doingStatus, doneStatus] = schema.statusChoices
   if (status === doneStatus) {
-    return "✓"
+    return "\u2713"
   }
   if (status === doingStatus) {
-    return "◐"
+    return "\u25D0"
   }
   if (status === todoStatus) {
-    return "◯"
+    return "\u25EF"
   }
 
-  return "◯"
+  return "\u25EF"
 }
 
 function resolveStatusColor(status: string, schema: TaskSchemaDefinition): string {
@@ -177,7 +176,7 @@ function resolveDueInfo(
 ): { text: string; color: string; strong: boolean } {
   if (endTime == null || Number.isNaN(endTime.getTime())) {
     return {
-      text: isChinese ? "未设置" : "No due",
+      text: t("No due"),
       color: "var(--orca-color-text-2)",
       strong: false,
     }
@@ -191,7 +190,7 @@ function resolveDueInfo(
     const diffMs = nowTime - dueTime
     const overdueDays = Math.max(1, Math.ceil(diffMs / (24 * 60 * 60 * 1000)))
     return {
-      text: isChinese ? `超期${overdueDays}天` : `Overdue ${overdueDays}d`,
+      text: t("Overdue ${days}d", { days: String(overdueDays) }),
       color: "var(--orca-color-text-red, #c53030)",
       strong: true,
     }
@@ -211,7 +210,7 @@ function resolveDueInfo(
 
   if (dueTime >= startOfToday.getTime() && dueTime < startOfTomorrow.getTime()) {
     return {
-      text: isChinese ? "今天" : "Today",
+      text: t("Today"),
       color: "var(--orca-color-text-yellow, #b7791f)",
       strong: true,
     }
@@ -219,7 +218,7 @@ function resolveDueInfo(
 
   if (dueTime >= startOfTomorrow.getTime() && dueTime < startOfAfterTomorrow.getTime()) {
     return {
-      text: isChinese ? "明天" : "Tomorrow",
+      text: t("Tomorrow"),
       color: "var(--orca-color-text-yellow, #b7791f)",
       strong: true,
     }

@@ -1,5 +1,6 @@
 import type { BlockProperty, DbId } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "./task-schema"
+import { t } from "../libs/l10n"
 
 const PROP_TYPE = {
   TEXT: 1,
@@ -41,41 +42,22 @@ export interface TaskFieldLabels {
   cancel: string
 }
 
-export function buildTaskFieldLabels(locale: string): TaskFieldLabels {
-  if (locale === "zh-CN") {
-    return {
-      title: "任务属性",
-      status: "状态",
-      startTime: "开始时间",
-      endTime: "结束时间",
-      importance: "重要性",
-      urgency: "紧急度",
-      effort: "工作量",
-      star: "收藏",
-      repeatRule: "重复规则",
-      dependsOn: "依赖任务",
-      dependsMode: "依赖模式",
-      dependencyDelay: "依赖延迟",
-      save: "保存",
-      cancel: "取消",
-    }
-  }
-
+export function buildTaskFieldLabels(_locale: string): TaskFieldLabels {
   return {
-    title: "Task Properties",
-    status: "Status",
-    startTime: "Start time",
-    endTime: "End time",
-    importance: "Importance",
-    urgency: "Urgency",
-    effort: "Effort",
-    star: "Star",
-    repeatRule: "Repeat rule",
-    dependsOn: "Depends on",
-    dependsMode: "Depends mode",
-    dependencyDelay: "Dependency delay",
-    save: "Save",
-    cancel: "Cancel",
+    title: t("Task Properties"),
+    status: t("Status"),
+    startTime: t("Start time"),
+    endTime: t("End time"),
+    importance: t("Importance"),
+    urgency: t("Urgency"),
+    effort: t("Effort"),
+    star: t("Star"),
+    repeatRule: t("Repeat rule"),
+    dependsOn: t("Depends on"),
+    dependsMode: t("Depends mode"),
+    dependencyDelay: t("Dependency delay"),
+    save: t("Save"),
+    cancel: t("Cancel"),
   }
 }
 
@@ -86,9 +68,7 @@ export function getTaskPropertiesFromRef(
   const names = schema.propertyNames
 
   return {
-    status:
-      getString(refData, names.status) ??
-      schema.statusChoices[0],
+    status: getString(refData, names.status) ?? schema.statusChoices[0],
     startTime: getDate(refData, names.startTime),
     endTime: getDate(refData, names.endTime),
     importance: getNumber(refData, names.importance),
@@ -97,9 +77,7 @@ export function getTaskPropertiesFromRef(
     star: getBoolean(refData, names.star),
     repeatRule: getString(refData, names.repeatRule) ?? "",
     dependsOn: getDbIdArray(refData, names.dependsOn),
-    dependsMode:
-      getString(refData, names.dependsMode) ??
-      schema.dependencyModeChoices[0],
+    dependsMode: getString(refData, names.dependsMode) ?? schema.dependencyModeChoices[0],
     dependencyDelay: getNumber(refData, names.dependencyDelay),
   }
 }
@@ -172,7 +150,6 @@ export function toRefDataForSave(
 export function validateNumericField(
   label: string,
   rawValue: string,
-  isChinese: boolean = true,
 ): { value: number | null; error: string | null } {
   const normalized = rawValue.trim()
   if (normalized === "") {
@@ -183,7 +160,7 @@ export function validateNumericField(
   if (Number.isNaN(parsed)) {
     return {
       value: null,
-      error: isChinese ? `${label} 必须是数字` : `${label} must be a number`,
+      error: t("${field} must be a number", { field: label }),
     }
   }
 

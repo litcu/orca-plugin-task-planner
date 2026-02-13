@@ -12,6 +12,7 @@ import {
   cycleTaskStatusInView,
   type AllTaskItem,
 } from "../core/all-tasks-engine"
+import { t } from "../libs/l10n"
 import { TaskPropertyPanelCard } from "./task-property-card"
 import { TaskListRow } from "./task-list-row"
 
@@ -74,18 +75,14 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         setErrorText("")
       } catch (error) {
         console.error(error)
-        setErrorText(
-          isChinese
-            ? "加载任务视图失败"
-            : "Failed to load task view",
-        )
+        setErrorText(t("Failed to load task view"))
       } finally {
         if (!silent) {
           setLoading(false)
         }
       }
     },
-    [isChinese, props.schema],
+    [props.schema],
   )
 
   React.useEffect(() => {
@@ -99,7 +96,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   }, [loadByTab, tab])
 
   React.useEffect(() => {
-    // 监听任务变更并轻量刷新，保证状态切换后视图及时更新。
+    // Listen for block changes and do lightweight refresh.
     const { subscribe } = window.Valtio
     let refreshTimer: number | null = null
     const unsubscribe = subscribe(orca.state.blocks, () => {
@@ -138,7 +135,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         await loadByTab(tab, { silent: true })
       } catch (error) {
         console.error(error)
-        setErrorText(isChinese ? "切换任务状态失败" : "Failed to toggle task status")
+        setErrorText(t("Failed to toggle task status"))
       } finally {
         setUpdatingIds((prev: Set<DbId>) => {
           const next = new Set(prev)
@@ -147,7 +144,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         })
       }
     },
-    [isChinese, loadByTab, props.schema, tab],
+    [loadByTab, props.schema, tab],
   )
 
   const openTaskProperty = React.useCallback(
@@ -156,6 +153,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     },
     [],
   )
+
   const closeTaskProperty = React.useCallback(() => {
     setSelectedTaskId(null)
     void loadByTab(tab, { silent: true })
@@ -177,14 +175,14 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     return [
       {
         value: "all",
-        label: isChinese ? "全部状态" : "All statuses",
+        label: t("All statuses"),
       },
       ...props.schema.statusChoices.map((status) => ({
         value: status,
         label: status,
       })),
     ]
-  }, [isChinese, props.schema])
+  }, [props.schema])
 
   const normalizedKeyword = React.useMemo(() => keyword.trim().toLowerCase(), [keyword])
   const matchesItem = React.useCallback(
@@ -216,8 +214,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   }, [collapsedIds, filteredAllTaskTree])
 
   const viewName = tab === "next-actions"
-    ? (isChinese ? "激活任务" : "Active Tasks")
-    : (isChinese ? "全部任务" : "All Tasks")
+    ? t("Active Tasks")
+    : t("All Tasks")
 
   const visibleCount = tab === "next-actions"
     ? filteredNextActionItems.length
@@ -261,11 +259,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       options: [
         {
           value: "next-actions",
-          label: isChinese ? "激活任务" : "Active Tasks",
+          label: t("Active Tasks"),
         },
         {
           value: "all-tasks",
-          label: isChinese ? "全部任务" : "All Tasks",
+          label: t("All Tasks"),
         },
       ],
       onChange: (value: string) => {
@@ -296,7 +294,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       }),
       React.createElement(Input, {
         value: keyword,
-        placeholder: isChinese ? "按关键字筛选" : "Filter by keyword",
+        placeholder: t("Filter by keyword"),
         onChange: (event: Event) => {
           const target = event.target as HTMLInputElement | null
           setKeyword(target?.value ?? "")
@@ -315,7 +313,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             marginLeft: "auto",
           },
         },
-        isChinese ? `显示 ${visibleCount} 项` : `${visibleCount} items`,
+        t("Showing ${count} items", { count: String(visibleCount) }),
       ),
     ),
     React.createElement(
@@ -366,7 +364,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                   padding: "4px 0",
                 },
               },
-              isChinese ? "加载中..." : "Loading...",
+              t("Loading..."),
             )
           : null,
         !loading && visibleCount === 0
@@ -380,8 +378,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 },
               },
               tab === "next-actions"
-                ? (isChinese ? "当前没有可执行任务" : "No actionable tasks")
-                : (isChinese ? "没有匹配的任务" : "No matched tasks"),
+                ? t("No actionable tasks")
+                : t("No matched tasks"),
             )
           : null,
         !loading && visibleCount > 0

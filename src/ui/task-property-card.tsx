@@ -8,6 +8,7 @@ import {
   validateNumericField,
 } from "../core/task-properties"
 
+import { t } from "../libs/l10n"
 interface TaskPropertyPanelCardProps {
   blockId: DbId
   schema: TaskSchemaDefinition
@@ -200,39 +201,34 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     value: item,
     label: item,
   }))
-  const dependsModeOptions = isChinese
-    ? [
-        { value: "ALL", label: "所有依赖任务完成" },
-        { value: "ANY", label: "任一依赖任务完成" },
-      ]
-    : [
-        { value: "ALL", label: "ALL" },
-        { value: "ANY", label: "ANY" },
-      ]
+  const dependsModeOptions = [
+    { value: "ALL", label: t("All dependency tasks completed") },
+    { value: "ANY", label: t("Any dependency task completed") },
+  ]
 
   const handleSave = async (snapshot: string) => {
     if (taskRef == null) {
-      const message = isChinese ? "未找到任务标签引用，无法保存" : "Task ref not found"
+      const message = t("Task ref not found")
       setErrorText(message)
       orca.notify("error", message)
       setLastFailedSnapshot(snapshot)
       return
     }
 
-    const importance = validateNumericField(labels.importance, importanceText, isChinese)
+    const importance = validateNumericField(labels.importance, importanceText)
     if (importance.error != null) {
       setErrorText(importance.error)
       setLastFailedSnapshot(snapshot)
       return
     }
 
-    const urgency = validateNumericField(labels.urgency, urgencyText, isChinese)
+    const urgency = validateNumericField(labels.urgency, urgencyText)
     if (urgency.error != null) {
       setErrorText(urgency.error)
       setLastFailedSnapshot(snapshot)
       return
     }
-    const effort = validateNumericField(labels.effort, effortText, isChinese)
+    const effort = validateNumericField(labels.effort, effortText)
     if (effort.error != null) {
       setErrorText(effort.error)
       setLastFailedSnapshot(snapshot)
@@ -242,7 +238,6 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     const dependencyDelay = validateNumericField(
       labels.dependencyDelay,
       dependencyDelayText,
-      isChinese,
     )
     if (dependencyDelay.error != null) {
       setErrorText(dependencyDelay.error)
@@ -252,20 +247,20 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
 
     const importanceInRange = toScoreInRange(importance.value)
     if (importanceInRange == null && importance.value != null) {
-      setErrorText(isChinese ? "重要性必须在 0-100 之间" : "Importance must be 0-100")
+      setErrorText(t("Importance must be 0-100"))
       setLastFailedSnapshot(snapshot)
       return
     }
 
     const urgencyInRange = toScoreInRange(urgency.value)
     if (urgencyInRange == null && urgency.value != null) {
-      setErrorText(isChinese ? "紧急度必须在 0-100 之间" : "Urgency must be 0-100")
+      setErrorText(t("Urgency must be 0-100"))
       setLastFailedSnapshot(snapshot)
       return
     }
     const effortInRange = toScoreInRange(effort.value)
     if (effortInRange == null && effort.value != null) {
-      setErrorText(isChinese ? "工作量必须在 0-100 之间" : "Effort must be 0-100")
+      setErrorText(t("Effort must be 0-100"))
       setLastFailedSnapshot(snapshot)
       return
     }
@@ -306,9 +301,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       const message =
         error instanceof Error
           ? error.message
-          : isChinese
-            ? "保存失败，请稍后重试"
-            : "Save failed"
+          : t("Save failed")
       setErrorText(message)
       orca.notify("error", message)
       setLastFailedSnapshot(snapshot)
@@ -396,7 +389,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
               whiteSpace: "nowrap",
             },
           },
-          value == null ? (isChinese ? "未设置" : "Not set") : value.toLocaleString(),
+          value == null ? (t("Not set")) : value.toLocaleString(),
         ),
         React.createElement(
           Button,
@@ -408,7 +401,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
               setEditingDateField(key)
             },
           },
-          isChinese ? "选择" : "Pick",
+          t("Pick"),
         ),
         React.createElement(
           Button,
@@ -417,7 +410,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
             style: { minWidth: "60px" },
             onClick: () => setValue(null),
           },
-          isChinese ? "清空" : "Clear",
+          t("Clear"),
         ),
       ),
     )
@@ -517,7 +510,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         Button,
         {
           variant: "plain",
-          title: isChinese ? "关闭属性面板" : "Close property panel",
+          title: t("Close property panel"),
           onClick: props.onClose,
         },
         React.createElement("i", {
@@ -527,7 +520,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       ),
     ),
     renderFormRow(
-      isChinese ? "任务名称" : "Task name",
+      t("Task name"),
       React.createElement(
         "div",
         {
@@ -550,7 +543,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       ),
     ),
     renderFormRow(
-      isChinese ? "状态 / 收藏" : "Status / Star",
+      t("Status / Star"),
       React.createElement(
         "div",
         {
@@ -595,8 +588,8 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
               },
             },
             starValue
-              ? (isChinese ? "已收藏" : "Starred")
-              : (isChinese ? "未收藏" : "Not starred"),
+              ? (t("Starred"))
+              : (t("Not starred")),
           ),
         ),
       ),
@@ -605,7 +598,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       labels.repeatRule,
       React.createElement(Input, {
         value: repeatRuleText,
-        placeholder: isChinese ? "例如：每周一 09:00" : "e.g. Every Monday 09:00",
+        placeholder: t("e.g. Every Monday 09:00"),
         onChange: (event: Event) => {
           setRepeatRuleText((event.target as HTMLInputElement).value)
         },
@@ -655,7 +648,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
             labels.dependencyDelay,
             React.createElement(Input, {
               value: dependencyDelayText,
-              placeholder: isChinese ? "例如：24" : "e.g. 24",
+              placeholder: t("e.g. 24"),
               onChange: (event: Event) => {
                 setDependencyDelayText((event.target as HTMLInputElement).value)
               },
@@ -736,7 +729,7 @@ function resolveTaskName(
   tagAlias: string,
   isChinese: boolean,
 ): string {
-  const emptyText = isChinese ? "(无标题任务)" : "(Untitled task)"
+  const emptyText = t("(Untitled task)")
   if (block == null) {
     return emptyText
   }
@@ -844,5 +837,6 @@ function toScoreInRange(value: number | null): number | null {
 
   return Math.round(value)
 }
+
 
 

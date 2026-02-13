@@ -1,4 +1,5 @@
 import type { Block, DbId, TagMenuCommand } from "../orca.d.ts"
+import { t } from "../libs/l10n"
 import { TASK_TAG_ALIAS, getTaskSchemaByLocale } from "./task-schema"
 import { getMirrorId } from "./block-utils"
 import {
@@ -41,7 +42,7 @@ export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
       return
     }
 
-    // 仅拦截任务标签，避免影响其它标签点击行为。
+    // Only intercept task tag click, do not affect other tags.
     if (!hasTaskTagRef(blockId, tagAlias)) {
       return
     }
@@ -64,22 +65,12 @@ export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
       async (blockId?: DbId) => {
         const targetBlockId = resolveCommandTargetBlockId(blockId)
         if (targetBlockId == null) {
-          orca.notify(
-            "warn",
-            orca.state.locale === "zh-CN"
-              ? "未定位到任务块，请先将光标放在任务块中"
-              : "No task block found. Put cursor inside a task block first",
-          )
+          orca.notify("warn", t("No task block found. Put cursor inside a task block first"))
           return
         }
 
         if (!hasTaskTagRef(targetBlockId, tagAlias)) {
-          orca.notify(
-            "warn",
-            orca.state.locale === "zh-CN"
-              ? "当前块不是任务，无法打开任务属性"
-              : "Current block is not a task",
-          )
+          orca.notify("warn", t("Current block is not a task"))
           return
         }
 
@@ -89,7 +80,7 @@ export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
           triggerSource: "tag-menu",
         })
       },
-      "打开任务属性弹窗",
+      t("Open task properties"),
     )
   }
 
@@ -103,10 +94,9 @@ export function setupTaskPopupEntry(pluginName: string): TaskPopupEntryHandle {
 
       return window.React.createElement(MenuText, {
         preIcon: "ti ti-edit",
-        title: "打开任务属性",
+        title: t("Open task properties"),
         onClick: () => {
           close()
-
           void orca.commands.invokeCommand(openCommandId, tagRef.from)
         },
       })
@@ -139,7 +129,7 @@ function resolveCommandTargetBlockId(explicitBlockId?: DbId): DbId | null {
     return getMirrorId(explicitBlockId)
   }
 
-  // 命令面板直接触发时通常没有参数，回退到当前编辑区光标所在块。
+  // If triggered from command panel without args, fallback to current cursor block.
   const cursor = orca.utils.getCursorDataFromSelection(window.getSelection())
   if (cursor == null) {
     return null

@@ -1,4 +1,5 @@
 import type { ColumnPanel, PanelProps, RowPanel, ViewPanel } from "../orca.d.ts"
+import { t } from "../libs/l10n"
 import type { TaskSchemaDefinition } from "./task-schema"
 import { TaskViewsPanel } from "../ui/task-views-panel"
 import { setPreferredTaskViewsTab } from "./task-views-state"
@@ -35,7 +36,7 @@ export function setupNextActionsEntry(
     fixedToggleTaskViewsCommandId,
   ].filter((id, index, list) => list.indexOf(id) === index)
 
-  // 通过闭包注入 schema，保证面板渲染时始终使用当前任务字段定义。
+  // Inject schema through closure to keep renderer and schema in sync.
   const panelRenderer = (panelProps: PanelProps) => {
     const React = window.React
     return React.createElement(TaskViewsPanel, {
@@ -57,21 +58,15 @@ export function setupNextActionsEntry(
   registerOpenCommand(
     dynamicOpenTaskViewsCommandId,
     "next-actions",
-    "打开任务视图面板（Open Task Views）",
+    t("Open Task Views Panel"),
   )
   registerOpenCommand(
     fixedOpenTaskViewsCommandId,
     "next-actions",
-    "打开任务视图面板（Open Task Views）",
+    t("Open Task Views Panel"),
   )
-  registerToggleCommand(
-    dynamicToggleTaskViewsCommandId,
-    "切换任务视图面板（Toggle Task Views）",
-  )
-  registerToggleCommand(
-    fixedToggleTaskViewsCommandId,
-    "切换任务视图面板（Toggle Task Views）",
-  )
+  registerToggleCommand(dynamicToggleTaskViewsCommandId, t("Toggle Task Views Panel"))
+  registerToggleCommand(fixedToggleTaskViewsCommandId, t("Toggle Task Views Panel"))
   registerHeadbarButton()
 
   for (const legacyCommandId of legacyOpenCommandIds) {
@@ -91,6 +86,7 @@ export function setupNextActionsEntry(
 
         orca.commands.unregisterCommand(commandId)
       }
+
       for (const commandId of toggleCommandIds) {
         if (orca.state.commands[commandId] == null) {
           continue
@@ -173,13 +169,12 @@ export function setupNextActionsEntry(
     orca.headbar.registerHeadbarButton(headbarButtonId, () => {
       const React = window.React
       const Button = orca.components.Button
-      const isChinese = orca.state.locale === "zh-CN"
 
       return React.createElement(
         Button,
         {
           variant: "plain",
-          title: isChinese ? "切换任务面板" : "Toggle task panel",
+          title: t("Toggle task panel"),
           onClick: () => {
             void orca.commands.invokeCommand(fixedToggleTaskViewsCommandId)
           },

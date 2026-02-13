@@ -28,7 +28,7 @@ export async function load(_name: string) {
   nextActionsEntryDisposer = nextActionsEntry.dispose
 
   console.log(
-    t("任务 schema 已初始化", {
+    t("Task schema initialized", {
       locale: schemaResult.schemaLocale,
       mode: "ALL",
     }),
@@ -54,3 +54,4 @@ export async function unload() {
 
   console.log(`${pluginName} unloaded.`)
 }
+
