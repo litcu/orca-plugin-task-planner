@@ -20,6 +20,8 @@ export interface TaskPropertyValues {
   effort: number | null
   star: boolean
   repeatRule: string
+  labels: string[]
+  remark: string
   dependsOn: DbId[]
   dependsMode: string
   dependencyDelay: number | null
@@ -35,6 +37,8 @@ export interface TaskFieldLabels {
   effort: string
   star: string
   repeatRule: string
+  labels: string
+  remark: string
   dependsOn: string
   dependsMode: string
   dependencyDelay: string
@@ -53,6 +57,8 @@ export function buildTaskFieldLabels(_locale: string): TaskFieldLabels {
     effort: t("Effort"),
     star: t("Star"),
     repeatRule: t("Repeat rule"),
+    labels: t("Labels"),
+    remark: t("Remark"),
     dependsOn: t("Depends on"),
     dependsMode: t("Depends mode"),
     dependencyDelay: t("Dependency delay"),
@@ -66,6 +72,7 @@ export function getTaskPropertiesFromRef(
   schema: TaskSchemaDefinition,
 ): TaskPropertyValues {
   const names = schema.propertyNames
+  const labelsFromChoices = getStringArray(refData, names.labels)
 
   return {
     status: getString(refData, names.status) ?? schema.statusChoices[0],
@@ -76,6 +83,8 @@ export function getTaskPropertiesFromRef(
     effort: getNumber(refData, names.effort),
     star: getBoolean(refData, names.star),
     repeatRule: getString(refData, names.repeatRule) ?? "",
+    labels: labelsFromChoices ?? parseTaskLabels(getString(refData, names.labels) ?? ""),
+    remark: getString(refData, names.remark) ?? "",
     dependsOn: getDbIdArray(refData, names.dependsOn),
     dependsMode: getString(refData, names.dependsMode) ?? schema.dependencyModeChoices[0],
     dependencyDelay: getNumber(refData, names.dependencyDelay),
@@ -130,6 +139,16 @@ export function toRefDataForSave(
       value: values.repeatRule.trim() === "" ? null : values.repeatRule.trim(),
     },
     {
+      name: names.labels,
+      type: PROP_TYPE.TEXT_CHOICES,
+      value: normalizeTaskLabels(values.labels),
+    },
+    {
+      name: names.remark,
+      type: PROP_TYPE.TEXT,
+      value: values.remark.trim() === "" ? null : values.remark,
+    },
+    {
       name: names.dependsOn,
       type: PROP_TYPE.BLOCK_REFS,
       value: values.dependsOn,
@@ -145,6 +164,33 @@ export function toRefDataForSave(
       value: values.dependencyDelay,
     },
   ]
+}
+
+export function parseTaskLabels(rawValue: string): string[] {
+  const normalized = rawValue.trim()
+  if (normalized === "") {
+    return []
+  }
+
+  if (normalized.startsWith("[") && normalized.endsWith("]")) {
+    try {
+      const parsed = JSON.parse(normalized) as unknown
+      if (Array.isArray(parsed)) {
+        const labels = parsed.filter((item): item is string => typeof item === "string")
+        return normalizeTaskLabels(labels)
+      }
+    } catch {
+      // Ignore JSON parse errors and fallback to separator parsing.
+    }
+  }
+
+  return normalizeTaskLabels(
+    normalized.split(/[\n,£¬;£»]+/g),
+  )
+}
+
+export function formatTaskLabels(labels: string[]): string {
+  return normalizeTaskLabels(labels).join(", ")
 }
 
 export function validateNumericField(
@@ -173,6 +219,19 @@ function getString(
 ): string | null {
   const property = refData?.find((item) => item.name === name)
   return typeof property?.value === "string" ? property.value : null
+}
+
+function getStringArray(
+  refData: BlockProperty[] | undefined,
+  name: string,
+): string[] | null {
+  const property = refData?.find((item) => item.name === name)
+  if (!Array.isArray(property?.value)) {
+    return null
+  }
+
+  const values = property.value.filter((item): item is string => typeof item === "string")
+  return normalizeTaskLabels(values)
 }
 
 function getNumber(
@@ -219,4 +278,26 @@ function getDbIdArray(
   return property.value
     .map((item) => Number(item))
     .filter((item) => !Number.isNaN(item))
+}
+
+function normalizeTaskLabels(labels: string[]): string[] {
+  const normalizedLabels: string[] = []
+  const seen = new Set<string>()
+
+  for (const rawLabel of labels) {
+    const label = rawLabel.replace(/\s+/g, " ").trim()
+    if (label === "") {
+      continue
+    }
+
+    const dedupKey = label.toLowerCase()
+    if (seen.has(dedupKey)) {
+      continue
+    }
+
+    seen.add(dedupKey)
+    normalizedLabels.push(label)
+  }
+
+  return normalizedLabels
 }

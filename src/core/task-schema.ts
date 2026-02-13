@@ -30,6 +30,8 @@ interface TaskSchemaPropertyNames {
   dependencyDelay: string
   star: string
   repeatRule: string
+  labels: string
+  remark: string
 }
 
 export interface TaskSchemaDefinition {
@@ -56,6 +58,8 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
       dependencyDelay: "Dependency delay",
       star: "Star",
       repeatRule: "Repeat rule",
+      labels: "Labels",
+      remark: "Remark",
     },
     statusChoices: ["TODO", "Doing", "Done"],
     dependencyModeChoices: ["ALL", "ANY"],
@@ -75,6 +79,8 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
       dependencyDelay: "依赖延迟",
       star: "收藏",
       repeatRule: "重复规则",
+      labels: "标签",
+      remark: "备注",
     },
     statusChoices: ["待开始", "进行中", "已完成"],
     dependencyModeChoices: ["ALL", "ANY"],
@@ -216,6 +222,37 @@ function buildTaskTagProperties(
   const findPos = (name: string) => {
     return findProperty(name)?.pos
   }
+  const findChoiceValues = (name: string): string[] => {
+    const property = findProperty(name)
+    const rawChoices = property?.typeArgs?.choices
+    if (!Array.isArray(rawChoices)) {
+      return []
+    }
+
+    const normalizedChoices: string[] = []
+    const seen = new Set<string>()
+    for (const rawChoice of rawChoices) {
+      const value = typeof rawChoice === "string"
+        ? rawChoice
+        : typeof rawChoice?.n === "string"
+          ? rawChoice.n
+          : ""
+      const choice = value.trim()
+      if (choice === "") {
+        continue
+      }
+
+      const dedupKey = choice.toLowerCase()
+      if (seen.has(dedupKey)) {
+        continue
+      }
+
+      seen.add(dedupKey)
+      normalizedChoices.push(choice)
+    }
+
+    return normalizedChoices
+  }
 
   return [
     {
@@ -305,6 +342,20 @@ function buildTaskTagProperties(
       name: names.repeatRule,
       type: PROP_TYPE.TEXT,
       pos: findPos(names.repeatRule),
+    },
+    {
+      name: names.labels,
+      type: PROP_TYPE.TEXT_CHOICES,
+      typeArgs: {
+        subType: "multi",
+        choices: findChoiceValues(names.labels),
+      },
+      pos: findPos(names.labels),
+    },
+    {
+      name: names.remark,
+      type: PROP_TYPE.TEXT,
+      pos: findPos(names.remark),
     },
   ]
 }

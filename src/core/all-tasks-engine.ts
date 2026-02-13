@@ -17,6 +17,7 @@ export interface AllTaskItem {
   text: string
   status: string
   endTime: Date | null
+  labels: string[]
   star: boolean
   taskTagRef: BlockRef
 }
@@ -58,6 +59,7 @@ export async function collectAllTasks(
       text: resolveTaskText(liveBlock, schema.tagAlias),
       status: values.status,
       endTime: values.endTime,
+      labels: values.labels,
       star: values.star,
       taskTagRef: taskRef,
     })

@@ -258,7 +258,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
   const normalizedKeyword = React.useMemo(() => keyword.trim().toLowerCase(), [keyword])
   const matchesItem = React.useCallback(
-    (item: { status: string; text: string }) => {
+    (item: { status: string; text: string; labels?: string[] }) => {
       const statusMatched = statusFilter === "all" || item.status === statusFilter
       if (!statusMatched) {
         return false
@@ -268,7 +268,13 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         return true
       }
 
-      return item.text.toLowerCase().includes(normalizedKeyword)
+      if (item.text.toLowerCase().includes(normalizedKeyword)) {
+        return true
+      }
+
+      return (item.labels ?? []).some((label) => {
+        return label.toLowerCase().includes(normalizedKeyword)
+      })
     },
     [normalizedKeyword, statusFilter],
   )

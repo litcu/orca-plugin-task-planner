@@ -15,6 +15,7 @@ export interface NextActionItem {
   text: string
   status: string
   endTime: Date | null
+  labels: string[]
   score: number
   star: boolean
   parentTaskName: string | null
@@ -159,6 +160,7 @@ export function evaluateNextAction(
       text: resolveTaskText(liveTaskBlock, schema.tagAlias),
       status,
       endTime: values.endTime,
+      labels: values.labels,
       score,
       star: values.star,
       parentTaskName,

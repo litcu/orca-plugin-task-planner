@@ -9,6 +9,7 @@ export interface TaskListRowItem {
   text: string
   status: string
   endTime: Date | null
+  labels: string[]
   star: boolean
   parentTaskName?: string | null
   taskTagRef?: BlockRef | null
@@ -43,6 +44,9 @@ export function TaskListRow(props: TaskListRowProps) {
   const statusVisualState = resolveStatusVisualState(props.item.status, props.schema)
   const dueInfo = resolveDueInfo(props.item.endTime, props.isChinese)
   const dueBadgeStyle = resolveDueBadgeStyle(dueInfo.tone)
+  const taskLabels = Array.isArray(props.item.labels) ? props.item.labels : []
+  const visibleLabels = taskLabels.slice(0, 4)
+  const hiddenLabelCount = Math.max(0, taskLabels.length - visibleLabels.length)
 
   React.useEffect(() => {
     ensureTaskRowStyles()
@@ -201,6 +205,63 @@ export function TaskListRow(props: TaskListRowProps) {
         },
         props.item.text,
       ),
+      taskLabels.length > 0
+        ? React.createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "4px",
+                width: "100%",
+                marginTop: "1px",
+              },
+            },
+            ...visibleLabels.map((label: string) =>
+              React.createElement(
+                "span",
+                {
+                  key: `${props.item.blockId}-${label}`,
+                  style: {
+                    display: "inline-flex",
+                    alignItems: "center",
+                    maxWidth: "100%",
+                    padding: "1px 7px",
+                    borderRadius: "999px",
+                    border: "1px solid rgba(37, 99, 235, 0.24)",
+                    background: "rgba(37, 99, 235, 0.12)",
+                    color: "var(--orca-color-text-blue, #2563eb)",
+                    fontSize: "10px",
+                    lineHeight: 1.3,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  },
+                },
+                label,
+              )),
+            hiddenLabelCount > 0
+              ? React.createElement(
+                  "span",
+                  {
+                    key: `${props.item.blockId}-more-labels`,
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      padding: "1px 7px",
+                      borderRadius: "999px",
+                      border: "1px solid rgba(148, 163, 184, 0.3)",
+                      background: "rgba(148, 163, 184, 0.08)",
+                      color: "var(--orca-color-text-2)",
+                      fontSize: "10px",
+                      lineHeight: 1.3,
+                    },
+                  },
+                  `+${hiddenLabelCount}`,
+                )
+              : null,
+          )
+        : null,
       props.showParentTaskContext && props.item.parentTaskName != null
         ? React.createElement(
             "span",

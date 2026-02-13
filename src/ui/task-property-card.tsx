@@ -1,4 +1,4 @@
-import type { Block, DbId } from "../orca.d.ts"
+import type { Block, BlockProperty, DbId } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 import { getMirrorId } from "../core/block-utils"
 import {
@@ -28,6 +28,7 @@ interface TaskPropertyPanelCardProps {
 
 const TAG_REF_TYPE = 2
 const REF_DATA_TYPE = 3
+const TEXT_CHOICES_PROP_TYPE = 6
 
 export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   const React = window.React
@@ -89,6 +90,13 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   )
   const [starValue, setStarValue] = React.useState(initialValues.star)
   const [repeatRuleText, setRepeatRuleText] = React.useState(initialValues.repeatRule)
+  const [taskLabelsValue, setTaskLabelsValue] = React.useState<string[]>(
+    initialValues.labels,
+  )
+  const [taskLabelOptions, setTaskLabelOptions] = React.useState<string[]>(
+    initialValues.labels,
+  )
+  const [remarkText, setRemarkText] = React.useState(initialValues.remark)
   const [repeatModeValue, setRepeatModeValue] = React.useState<RepeatMode>(
     initialRepeatEditor.mode,
   )
@@ -160,6 +168,8 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       effortText: initialValues.effort == null ? "" : String(initialValues.effort),
       star: initialValues.star,
       repeatRuleText: initialValues.repeatRule,
+      taskLabels: initialValues.labels,
+      remarkText: initialValues.remark,
       dependsOn: initialDependsOnForEditor,
       dependsMode: initialValues.dependsMode,
       dependencyDelayText:
@@ -173,6 +183,8 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     initialValues.endTime,
     initialValues.effort,
     initialValues.importance,
+    initialValues.labels,
+    initialValues.remark,
     initialValues.repeatRule,
     initialValues.startTime,
     initialValues.star,
@@ -189,6 +201,8 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       effortText,
       star: starValue,
       repeatRuleText,
+      taskLabels: taskLabelsValue,
+      remarkText,
       dependsOn: dependsOnValues,
       dependsMode: dependsModeValue,
       dependencyDelayText,
@@ -202,10 +216,12 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     effortText,
     hasDependencies,
     importanceText,
+    remarkText,
     repeatRuleText,
     startTimeValue,
     starValue,
     statusValue,
+    taskLabelsValue,
     urgencyText,
   ])
 
@@ -223,6 +239,9 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     setEffortValue(clampScore(initialValues.effort))
     setStarValue(initialValues.star)
     setRepeatRuleText(initialValues.repeatRule)
+    setTaskLabelsValue(initialValues.labels)
+    setTaskLabelOptions(initialValues.labels)
+    setRemarkText(initialValues.remark)
     setRepeatModeValue(initialRepeatEditor.mode)
     setRepeatIntervalText(initialRepeatEditor.intervalText)
     setRepeatWeekdayValue(initialRepeatEditor.weekdayValue)
@@ -280,6 +299,9 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     { value: "5", label: t("Friday") },
     { value: "6", label: t("Saturday") },
   ]
+  const taskLabelSelectOptions = React.useMemo(() => {
+    return buildTaskLabelSelectOptions(taskLabelOptions, taskLabelsValue)
+  }, [taskLabelOptions, taskLabelsValue])
 
   const updateRepeatEditor = React.useCallback((next: {
     mode?: RepeatMode
@@ -334,6 +356,29 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   React.useEffect(() => {
     void refreshActivationInfo()
   }, [refreshActivationInfo])
+
+  React.useEffect(() => {
+    let disposed = false
+
+    const loadTaskLabelOptions = async () => {
+      const choices = await getTaskLabelChoicesFromSchema(props.schema)
+      if (disposed) {
+        return
+      }
+
+      setTaskLabelOptions((prev: string[]) =>
+        mergeTaskLabelValues(prev, choices, initialValues.labels))
+    }
+
+    void loadTaskLabelOptions()
+    return () => {
+      disposed = true
+    }
+  }, [
+    initialValues.labels,
+    props.blockId,
+    props.schema,
+  ])
 
   const handleSave = async (snapshot: string) => {
     if (taskRef == null) {
@@ -400,6 +445,8 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     try {
       const sourceBlockId = getMirrorId(props.blockId)
       const dependencyRefIds = await ensureDependencyRefIds(sourceBlockId, dependsOnValues)
+      const normalizedTaskLabels = normalizeTaskLabelValues(taskLabelsValue)
+      await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
       const previousValues = getTaskPropertiesFromRef(taskRef.data, props.schema)
       const valuesToSave = {
         status: statusValue,
@@ -410,6 +457,8 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         effort: effortInRange,
         star: starValue,
         repeatRule: repeatRuleText,
+        labels: normalizedTaskLabels,
+        remark: remarkText,
         dependsOn: dependencyRefIds,
         dependsMode: hasDependencies ? dependsModeValue : "ALL",
         dependencyDelay: hasDependencies ? dependencyDelay.value : null,
@@ -513,6 +562,20 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     color: "var(--orca-color-text-2)",
     whiteSpace: "nowrap" as const,
     letterSpacing: "0.01em",
+  }
+  const remarkTextareaStyle = {
+    width: "100%",
+    minHeight: "68px",
+    border: `1px solid ${panelBorderColor}`,
+    borderRadius: "8px",
+    background: "var(--orca-color-bg-1)",
+    color: "var(--orca-color-text-1, var(--orca-color-text))",
+    fontSize: "12px",
+    lineHeight: 1.5,
+    padding: "7px 10px",
+    resize: "vertical" as const,
+    boxSizing: "border-box" as const,
+    fontFamily: "inherit",
   }
   const sectionStyle = {
     border: `1px solid ${panelBorderColor}`,
@@ -811,6 +874,43 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
           width: "100%",
         }),
       ),
+      renderFormRow(
+        labels.labels,
+        React.createElement(Select, {
+          selected: taskLabelsValue,
+          options: taskLabelSelectOptions,
+          multiSelection: true,
+          filter: true,
+          placeholder: t("Select labels"),
+          filterPlaceholder: t("Filter labels"),
+          filterFunction: async (keyword: string) => {
+            return buildTaskLabelSelectOptions(
+              taskLabelOptions,
+              taskLabelsValue,
+              keyword,
+            )
+          },
+          onChange: (selected: string[]) => {
+            const normalized = normalizeTaskLabelValues(selected)
+            setTaskLabelsValue(normalized)
+            setTaskLabelOptions((prev: string[]) =>
+              mergeTaskLabelValues(prev, normalized))
+          },
+          menuContainer: popupMenuContainerRef,
+          width: "100%",
+        }),
+      ),
+      renderFormRow(
+        labels.remark,
+        React.createElement("textarea", {
+          value: remarkText,
+          placeholder: t("Add notes for this task"),
+          style: remarkTextareaStyle,
+          onChange: (event: Event) => {
+            setRemarkText((event.target as HTMLTextAreaElement).value)
+          },
+        }),
+      ),
     ),
     renderSection(
       renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
@@ -1106,6 +1206,8 @@ interface TaskEditorSnapshotInput {
   effortText: string
   star: boolean
   repeatRuleText: string
+  taskLabels: string[]
+  remarkText: string
   dependsOn: DbId[]
   dependsMode: string
   dependencyDelayText: string
@@ -1122,6 +1224,9 @@ function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {
     effortText: input.effortText.trim(),
     star: input.star,
     repeatRuleText: input.repeatRuleText.trim(),
+    taskLabels: [...normalizeTaskLabelValues(input.taskLabels)].sort((left, right) =>
+      left.localeCompare(right, undefined, { sensitivity: "base" })),
+    remarkText: input.remarkText,
     dependsOn: [...input.dependsOn].sort((left, right) => left - right),
     dependsMode: input.hasDependencies ? input.dependsMode : "ALL",
     dependencyDelayText: input.hasDependencies ? input.dependencyDelayText.trim() : "",
@@ -1252,6 +1357,180 @@ async function ensureDependencyRefIds(
   }
 
   return resolvedRefIds
+}
+
+function normalizeTaskLabelValues(labels: string[]): string[] {
+  const normalizedLabels: string[] = []
+  const seen = new Set<string>()
+
+  for (const rawLabel of labels) {
+    const label = rawLabel.replace(/\s+/g, " ").trim()
+    if (label === "") {
+      continue
+    }
+
+    const dedupKey = label.toLowerCase()
+    if (seen.has(dedupKey)) {
+      continue
+    }
+
+    seen.add(dedupKey)
+    normalizedLabels.push(label)
+  }
+
+  return normalizedLabels
+}
+
+function buildTaskLabelSelectOptions(
+  optionValues: string[],
+  selectedValues: string[],
+  filterKeyword: string = "",
+): { value: string; label: string; group?: string }[] {
+  const mergedValues = mergeTaskLabelValues(optionValues, selectedValues)
+  const normalizedKeyword = filterKeyword.replace(/\s+/g, " ").trim()
+  const keywordLower = normalizedKeyword.toLowerCase()
+
+  const filteredValues = normalizedKeyword === ""
+    ? mergedValues
+    : mergedValues.filter((value) => value.toLowerCase().includes(keywordLower))
+
+  const options = filteredValues.map((value) => ({
+    value,
+    label: value,
+  }))
+
+  if (
+    normalizedKeyword !== "" &&
+    !mergedValues.some((value) => value.toLowerCase() === keywordLower)
+  ) {
+    options.unshift({
+      value: normalizedKeyword,
+      label: `${normalizedKeyword} (${t("Add")})`,
+    })
+  }
+
+  return options
+}
+
+function mergeTaskLabelValues(...sources: (string[] | undefined)[]): string[] {
+  const merged: string[] = []
+  for (const source of sources) {
+    if (source == null) {
+      continue
+    }
+    merged.push(...source)
+  }
+
+  return normalizeTaskLabelValues(merged)
+}
+
+function readTaskLabelChoiceValues(property: BlockProperty | undefined): string[] {
+  const rawChoices = property?.typeArgs?.choices
+  if (!Array.isArray(rawChoices)) {
+    return []
+  }
+
+  return normalizeTaskLabelValues(
+    rawChoices.map((item) => {
+      if (typeof item === "string") {
+        return item
+      }
+      if (isRecord(item) && typeof item.n === "string") {
+        return item.n
+      }
+      if (isRecord(item) && typeof item.value === "string") {
+        return item.value
+      }
+      return ""
+    }),
+  )
+}
+
+async function getTaskLabelChoicesFromSchema(
+  schema: TaskSchemaDefinition,
+): Promise<string[]> {
+  try {
+    const taskTagBlock = (await orca.invokeBackend(
+      "get-block-by-alias",
+      schema.tagAlias,
+    )) as Block | null
+    if (taskTagBlock == null) {
+      return []
+    }
+
+    const property = taskTagBlock.properties.find((item) => {
+      return item.name === schema.propertyNames.labels
+    })
+    return readTaskLabelChoiceValues(property)
+  } catch (error) {
+    console.error(error)
+    return []
+  }
+}
+
+async function ensureTaskLabelChoices(
+  schema: TaskSchemaDefinition,
+  labels: string[],
+): Promise<void> {
+  const requiredChoices = normalizeTaskLabelValues(labels)
+  if (requiredChoices.length === 0) {
+    return
+  }
+
+  const taskTagBlock = (await orca.invokeBackend(
+    "get-block-by-alias",
+    schema.tagAlias,
+  )) as Block | null
+  if (taskTagBlock == null) {
+    return
+  }
+
+  const properties = taskTagBlock.properties ?? []
+  const labelsProperty = properties.find((item) => item.name === schema.propertyNames.labels)
+  const existingChoices = readTaskLabelChoiceValues(labelsProperty)
+  const mergedChoices = mergeTaskLabelValues(existingChoices, requiredChoices)
+  if (mergedChoices.length === existingChoices.length) {
+    return
+  }
+
+  const nextProperties: BlockProperty[] = properties.map((property) => {
+    if (property.name !== schema.propertyNames.labels) {
+      return property
+    }
+
+    const baseTypeArgs = isRecord(property.typeArgs) ? property.typeArgs : {}
+    return {
+      ...property,
+      type: TEXT_CHOICES_PROP_TYPE,
+      typeArgs: {
+        ...baseTypeArgs,
+        subType: "multi",
+        choices: mergedChoices,
+      },
+    }
+  })
+
+  if (labelsProperty == null) {
+    nextProperties.push({
+      name: schema.propertyNames.labels,
+      type: TEXT_CHOICES_PROP_TYPE,
+      typeArgs: {
+        subType: "multi",
+        choices: mergedChoices,
+      },
+    })
+  }
+
+  await orca.commands.invokeEditorCommand(
+    "core.editor.setProperties",
+    null,
+    [taskTagBlock.id],
+    nextProperties,
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return value != null && typeof value === "object" && !Array.isArray(value)
 }
 
 function toScoreInRange(value: number | null): number | null {
