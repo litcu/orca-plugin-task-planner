@@ -313,35 +313,39 @@ function injectTaskStatusStyles(pluginName: string, schema: TaskSchemaDefinition
     .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"])::before,
     .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"])>.orca-repr-main>.orca-repr-main-content::before,
     .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
-      font-family: inherit;
+      font-family: "tabler-icons";
+      speak: none;
+      font-style: normal;
+      font-weight: normal;
+      font-variant: normal;
+      text-transform: none;
+      -webkit-font-smoothing: antialiased;
       margin-right: var(--orca-spacing-md);
       cursor: pointer;
       font-size: calc(.25rem + var(--orca-block-line-height) / var(--orca-lineheight-md));
       display: inline-block;
       line-height: 1;
       translate: 0 .125rem;
-      content: "◯";
-      color: var(--orca-color-text-2);
     }
 
     .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${todoStatus}"])::before,
     .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${todoStatus}"])>.orca-repr-main>.orca-repr-main-content::before,
     .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${todoStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
-      content: "◯";
+      content: "\\ea6b";
       color: var(--orca-color-text-2);
     }
 
     .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"])::before,
     .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"])>.orca-repr-main>.orca-repr-main-content::before,
     .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
-      content: "◐";
+      content: "\\fedd";
       color: var(--orca-color-text-yellow);
     }
 
     .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])::before,
     .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])>.orca-repr-main>.orca-repr-main-content::before,
     .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
-      content: "✓";
+      content: "\\f704";
       color: var(--orca-color-text-green);
     }
 
@@ -371,4 +375,3 @@ function getStyleRole(pluginName: string): string {
 function toDataAttributeName(propertyName: string): string {
   return propertyName.trim().replace(/\s+/g, "-").toLowerCase()
 }
-

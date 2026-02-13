@@ -147,9 +147,12 @@ export function TaskListRow(props: TaskListRowProps) {
         type: "button",
         onClick: (event: MouseEvent) => {
           event.stopPropagation()
+          if (props.loading || props.updating) {
+            return
+          }
           void props.onToggleStatus()
         },
-        disabled: props.loading || props.updating,
+        "aria-disabled": props.loading || props.updating,
         title: t("Toggle task status"),
         style: {
           width: "20px",
@@ -157,7 +160,7 @@ export function TaskListRow(props: TaskListRowProps) {
           border: "none",
           background: "transparent",
           color: statusColor,
-          cursor: props.loading || props.updating ? "not-allowed" : "pointer",
+          cursor: "pointer",
           flexShrink: 0,
           display: "inline-flex",
           alignItems: "center",
