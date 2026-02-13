@@ -11,6 +11,7 @@ import { collectNextActions, type NextActionItem } from "../core/dependency-engi
 import {
   collectAllTasks,
   cycleTaskStatusInView,
+  moveTaskInView,
   toggleTaskStarInView,
   type AllTaskItem,
 } from "../core/all-tasks-engine"
@@ -41,6 +42,13 @@ interface VisibleTreeRow {
   collapsed: boolean
 }
 
+type TaskDropPosition = "before" | "child" | "after"
+
+interface TaskDropTarget {
+  targetTaskId: DbId
+  position: TaskDropPosition
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
@@ -62,7 +70,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [keyword, setKeyword] = React.useState("")
   const [updatingIds, setUpdatingIds] = React.useState<Set<DbId>>(new Set())
   const [starringIds, setStarringIds] = React.useState<Set<DbId>>(new Set())
+  const [movingIds, setMovingIds] = React.useState<Set<DbId>>(new Set())
   const [collapsedIds, setCollapsedIds] = React.useState<Set<DbId>>(new Set())
+  const [draggingTaskId, setDraggingTaskId] = React.useState<DbId | null>(null)
+  const [dropTarget, setDropTarget] = React.useState<TaskDropTarget | null>(null)
+  const [todayJournalDropActive, setTodayJournalDropActive] = React.useState(false)
   const [nextActionItems, setNextActionItems] = React.useState<NextActionItem[]>([])
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
   const [selectedTaskId, setSelectedTaskId] = React.useState<DbId | null>(null)
@@ -375,6 +387,278 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     })
   }, [allVisibleCollapsed, collapsibleVisibleTaskIds])
 
+  const taskItemById = React.useMemo(() => {
+    const map = new Map<DbId, AllTaskItem>()
+    for (const item of allTaskItems) {
+      map.set(item.blockId, item)
+    }
+    return map
+  }, [allTaskItems])
+
+  const isDescendantTask = React.useCallback(
+    (taskId: DbId, ancestorTaskId: DbId): boolean => {
+      const visited = new Set<DbId>()
+      let currentParentId = taskItemById.get(taskId)?.parentId ?? null
+
+      while (currentParentId != null) {
+        if (currentParentId === ancestorTaskId) {
+          return true
+        }
+
+        if (visited.has(currentParentId)) {
+          return false
+        }
+
+        visited.add(currentParentId)
+        currentParentId = taskItemById.get(currentParentId)?.parentId ?? null
+      }
+
+      return false
+    },
+    [taskItemById],
+  )
+
+  const resolveDropPosition = React.useCallback(
+    (event: DragEvent, targetDepth: number): TaskDropPosition => {
+      const target = event.currentTarget as HTMLDivElement | null
+      if (target == null) {
+        return "after"
+      }
+
+      const rect = target.getBoundingClientRect()
+      const offsetY = event.clientY - rect.top
+      if (offsetY < rect.height * 0.25) {
+        return "before"
+      }
+      if (offsetY > rect.height * 0.75) {
+        return "after"
+      }
+
+      // Only treat middle-zone drop as "child" when pointer is visually in the indented area.
+      const childThresholdX = rect.left + 56 + targetDepth * 14
+      return event.clientX >= childThresholdX ? "child" : "after"
+    },
+    [],
+  )
+
+  const handleTaskDragStart = React.useCallback(
+    (event: DragEvent, taskId: DbId) => {
+      if (!isAllTasksTab) {
+        return
+      }
+
+      const transfer = event.dataTransfer
+      transfer?.setData("text/plain", String(taskId))
+      transfer?.setData("application/x-mlo-task-id", String(taskId))
+      if (transfer != null) {
+        transfer.effectAllowed = "move"
+      }
+
+      setDraggingTaskId(taskId)
+      setDropTarget(null)
+      setTodayJournalDropActive(false)
+      setErrorText("")
+    },
+    [isAllTasksTab],
+  )
+
+  const handleTaskDragEnd = React.useCallback(() => {
+    setDraggingTaskId(null)
+    setDropTarget(null)
+    setTodayJournalDropActive(false)
+  }, [])
+
+  React.useEffect(() => {
+    if (!isAllTasksTab) {
+      setDraggingTaskId(null)
+      setDropTarget(null)
+      setTodayJournalDropActive(false)
+    }
+  }, [isAllTasksTab])
+
+  const moveTaskFromDrop = React.useCallback(
+    async (sourceTaskId: DbId, targetTaskId: DbId, position: TaskDropPosition) => {
+      if (sourceTaskId === targetTaskId) {
+        if (position === "child") {
+          setErrorText(t("Cannot move task into itself or its subtasks"))
+        }
+        return
+      }
+
+      const source = taskItemById.get(sourceTaskId)
+      const target = taskItemById.get(targetTaskId)
+      if (source == null || target == null) {
+        return
+      }
+
+      if (isDescendantTask(targetTaskId, sourceTaskId)) {
+        setErrorText(t("Cannot move task into itself or its subtasks"))
+        return
+      }
+
+      setMovingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(sourceTaskId)
+        return next
+      })
+
+      try {
+        await moveTaskInView(
+          source.blockId,
+          target.blockId,
+          {
+            sourceSourceBlockId: source.sourceBlockId,
+            targetSourceBlockId: target.sourceBlockId,
+            position,
+          },
+        )
+        setErrorText("")
+        await loadByTab(tab, { silent: true })
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to move task"))
+      } finally {
+        setMovingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(sourceTaskId)
+          return next
+        })
+      }
+    },
+    [isDescendantTask, loadByTab, tab, taskItemById],
+  )
+
+  const moveTaskToTodayJournal = React.useCallback(
+    async (sourceTaskId: DbId) => {
+      const source = taskItemById.get(sourceTaskId)
+      if (source == null) {
+        return
+      }
+
+      setMovingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(sourceTaskId)
+        return next
+      })
+
+      try {
+        await moveTaskInView(
+          source.blockId,
+          source.blockId,
+          {
+            sourceSourceBlockId: source.sourceBlockId,
+            targetSourceBlockId: source.sourceBlockId,
+            position: "after",
+            moveToTodayJournalRoot: true,
+          },
+        )
+        setErrorText("")
+        await loadByTab(tab, { silent: true })
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to move task"))
+      } finally {
+        setMovingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(sourceTaskId)
+          return next
+        })
+      }
+    },
+    [loadByTab, tab, taskItemById],
+  )
+
+  const handleTaskRowDragOver = React.useCallback(
+    (event: DragEvent, targetTaskId: DbId, targetDepth: number) => {
+      const sourceTaskId = draggingTaskId
+      if (sourceTaskId == null || movingIds.size > 0) {
+        return
+      }
+
+      event.preventDefault()
+      if (event.dataTransfer != null) {
+        event.dataTransfer.dropEffect = "move"
+      }
+
+      if (sourceTaskId === targetTaskId || isDescendantTask(targetTaskId, sourceTaskId)) {
+        setDropTarget(null)
+        return
+      }
+
+      const position = resolveDropPosition(event, targetDepth)
+      setDropTarget((prev: TaskDropTarget | null) => {
+        if (prev?.targetTaskId === targetTaskId && prev.position === position) {
+          return prev
+        }
+        return {
+          targetTaskId,
+          position,
+        }
+      })
+      setTodayJournalDropActive(false)
+    },
+    [draggingTaskId, isDescendantTask, movingIds.size, resolveDropPosition],
+  )
+
+  const handleTaskRowDrop = React.useCallback(
+    (event: DragEvent, targetTaskId: DbId, targetDepth: number) => {
+      event.preventDefault()
+
+      const sourceTaskId = draggingTaskId
+      if (sourceTaskId == null || movingIds.size > 0) {
+        return
+      }
+
+      if (sourceTaskId === targetTaskId || isDescendantTask(targetTaskId, sourceTaskId)) {
+        setErrorText(t("Cannot move task into itself or its subtasks"))
+        setDraggingTaskId(null)
+        setDropTarget(null)
+        setTodayJournalDropActive(false)
+        return
+      }
+
+      const position = resolveDropPosition(event, targetDepth)
+      setDraggingTaskId(null)
+      setDropTarget(null)
+      setTodayJournalDropActive(false)
+      void moveTaskFromDrop(sourceTaskId, targetTaskId, position)
+    },
+    [draggingTaskId, isDescendantTask, moveTaskFromDrop, movingIds.size, resolveDropPosition],
+  )
+
+  const handleTodayJournalDropOver = React.useCallback((event: DragEvent) => {
+    if (draggingTaskId == null || movingIds.size > 0) {
+      return
+    }
+
+    event.preventDefault()
+    if (event.dataTransfer != null) {
+      event.dataTransfer.dropEffect = "move"
+    }
+    setDropTarget(null)
+    setTodayJournalDropActive(true)
+  }, [draggingTaskId, movingIds.size])
+
+  const handleTodayJournalDropLeave = React.useCallback(() => {
+    setTodayJournalDropActive(false)
+  }, [])
+
+  const handleTodayJournalDrop = React.useCallback(
+    (event: DragEvent) => {
+      event.preventDefault()
+      const sourceTaskId = draggingTaskId
+      if (sourceTaskId == null || movingIds.size > 0) {
+        return
+      }
+
+      setDraggingTaskId(null)
+      setDropTarget(null)
+      setTodayJournalDropActive(false)
+      void moveTaskToTodayJournal(sourceTaskId)
+    },
+    [draggingTaskId, moveTaskToTodayJournal, movingIds.size],
+  )
+
   const viewName = tab === "next-actions"
     ? t("Active Tasks")
     : tab === "all-tasks"
@@ -400,6 +684,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         ? "rgba(214, 158, 46, 0.18)"
         : "rgba(221, 107, 32, 0.18)"
   const countText = t("Showing ${count} items", { count: String(visibleCount) })
+  const showTodayJournalDropZone = isAllTasksTab
 
   return React.createElement(
     "div",
@@ -725,30 +1010,101 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 },
               },
               isAllTasksTab
-                ? visibleAllTaskRows.map((row: VisibleTreeRow, index: number) => {
-                    return React.createElement(TaskListRow, {
-                      key: row.node.item.blockId,
-                      item: row.node.item,
-                      schema: props.schema,
-                      isChinese,
-                      rowIndex: index,
-                      depth: row.depth,
-                      contextOnly: row.node.contextOnly,
-                      loading,
-                      updating: updatingIds.has(row.node.item.blockId),
-                      showCollapseToggle: row.hasChildren,
-                      collapsed: row.collapsed,
-                      showParentTaskContext: false,
-                      starUpdating: starringIds.has(row.node.item.blockId),
-                      onToggleCollapse: row.hasChildren
-                        ? () => toggleCollapsed(row.node.item.blockId)
-                        : undefined,
-                      onToggleStatus: () => toggleTaskStatus(row.node.item),
-                      onNavigate: () => navigateToTaskParent(row.node.item),
-                      onToggleStar: () => toggleTaskStar(row.node.item),
-                      onOpen: () => openTaskProperty(row.node.item.blockId),
-                    })
-                  })
+                ? [
+                    showTodayJournalDropZone
+                      ? React.createElement(
+                          "div",
+                          {
+                            key: "today-journal-drop-zone",
+                            onDragOver: (event: DragEvent) => handleTodayJournalDropOver(event),
+                            onDragLeave: () => handleTodayJournalDropLeave(),
+                            onDrop: (event: DragEvent) => handleTodayJournalDrop(event),
+                            style: {
+                              minHeight: "30px",
+                              borderRadius: "9px",
+                              border: todayJournalDropActive
+                                ? "1px solid var(--orca-color-text-blue, #2563eb)"
+                                : "1px dashed rgba(148, 163, 184, 0.45)",
+                              background: todayJournalDropActive
+                                ? "rgba(37, 99, 235, 0.12)"
+                                : "rgba(148, 163, 184, 0.07)",
+                              color: todayJournalDropActive
+                                ? "var(--orca-color-text-blue, #2563eb)"
+                                : "var(--orca-color-text-2)",
+                              fontSize: "11px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              letterSpacing: "0.01em",
+                              transition: "background 120ms ease, border-color 120ms ease",
+                            },
+                          },
+                          t("Drop here to move task to today's journal"),
+                        )
+                      : null,
+                    ...visibleAllTaskRows.map((row: VisibleTreeRow, index: number) => {
+                      const isDragging = draggingTaskId === row.node.item.blockId
+                      const moving = movingIds.has(row.node.item.blockId)
+                      const activeDropPosition =
+                        dropTarget?.targetTaskId === row.node.item.blockId
+                          ? dropTarget.position
+                          : null
+
+                      return React.createElement(
+                        "div",
+                        {
+                        key: row.node.item.blockId,
+                        draggable: !loading && !moving,
+                          onDragStart: (event: DragEvent) => {
+                            handleTaskDragStart(event, row.node.item.blockId)
+                          },
+                          onDragEnd: () => handleTaskDragEnd(),
+                          onDragOver: (event: DragEvent) => {
+                            handleTaskRowDragOver(event, row.node.item.blockId, row.depth)
+                          },
+                          onDrop: (event: DragEvent) => {
+                            handleTaskRowDrop(event, row.node.item.blockId, row.depth)
+                          },
+                          style: {
+                            position: "relative",
+                            borderTop: activeDropPosition === "before"
+                              ? "2px solid var(--orca-color-text-blue, #2563eb)"
+                              : "2px solid transparent",
+                            borderBottom: activeDropPosition === "after"
+                              ? "2px solid var(--orca-color-text-blue, #2563eb)"
+                              : "2px solid transparent",
+                            borderRadius: "10px",
+                            background: activeDropPosition === "child"
+                              ? "rgba(37, 99, 235, 0.1)"
+                              : "transparent",
+                            opacity: isDragging ? 0.42 : 1,
+                            transition: "background 120ms ease, opacity 120ms ease",
+                          },
+                        },
+                        React.createElement(TaskListRow, {
+                          item: row.node.item,
+                          schema: props.schema,
+                          isChinese,
+                          rowIndex: index,
+                          depth: row.depth,
+                          contextOnly: row.node.contextOnly,
+                          loading,
+                          updating: updatingIds.has(row.node.item.blockId) || moving,
+                          showCollapseToggle: row.hasChildren,
+                          collapsed: row.collapsed,
+                          showParentTaskContext: false,
+                          starUpdating: starringIds.has(row.node.item.blockId),
+                          onToggleCollapse: row.hasChildren
+                            ? () => toggleCollapsed(row.node.item.blockId)
+                            : undefined,
+                          onToggleStatus: () => toggleTaskStatus(row.node.item),
+                          onNavigate: () => navigateToTaskParent(row.node.item),
+                          onToggleStar: () => toggleTaskStar(row.node.item),
+                          onOpen: () => openTaskProperty(row.node.item.blockId),
+                        }),
+                      )
+                    }),
+                  ]
                 : flatVisibleItems.map((item: TaskListRowItem, index: number) => {
                     return React.createElement(TaskListRow, {
                       key: item.blockId,

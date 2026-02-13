@@ -423,8 +423,103 @@ export async function toggleTaskStarInView(
   }
 }
 
+type MoveTaskPosition = "before" | "after" | "child"
+
+export async function moveTaskInView(
+  sourceBlockId: DbId,
+  targetBlockId: DbId,
+  options: {
+    sourceSourceBlockId?: DbId | null
+    targetSourceBlockId?: DbId | null
+    position: MoveTaskPosition
+    moveToTodayJournalRoot?: boolean
+  },
+): Promise<void> {
+  const sourceCandidates = collectCandidateIds(
+    options.sourceSourceBlockId ?? null,
+    getMirrorId(sourceBlockId),
+    sourceBlockId,
+  )
+
+  if (sourceCandidates.length === 0) {
+    throw new Error("No source block id available for move")
+  }
+
+  const position = options.position === "child" ? "lastChild" : options.position
+  if (options.moveToTodayJournalRoot) {
+    const journalBlock = (await orca.invokeBackend(
+      "get-journal-block",
+      new Date(),
+    )) as Block | null
+    if (journalBlock == null) {
+      throw new Error("Failed to resolve today journal block")
+    }
+
+    let lastError: unknown = null
+    for (const sourceId of sourceCandidates) {
+      try {
+        await orca.commands.invokeEditorCommand(
+          "core.editor.moveBlocks",
+          null,
+          [sourceId],
+          journalBlock.id,
+          "lastChild",
+        )
+        return
+      } catch (error) {
+        lastError = error
+        console.error(error)
+      }
+    }
+
+    if (lastError != null) {
+      throw lastError
+    }
+    return
+  }
+
+  const targetCandidates = collectCandidateIds(
+    options.targetSourceBlockId ?? null,
+    getMirrorId(targetBlockId),
+    targetBlockId,
+  )
+
+  if (targetCandidates.length === 0) {
+    throw new Error("No target block id available for move")
+  }
+
+  let lastError: unknown = null
+  for (const sourceId of sourceCandidates) {
+    for (const targetId of targetCandidates) {
+      try {
+        await orca.commands.invokeEditorCommand(
+          "core.editor.moveBlocks",
+          null,
+          [sourceId],
+          targetId,
+          position,
+        )
+        return
+      } catch (error) {
+        lastError = error
+        console.error(error)
+      }
+    }
+  }
+
+  if (lastError != null) {
+    throw lastError
+  }
+}
+
 function getLiveTaskBlock(block: Block): Block {
   return orca.state.blocks[getMirrorId(block.id)] ?? block
+}
+
+function collectCandidateIds(...candidates: Array<DbId | null | undefined>): DbId[] {
+  return candidates
+    .filter((id): id is DbId => id != null && !Number.isNaN(id))
+    .filter((id, index, all) => all.indexOf(id) === index)
 }
 
 function findTaskTagRef(
