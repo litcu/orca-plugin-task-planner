@@ -9,6 +9,11 @@ import {
 } from "../core/task-properties"
 
 import { t } from "../libs/l10n"
+import {
+  loadTaskActivationInfo,
+  resolveBlockedReasonTag,
+  type TaskActivationInfo,
+} from "./task-activation-state"
 interface TaskPropertyPanelCardProps {
   blockId: DbId
   schema: TaskSchemaDefinition
@@ -21,7 +26,6 @@ const REF_DATA_TYPE = 3
 export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   const React = window.React
   const Button = orca.components.Button
-  const Checkbox = orca.components.Checkbox
   const Input = orca.components.Input
   const Select = orca.components.Select
   const DatePicker = orca.components.DatePicker
@@ -96,6 +100,10 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
   const [lastFailedSnapshot, setLastFailedSnapshot] = React.useState<string | null>(
     null,
   )
+  const [activationInfo, setActivationInfo] = React.useState<TaskActivationInfo | null>(
+    null,
+  )
+  const [activationLoading, setActivationLoading] = React.useState(true)
 
   const dateAnchorRef = React.useRef<HTMLButtonElement | null>(null)
   const popupMenuContainerRef = React.useRef<HTMLElement | null>(null)
@@ -206,6 +214,23 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     { value: "ANY", label: t("Any dependency task completed") },
   ]
 
+  const refreshActivationInfo = React.useCallback(async () => {
+    setActivationLoading(true)
+    try {
+      const next = await loadTaskActivationInfo(props.schema, props.blockId)
+      setActivationInfo(next)
+    } catch (error) {
+      console.error(error)
+      setActivationInfo(null)
+    } finally {
+      setActivationLoading(false)
+    }
+  }, [props.blockId, props.schema])
+
+  React.useEffect(() => {
+    void refreshActivationInfo()
+  }, [refreshActivationInfo])
+
   const handleSave = async (snapshot: string) => {
     if (taskRef == null) {
       const message = t("Task ref not found")
@@ -297,6 +322,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       )
       setLastSavedSnapshot(snapshot)
       setLastFailedSnapshot(null)
+      void refreshActivationInfo()
     } catch (error) {
       const message =
         error instanceof Error
@@ -471,6 +497,37 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     )
   }
 
+  const activationBadgeText = activationLoading
+    ? t("Checking activation...")
+    : activationInfo == null
+      ? t("Activation unknown")
+      : activationInfo.isActive
+        ? t("Active now")
+        : t("Blocked now - ${reason}", {
+          reason: resolveBlockedReasonTag(activationInfo.blockedReason),
+        })
+  const activationBadgeStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    minHeight: "22px",
+    padding: "0 8px",
+    borderRadius: "999px",
+    fontSize: "11px",
+    fontWeight: 600,
+    border: "1px solid var(--orca-color-border-1)",
+    color:
+      activationLoading || activationInfo == null
+        ? "var(--orca-color-text-2)"
+        : activationInfo.isActive
+          ? "var(--orca-color-text-green)"
+          : "var(--orca-color-text-yellow)",
+    background:
+      activationLoading || activationInfo == null
+        ? "var(--orca-color-bg-2)"
+        : activationInfo.isActive
+          ? "rgba(56, 161, 105, 0.12)"
+          : "rgba(183, 121, 31, 0.12)",
+  }
   return React.createElement(
     "div",
     {
@@ -500,11 +557,44 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         "div",
         {
           style: {
-            fontSize: "14px",
-            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
           },
         },
-        labels.title,
+        React.createElement(
+          "div",
+          {
+            style: {
+              fontSize: "14px",
+              fontWeight: 600,
+            },
+          },
+          labels.title,
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => setStarValue((prev: boolean) => !prev),
+            title: starValue ? t("Starred") : t("Not starred"),
+            style: {
+              width: "24px",
+              height: "24px",
+              padding: 0,
+              border: "none",
+              background: "transparent",
+              color: starValue
+                ? "var(--orca-color-text-yellow, #d69e2e)"
+                : "var(--orca-color-text-2)",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            },
+          },
+          React.createElement(StarIcon, { filled: starValue }),
+        ),
       ),
       React.createElement(
         Button,
@@ -518,6 +608,10 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
           style: { fontSize: "16px" },
         }),
       ),
+    ),
+    renderFormRow(
+      t("Activation"),
+      React.createElement("span", { style: activationBadgeStyle }, activationBadgeText),
     ),
     renderFormRow(
       t("Task name"),
@@ -543,56 +637,16 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       ),
     ),
     renderFormRow(
-      t("Status / Star"),
-      React.createElement(
-        "div",
-        {
-          style: {
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
-            gap: "10px",
-            alignItems: "center",
-          },
+      labels.status,
+      React.createElement(Select, {
+        selected: [statusValue],
+        options: statusOptions,
+        onChange: (selected: string[]) => {
+          setStatusValue(selected[0] ?? props.schema.statusChoices[0])
         },
-        React.createElement(Select, {
-          selected: [statusValue],
-          options: statusOptions,
-          onChange: (selected: string[]) => {
-            setStatusValue(selected[0] ?? props.schema.statusChoices[0])
-          },
-          menuContainer: popupMenuContainerRef,
-          width: "100%",
-        }),
-        React.createElement(
-          "div",
-          {
-            style: {
-              minHeight: "30px",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            },
-          },
-          React.createElement(Checkbox, {
-            checked: starValue,
-            onChange: (event: { checked: boolean }) => {
-              setStarValue(event.checked === true)
-            },
-          }),
-          React.createElement(
-            "span",
-            {
-              style: {
-                fontSize: "12px",
-                color: "var(--orca-color-text-2)",
-              },
-            },
-            starValue
-              ? (t("Starred"))
-              : (t("Not starred")),
-          ),
-        ),
-      ),
+        menuContainer: popupMenuContainerRef,
+        width: "100%",
+      }),
     ),
     renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
     renderTimeField("end", labels.endTime, endTimeValue, setEndTimeValue),
@@ -669,13 +723,35 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
           ),
           renderFormRow(
             labels.dependencyDelay,
-            React.createElement(Input, {
-              value: dependencyDelayText,
-              placeholder: t("e.g. 24"),
-              onChange: (event: Event) => {
-                setDependencyDelayText((event.target as HTMLInputElement).value)
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) auto",
+                  gap: "8px",
+                  alignItems: "center",
+                },
               },
-            }),
+              React.createElement(Input, {
+                value: dependencyDelayText,
+                placeholder: t("e.g. 24 hours"),
+                onChange: (event: Event) => {
+                  setDependencyDelayText((event.target as HTMLInputElement).value)
+                },
+              }),
+              React.createElement(
+                "span",
+                {
+                  style: {
+                    fontSize: "11px",
+                    color: "var(--orca-color-text-2)",
+                    whiteSpace: "nowrap",
+                  },
+                },
+                t("Hours"),
+              ),
+            ),
           ),
         )
       : null,
@@ -784,6 +860,29 @@ function stripTaskTagFromText(text: string, tagAlias: string): string {
     .replace(/(^|[\s,\uFF0C;\uFF1B\u3001])#[^\s#,\uFF0C;\uFF1B\u3001]+(?=[\s,\uFF0C;\uFF1B\u3001]|$)/g, " ")
     .replace(/\s+/g, " ")
     .trim()
+}
+
+function StarIcon(props: { filled: boolean }) {
+  const React = window.React
+  return (
+    React.createElement(
+      "svg",
+      {
+        width: 16,
+        height: 16,
+        viewBox: "0 0 24 24",
+        fill: props.filled ? "currentColor" : "none",
+        stroke: "currentColor",
+        strokeWidth: 1.8,
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": true,
+      },
+      React.createElement("path", {
+        d: "M12 2.5l2.9 6 6.6.9-4.8 4.7 1.1 6.6L12 17.7 6.2 20.7l1.1-6.6L2.5 9.4l6.6-.9L12 2.5z",
+      }),
+    )
+  )
 }
 
 function clampScore(value: number | null): number {

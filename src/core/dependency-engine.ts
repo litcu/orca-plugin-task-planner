@@ -4,6 +4,7 @@ import type { DependencyMode, TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId } from "./block-utils"
 
 const TAG_REF_TYPE = 2
+const ONE_HOUR_MS = 60 * 60 * 1000
 
 // Next Actions 运行时数据，供视图层直接渲染。
 export interface NextActionItem {
@@ -13,17 +14,19 @@ export interface NextActionItem {
   endTime: Date | null
 }
 
+export type NextActionBlockedReason =
+  | "completed"
+  | "canceled"
+  | "not-started"
+  | "dependency-unmet"
+  | "dependency-delayed"
+  | "has-open-children"
+  | "ancestor-dependency-unmet"
+
 export interface NextActionEvaluation {
   item: NextActionItem
   isNextAction: boolean
-  blockedReason: Array<
-    | "completed"
-    | "canceled"
-    | "not-started"
-    | "dependency-unmet"
-    | "has-open-children"
-    | "ancestor-dependency-unmet"
-  >
+  blockedReason: NextActionBlockedReason[]
 }
 
 interface DependencyCycleContext {
@@ -37,10 +40,31 @@ interface SubtaskContext {
   parentTaskIdByTaskId: Map<DbId, DbId | null>
 }
 
+interface DependencyEvaluationResult {
+  satisfied: boolean
+  unmet: boolean
+  delayed: boolean
+}
+
+interface DependencyCompletionState {
+  completed: boolean
+  completedAtMs: number | null
+}
+
 export async function collectNextActions(
   schema: TaskSchemaDefinition,
   now: Date = new Date(),
 ): Promise<NextActionItem[]> {
+  const evaluations = await collectNextActionEvaluations(schema, now)
+  return evaluations
+    .filter((evaluation) => evaluation.isNextAction)
+    .map((evaluation) => evaluation.item)
+}
+
+export async function collectNextActionEvaluations(
+  schema: TaskSchemaDefinition,
+  now: Date = new Date(),
+): Promise<NextActionEvaluation[]> {
   const taskBlocks = await queryTaskBlocks(schema.tagAlias)
   const taskMap = buildTaskMap(taskBlocks)
   const cycleContext = buildDependencyCycleContext(taskBlocks, taskMap, schema)
@@ -51,9 +75,7 @@ export async function collectNextActions(
   })
 
   return evaluations
-    .filter((evaluation) => evaluation.isNextAction)
     .sort((left, right) => left.item.blockId - right.item.blockId)
-    .map((evaluation) => evaluation.item)
 }
 
 export function evaluateNextAction(
@@ -82,20 +104,36 @@ export function evaluateNextAction(
     blockedReason.push("has-open-children")
   }
 
-  if (hasAncestorDependencyUnmet(block, taskMap, schema, cycleContext, subtaskContext)) {
+  if (
+    hasAncestorDependencyUnmet(
+      block,
+      taskMap,
+      schema,
+      cycleContext,
+      subtaskContext,
+      now,
+    )
+  ) {
     blockedReason.push("ancestor-dependency-unmet")
   }
 
-  if (!isDependencySatisfied(
+  const dependencyResult = evaluateDependencyEligibility(
     block,
     values.dependsOn,
     values.dependsMode,
+    values.dependencyDelay,
     taskMap,
     schema,
     cycleContext,
     subtaskContext,
-  )) {
+    now,
+  )
+
+  if (dependencyResult.unmet) {
     blockedReason.push("dependency-unmet")
+  }
+  if (dependencyResult.delayed) {
+    blockedReason.push("dependency-delayed")
   }
 
   return {
@@ -185,24 +223,31 @@ function buildSubtaskContext(
   }
 }
 
-function isDependencySatisfied(
+function evaluateDependencyEligibility(
   sourceBlock: Block,
   dependsOn: DbId[],
   rawMode: string,
+  rawDelayHours: number | null,
   taskMap: Map<DbId, Block>,
   schema: TaskSchemaDefinition,
   cycleContext: DependencyCycleContext | null,
   subtaskContext: SubtaskContext | null,
-): boolean {
+  now: Date,
+): DependencyEvaluationResult {
   if (dependsOn.length === 0) {
-    return true
+    return {
+      satisfied: true,
+      unmet: false,
+      delayed: false,
+    }
   }
 
   const sourceBlockInState =
     orca.state.blocks[getMirrorId(sourceBlock.id)] ?? sourceBlock
   const mode = normalizeDependsMode(rawMode)
+  const delayHours = normalizeDependencyDelayHours(rawDelayHours)
   const sourceTaskId = getMirrorId(sourceBlockInState.id)
-  const completionList = dependsOn.flatMap((dependencyId) => {
+  const completionStates = dependsOn.flatMap((dependencyId) => {
     if (isSelfDependencyByRefId(sourceBlockInState, dependencyId, sourceTaskId)) {
       return []
     }
@@ -214,7 +259,7 @@ function isDependencySatisfied(
     )
 
     if (dependencyTask == null) {
-      return [false]
+      return [{ completed: false, completedAtMs: null }]
     }
 
     // 自依赖无效：忽略该条依赖，避免任务被永久阻塞。
@@ -228,22 +273,79 @@ function isDependencySatisfied(
       return []
     }
 
-    const dependencyRef = findTaskTagRef(dependencyTask, schema.tagAlias)
+    const liveDependencyTask = getLiveTaskBlock(dependencyTask)
+    const dependencyRef = findTaskTagRef(liveDependencyTask, schema.tagAlias)
     const dependencyStatus = subtaskContext?.statusByTaskId.get(dependencyTaskId) ??
       getTaskStatus(dependencyRef?.data, schema)
+    const completed = isDoneStatus(dependencyStatus, schema) &&
+      !hasOpenSubtaskByTaskId(dependencyTaskId, schema, subtaskContext)
     return [
-      isDoneStatus(dependencyStatus, schema) &&
-      !hasOpenSubtaskByTaskId(dependencyTaskId, schema, subtaskContext),
+      {
+        completed,
+        completedAtMs: completed ? resolveTaskCompletionTimestamp(liveDependencyTask) : null,
+      } satisfies DependencyCompletionState,
     ]
   })
 
-  if (completionList.length === 0) {
-    return true
+  if (completionStates.length === 0) {
+    return {
+      satisfied: true,
+      unmet: false,
+      delayed: false,
+    }
   }
 
-  return mode === "ANY"
-    ? completionList.some((value) => value)
-    : completionList.every((value) => value)
+  const satisfiedByCompletion = mode === "ANY"
+    ? completionStates.some((item) => item.completed)
+    : completionStates.every((item) => item.completed)
+
+  if (!satisfiedByCompletion) {
+    return {
+      satisfied: false,
+      unmet: true,
+      delayed: false,
+    }
+  }
+
+  if (delayHours <= 0) {
+    return {
+      satisfied: true,
+      unmet: false,
+      delayed: false,
+    }
+  }
+
+  const completedAtMsList = completionStates
+    .filter((item) => item.completed)
+    .map((item) => item.completedAtMs)
+    .filter((value): value is number => value != null && !Number.isNaN(value))
+
+  if (completedAtMsList.length === 0) {
+    return {
+      satisfied: true,
+      unmet: false,
+      delayed: false,
+    }
+  }
+
+  const anchorCompletedAtMs = mode === "ANY"
+    ? Math.min(...completedAtMsList)
+    : Math.max(...completedAtMsList)
+  const unlockAtMs = anchorCompletedAtMs + delayHours * ONE_HOUR_MS
+
+  if (now.getTime() >= unlockAtMs) {
+    return {
+      satisfied: true,
+      unmet: false,
+      delayed: false,
+    }
+  }
+
+  return {
+    satisfied: false,
+    unmet: false,
+    delayed: true,
+  }
 }
 
 function hasOpenSubtask(
@@ -300,6 +402,7 @@ function hasAncestorDependencyUnmet(
   schema: TaskSchemaDefinition,
   cycleContext: DependencyCycleContext | null,
   subtaskContext: SubtaskContext | null,
+  now: Date,
 ): boolean {
   if (subtaskContext == null) {
     return false
@@ -319,15 +422,18 @@ function hasAncestorDependencyUnmet(
     if (ancestorBlock != null) {
       const ancestorRef = findTaskTagRef(ancestorBlock, schema.tagAlias)
       const ancestorValues = getTaskPropertiesFromRef(ancestorRef?.data, schema)
-      if (!isDependencySatisfied(
+      const dependencyResult = evaluateDependencyEligibility(
         ancestorBlock,
         ancestorValues.dependsOn,
         ancestorValues.dependsMode,
+        ancestorValues.dependencyDelay,
         taskMap,
         schema,
         cycleContext,
         subtaskContext,
-      )) {
+        now,
+      )
+      if (!dependencyResult.satisfied) {
         return true
       }
     }
@@ -498,6 +604,36 @@ function getLiveTaskBlock(block: Block): Block {
 
 function normalizeDependsMode(mode: string): DependencyMode {
   return mode === "ANY" ? "ANY" : "ALL"
+}
+
+function normalizeDependencyDelayHours(rawDelayHours: number | null): number {
+  if (rawDelayHours == null || Number.isNaN(rawDelayHours)) {
+    return 0
+  }
+
+  return rawDelayHours > 0 ? rawDelayHours : 0
+}
+
+function resolveTaskCompletionTimestamp(taskBlock: Block): number | null {
+  // 当前无“完成时间”专用字段，使用 modified 近似表示完成时刻，回退到 created。
+  const modifiedAt = normalizeDateTimeToTimestamp(taskBlock.modified)
+  if (modifiedAt != null) {
+    return modifiedAt
+  }
+
+  return normalizeDateTimeToTimestamp(taskBlock.created)
+}
+
+function normalizeDateTimeToTimestamp(
+  value: Date | string | number | undefined,
+): number | null {
+  if (value == null) {
+    return null
+  }
+
+  const date = value instanceof Date ? value : new Date(value)
+  const timestamp = date.getTime()
+  return Number.isNaN(timestamp) ? null : timestamp
 }
 
 function findTaskTagRef(
