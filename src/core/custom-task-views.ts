@@ -7,10 +7,55 @@ import type {
 } from "../orca.d.ts"
 import { getMirrorIdFromBlock } from "./block-utils"
 
+export type CustomTaskViewFilterGroupLogic = "and" | "or"
+export type CustomTaskViewFilterFieldType =
+  | "text"
+  | "single-select"
+  | "multi-select"
+  | "number"
+  | "boolean"
+  | "datetime"
+  | "block-refs"
+export type CustomTaskViewFilterOperator =
+  | "eq"
+  | "neq"
+  | "contains"
+  | "contains-any"
+  | "contains-all"
+  | "not-contains"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "before"
+  | "after"
+  | "empty"
+  | "not-empty"
+
+export interface CustomTaskViewFilterRuleNode {
+  id: string
+  kind: "rule"
+  fieldKey: string
+  operator: CustomTaskViewFilterOperator
+  value: string | string[]
+}
+
+export interface CustomTaskViewFilterGroupNode {
+  id: string
+  kind: "group"
+  logic: CustomTaskViewFilterGroupLogic
+  children: CustomTaskViewFilterNode[]
+}
+
+export type CustomTaskViewFilterNode =
+  | CustomTaskViewFilterRuleNode
+  | CustomTaskViewFilterGroupNode
+
 export interface CustomTaskView {
   id: string
   name: string
-  query: QueryDescription2
+  filter: CustomTaskViewFilterGroupNode
+  legacyQuery: QueryDescription2 | null
   createdAt: number
   updatedAt: number
 }
@@ -18,6 +63,26 @@ export interface CustomTaskView {
 const CUSTOM_TASK_VIEWS_DATA_KEY = "taskCustomViews.v1"
 const CUSTOM_TASK_QUERY_PAGE_SIZE = 5000
 const CUSTOM_QUERY_GROUP_KINDS = new Set<number>([100, 101, 102, 103, 104, 105, 106])
+const CUSTOM_TASK_VIEW_FILTER_OPERATOR_SET = new Set<CustomTaskViewFilterOperator>([
+  "eq",
+  "neq",
+  "contains",
+  "contains-any",
+  "contains-all",
+  "not-contains",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "before",
+  "after",
+  "empty",
+  "not-empty",
+])
+const CUSTOM_TASK_VIEW_FILTER_ROOT_ID = "__root__"
+const CUSTOM_TASK_VIEW_DEFAULT_FIELD_KEY = "__task_name__"
+
+let customTaskViewFilterNodeSeed = 0
 
 export function createCustomTaskViewId(): string {
   const randomPart = Math.random().toString(36).slice(2, 10)
@@ -36,6 +101,24 @@ export function cloneCustomTaskViewQuery(
   return normalizeCustomTaskViewQuery(value)
 }
 
+export function createDefaultCustomTaskViewFilterGroup(
+  id: string = CUSTOM_TASK_VIEW_FILTER_ROOT_ID,
+  logic: CustomTaskViewFilterGroupLogic = "and",
+): CustomTaskViewFilterGroupNode {
+  return {
+    id,
+    kind: "group",
+    logic,
+    children: [],
+  }
+}
+
+export function cloneCustomTaskViewFilterGroup(
+  value: CustomTaskViewFilterGroupNode,
+): CustomTaskViewFilterGroupNode {
+  return normalizeCustomTaskViewFilterGroup(value)
+}
+
 export function normalizeCustomTaskViewName(value: string): string {
   return value.replace(/\s+/g, " ").trim()
 }
@@ -50,6 +133,36 @@ export function normalizeCustomTaskViewQuery(value: unknown): QueryDescription2 
     ...(cloned as QueryDescription2),
     q: normalizeCustomTaskViewGroup(cloned.q),
   }
+}
+
+export function normalizeCustomTaskViewFilterGroup(
+  value: unknown,
+): CustomTaskViewFilterGroupNode {
+  const normalized = normalizeCustomTaskViewFilterGroupInternal(value, true)
+  return normalized ?? createDefaultCustomTaskViewFilterGroup()
+}
+
+export function hasAnyCustomTaskViewFilterRules(
+  group: CustomTaskViewFilterGroupNode,
+): boolean {
+  for (const child of group.children) {
+    if (child.kind === "rule") {
+      return true
+    }
+    if (hasAnyCustomTaskViewFilterRules(child)) {
+      return true
+    }
+  }
+  return false
+}
+
+export function hasLegacyCustomTaskViewQuery(view: CustomTaskView): boolean {
+  if (view.legacyQuery == null) {
+    return false
+  }
+
+  const userGroup = normalizeScopedCustomTaskQueryGroup(view.legacyQuery.q)
+  return userGroup != null
 }
 
 export async function loadCustomTaskViews(pluginName: string): Promise<CustomTaskView[]> {
@@ -83,7 +196,11 @@ export async function executeCustomTaskViewQuery(
   view: CustomTaskView,
   taskTagName: string,
 ): Promise<DbId[]> {
-  const description = buildCustomTaskQueryDescription(view.query, taskTagName)
+  if (!hasLegacyCustomTaskViewQuery(view) || view.legacyQuery == null) {
+    return []
+  }
+
+  const description = buildCustomTaskQueryDescription(view.legacyQuery, taskTagName)
   const legacyDescription = convertQueryDescriptionToLegacy(description)
   const rawResult = await orca.invokeBackend("query", legacyDescription) as unknown
   const result = normalizeQueryResultList(rawResult)
@@ -101,7 +218,7 @@ export async function executeCustomTaskViewQuery(
       ? getMirrorIdFromBlock(item as Pick<Block, "id" | "properties">)
       : taskId
 
-    if (seenIds.has(taskId)) {
+    if (seenIds.has(normalizedTaskId)) {
       continue
     }
 
@@ -297,14 +414,29 @@ function normalizeCustomTaskView(value: unknown): CustomTaskView | null {
 
   const createdAt = toUnixTimestamp(value.createdAt) ?? Date.now()
   const updatedAt = toUnixTimestamp(value.updatedAt) ?? createdAt
+  const filter = normalizeCustomTaskViewFilterGroup(value.filter)
+  const legacyQuery = normalizeLegacyCustomTaskViewQuery(
+    value.legacyQuery ?? value.query,
+  )
 
   return {
     id,
     name,
-    query: normalizeCustomTaskViewQuery(value.query),
+    filter,
+    legacyQuery,
     createdAt,
     updatedAt,
   }
+}
+
+function normalizeLegacyCustomTaskViewQuery(value: unknown): QueryDescription2 | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const normalized = normalizeCustomTaskViewQuery(value)
+  const scopedGroup = normalizeScopedCustomTaskQueryGroup(normalized.q)
+  return scopedGroup == null ? null : normalized
 }
 
 function createDefaultCustomTaskViewGroup(): QueryGroup2 {
@@ -343,6 +475,140 @@ function normalizeCustomTaskQueryItem(value: unknown): QueryItem2 | null {
 
   const cloned = cloneRecord(value)
   return cloned == null ? null : (cloned as unknown as QueryItem2)
+}
+
+function normalizeCustomTaskViewFilterGroupInternal(
+  value: unknown,
+  isRoot: boolean,
+): CustomTaskViewFilterGroupNode | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const logic: CustomTaskViewFilterGroupLogic = value.logic === "or" ? "or" : "and"
+  const id = normalizeCustomTaskViewFilterNodeId(value.id, isRoot ? "root" : "group")
+  const rawChildren = Array.isArray(value.children) ? value.children : []
+  const children = rawChildren
+    .map((item: unknown) => normalizeCustomTaskViewFilterNode(item))
+    .filter((item): item is CustomTaskViewFilterNode => item != null)
+
+  return {
+    id,
+    kind: "group",
+    logic,
+    children,
+  }
+}
+
+function normalizeCustomTaskViewFilterNode(
+  value: unknown,
+): CustomTaskViewFilterNode | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  if (value.kind === "group") {
+    return normalizeCustomTaskViewFilterGroupInternal(value, false)
+  }
+  if (value.kind === "rule") {
+    return normalizeCustomTaskViewFilterRuleNode(value)
+  }
+
+  if (Array.isArray(value.children)) {
+    return normalizeCustomTaskViewFilterGroupInternal(value, false)
+  }
+
+  return normalizeCustomTaskViewFilterRuleNode(value)
+}
+
+function normalizeCustomTaskViewFilterRuleNode(
+  value: Record<string, unknown>,
+): CustomTaskViewFilterRuleNode | null {
+  const fieldKey = typeof value.fieldKey === "string" && value.fieldKey.trim() !== ""
+    ? value.fieldKey.trim()
+    : CUSTOM_TASK_VIEW_DEFAULT_FIELD_KEY
+  const operator = normalizeCustomTaskViewFilterOperator(value.operator)
+
+  return {
+    id: normalizeCustomTaskViewFilterNodeId(value.id, "rule"),
+    kind: "rule",
+    fieldKey,
+    operator,
+    value: normalizeCustomTaskViewFilterRuleValue(value.value),
+  }
+}
+
+function normalizeCustomTaskViewFilterOperator(
+  value: unknown,
+): CustomTaskViewFilterOperator {
+  if (typeof value === "string" && CUSTOM_TASK_VIEW_FILTER_OPERATOR_SET.has(value as any)) {
+    return value as CustomTaskViewFilterOperator
+  }
+
+  return "contains"
+}
+
+function normalizeCustomTaskViewFilterRuleValue(
+  value: unknown,
+): string | string[] {
+  if (Array.isArray(value)) {
+    return normalizeCustomTaskViewFilterTextValues(
+      value.map((item) => toStringValue(item)),
+    )
+  }
+
+  return toStringValue(value)
+}
+
+function normalizeCustomTaskViewFilterTextValues(values: string[]): string[] {
+  const normalizedValues: string[] = []
+  const seen = new Set<string>()
+
+  for (const rawValue of values) {
+    const value = rawValue.replace(/\s+/g, " ").trim()
+    if (value === "") {
+      continue
+    }
+
+    const dedupKey = value.toLowerCase()
+    if (seen.has(dedupKey)) {
+      continue
+    }
+
+    seen.add(dedupKey)
+    normalizedValues.push(value)
+  }
+
+  return normalizedValues
+}
+
+function normalizeCustomTaskViewFilterNodeId(
+  value: unknown,
+  kind: "root" | "group" | "rule",
+): string {
+  if (typeof value === "string" && value.trim() !== "") {
+    return value.trim()
+  }
+
+  if (kind === "root") {
+    return CUSTOM_TASK_VIEW_FILTER_ROOT_ID
+  }
+
+  customTaskViewFilterNodeSeed += 1
+  return `${kind}-${customTaskViewFilterNodeSeed}`
+}
+
+function toStringValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value)
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false"
+  }
+  return ""
 }
 
 function isCustomQueryGroupKind(value: unknown): value is QueryGroup2["kind"] {

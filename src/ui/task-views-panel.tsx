@@ -4,7 +4,6 @@ import type {
   BlockRef,
   DbId,
   PanelProps,
-  QueryDescription2,
 } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 import {
@@ -37,14 +36,22 @@ import {
   type MyLifeOrganizedSettings,
 } from "../core/plugin-settings"
 import {
-  cloneCustomTaskViewQuery,
+  cloneCustomTaskViewFilterGroup,
   createCustomTaskViewId,
-  createDefaultCustomTaskViewQuery,
+  createDefaultCustomTaskViewFilterGroup,
   executeCustomTaskViewQuery,
+  hasAnyCustomTaskViewFilterRules,
+  hasLegacyCustomTaskViewQuery,
   loadCustomTaskViews,
+  normalizeCustomTaskViewFilterGroup,
   normalizeCustomTaskViewName,
-  normalizeCustomTaskViewQuery,
   saveCustomTaskViews,
+  type CustomTaskViewFilterFieldType,
+  type CustomTaskViewFilterGroupLogic,
+  type CustomTaskViewFilterGroupNode,
+  type CustomTaskViewFilterNode,
+  type CustomTaskViewFilterOperator,
+  type CustomTaskViewFilterRuleNode,
   type CustomTaskView,
 } from "../core/custom-task-views"
 import { t } from "../libs/l10n"
@@ -78,47 +85,12 @@ interface TaskDropTarget {
   position: TaskDropPosition
 }
 
-type TaskFilterGroupLogic = "and" | "or"
-type TaskFilterFieldType =
-  | "text"
-  | "single-select"
-  | "multi-select"
-  | "number"
-  | "boolean"
-  | "datetime"
-  | "block-refs"
-type TaskFilterOperator =
-  | "eq"
-  | "neq"
-  | "contains"
-  | "contains-any"
-  | "contains-all"
-  | "not-contains"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "before"
-  | "after"
-  | "empty"
-  | "not-empty"
-
-interface TaskFilterRuleNode {
-  id: string
-  kind: "rule"
-  fieldKey: string
-  operator: TaskFilterOperator
-  value: string | string[]
-}
-
-interface TaskFilterGroupNode {
-  id: string
-  kind: "group"
-  logic: TaskFilterGroupLogic
-  children: TaskFilterNode[]
-}
-
-type TaskFilterNode = TaskFilterRuleNode | TaskFilterGroupNode
+type TaskFilterGroupLogic = CustomTaskViewFilterGroupLogic
+type TaskFilterFieldType = CustomTaskViewFilterFieldType
+type TaskFilterOperator = CustomTaskViewFilterOperator
+type TaskFilterRuleNode = CustomTaskViewFilterRuleNode
+type TaskFilterGroupNode = CustomTaskViewFilterGroupNode
+type TaskFilterNode = CustomTaskViewFilterNode
 
 interface TaskFilterField {
   key: string
@@ -154,7 +126,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const Input = orca.components.Input
   const ModalOverlay = orca.components.ModalOverlay
   const Popup = orca.components.Popup
-  const QueryConditionsBuilder = orca.components.QueryConditionsBuilder
   const Select = orca.components.Select
   const Segmented = orca.components.Segmented
   const Switch = orca.components.Switch
@@ -166,6 +137,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const customViewsButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
   const filterButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
   const filterPopupContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const customViewFilterPopupContainerRef = React.useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [errorText, setErrorText] = React.useState("")
   const [customViews, setCustomViews] = React.useState<CustomTaskView[]>([])
@@ -175,8 +147,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [editingCustomViewId, setEditingCustomViewId] = React.useState<string | null>(null)
   const [customViewNameDraft, setCustomViewNameDraft] = React.useState("")
   const [customViewNameError, setCustomViewNameError] = React.useState("")
-  const [customViewQueryDraft, setCustomViewQueryDraft] = React.useState<QueryDescription2>(() =>
-    createDefaultCustomTaskViewQuery()
+  const [customViewFilterDraft, setCustomViewFilterDraft] = React.useState<TaskFilterGroupNode>(() =>
+    createDefaultCustomTaskViewFilterGroup()
   )
   const [savingCustomView, setSavingCustomView] = React.useState(false)
   const [customViewMatchedTaskIds, setCustomViewMatchedTaskIds] = React.useState<DbId[]>([])
@@ -215,6 +187,12 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
     return customViews.find((view: CustomTaskView) => view.id === activeCustomViewId) ?? null
   }, [activeCustomViewId, customViews])
+  const editingCustomView = React.useMemo(() => {
+    if (editingCustomViewId == null) {
+      return null
+    }
+    return customViews.find((view: CustomTaskView) => view.id === editingCustomViewId) ?? null
+  }, [customViews, editingCustomViewId])
 
   const loadByTab = React.useCallback(
     async (
@@ -251,11 +229,17 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           if (customView == null) {
             setCustomViewMatchedTaskIds([])
           } else {
-            const matchedIds = await executeCustomTaskViewQuery(
-              customView,
-              props.schema.tagAlias,
-            )
-            setCustomViewMatchedTaskIds(matchedIds)
+            const shouldUseLegacyQuery = hasLegacyCustomTaskViewQuery(customView) &&
+              !hasAnyCustomTaskViewFilterRules(customView.filter)
+            if (shouldUseLegacyQuery) {
+              const matchedIds = await executeCustomTaskViewQuery(
+                customView,
+                props.schema.tagAlias,
+              )
+              setCustomViewMatchedTaskIds(matchedIds)
+            } else {
+              setCustomViewMatchedTaskIds([])
+            }
           }
         } else {
           const allTasks = await collectAllTasks(props.schema)
@@ -367,6 +351,13 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   }, [filterPanelVisible, loadTaskTagProperties])
 
   React.useEffect(() => {
+    if (!customViewEditorVisible) {
+      return
+    }
+    void loadTaskTagProperties()
+  }, [customViewEditorVisible, loadTaskTagProperties])
+
+  React.useEffect(() => {
     setFilterPanelVisible(false)
     setCustomViewsPanelVisible(false)
   }, [tab])
@@ -406,7 +397,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     setEditingCustomViewId(null)
     setCustomViewNameDraft("")
     setCustomViewNameError("")
-    setCustomViewQueryDraft(createDefaultCustomTaskViewQuery())
+    setCustomViewFilterDraft(createDefaultCustomTaskViewFilterGroup())
     setCustomViewsPanelVisible(false)
     setCustomViewEditorVisible(true)
   }, [])
@@ -415,7 +406,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     setEditingCustomViewId(view.id)
     setCustomViewNameDraft(view.name)
     setCustomViewNameError("")
-    setCustomViewQueryDraft(cloneCustomTaskViewQuery(view.query))
+    setCustomViewFilterDraft(cloneCustomTaskViewFilterGroup(view.filter))
     setCustomViewsPanelVisible(false)
     setCustomViewEditorVisible(true)
   }, [])
@@ -437,7 +428,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     }
     setCustomViewNameError("")
 
-    const query = normalizeCustomTaskViewQuery(customViewQueryDraft)
+    const filter = normalizeCustomTaskViewFilterGroup(customViewFilterDraft)
+    const hasFilterRules = hasAnyCustomTaskViewFilterRules(filter)
     const now = Date.now()
     let savedViewId = editingCustomViewId
     let nextViews: CustomTaskView[] = []
@@ -459,7 +451,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         return {
           ...view,
           name,
-          query,
+          filter,
+          legacyQuery: hasFilterRules ? null : view.legacyQuery,
           updatedAt: now,
         }
       })
@@ -470,7 +463,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         {
           id: savedViewId,
           name,
-          query,
+          filter,
+          legacyQuery: null,
           createdAt: now,
           updatedAt: now,
         },
@@ -496,8 +490,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       setSavingCustomView(false)
     }
   }, [
+    customViewFilterDraft,
     customViewNameDraft,
-    customViewQueryDraft,
     customViews,
     editingCustomViewId,
     props.pluginName,
@@ -719,6 +713,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const activeFilterCount = React.useMemo(() => {
     return countEffectiveTaskFilterRules(filterRoot, filterFieldByKey)
   }, [filterFieldByKey, filterRoot])
+  const customViewFilterRuleCount = React.useMemo(() => {
+    return countEffectiveTaskFilterRules(customViewFilterDraft, filterFieldByKey)
+  }, [customViewFilterDraft, filterFieldByKey])
+  const editingCustomViewUsesLegacyQuery = React.useMemo(() => {
+    if (editingCustomView == null) {
+      return false
+    }
+    return hasLegacyCustomTaskViewQuery(editingCustomView) &&
+      !hasAnyCustomTaskViewFilterRules(editingCustomView.filter)
+  }, [editingCustomView])
   const normalizedQuickSearch = React.useMemo(() => {
     return quickSearchKeyword.trim().toLowerCase()
   }, [quickSearchKeyword])
@@ -794,6 +798,83 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     })
   }, [])
 
+  const clearCustomViewFilters = React.useCallback(() => {
+    setCustomViewFilterDraft(createDefaultCustomTaskViewFilterGroup())
+  }, [])
+
+  const addCustomViewFilterRule = React.useCallback(
+    (groupId: string) => {
+      const defaultField = filterFields[0] ?? createTaskNameFilterField()
+      const nextRule = createTaskFilterRule(defaultField)
+      setCustomViewFilterDraft((prev: TaskFilterGroupNode) => {
+        return appendRuleToTaskFilterGroup(prev, groupId, nextRule)
+      })
+    },
+    [filterFields],
+  )
+
+  const addCustomViewFilterGroup = React.useCallback((groupId: string) => {
+    setCustomViewFilterDraft((prev: TaskFilterGroupNode) => {
+      const nextGroup = createTaskFilterGroup(createTaskFilterNodeId("group"), "and")
+      return appendGroupToTaskFilterGroup(prev, groupId, nextGroup)
+    })
+  }, [])
+
+  const removeCustomViewFilterNode = React.useCallback((nodeId: string) => {
+    if (nodeId === FILTER_GROUP_ROOT_ID) {
+      return
+    }
+
+    setCustomViewFilterDraft((prev: TaskFilterGroupNode) => {
+      return removeTaskFilterNode(prev, nodeId)
+    })
+  }, [])
+
+  const updateCustomViewFilterGroupLogic = React.useCallback(
+    (groupId: string, logic: TaskFilterGroupLogic) => {
+      setCustomViewFilterDraft((prev: TaskFilterGroupNode) => {
+        return updateTaskFilterGroupLogic(prev, groupId, logic)
+      })
+    },
+    [],
+  )
+
+  const updateCustomViewFilterRuleField = React.useCallback(
+    (ruleId: string, fieldKey: string) => {
+      const field = filterFieldByKey.get(fieldKey) ?? filterFields[0] ?? createTaskNameFilterField()
+      setCustomViewFilterDraft((prev: TaskFilterGroupNode) => {
+        return updateTaskFilterRule(prev, ruleId, (rule) => ({
+          ...rule,
+          fieldKey: field.key,
+          operator: getDefaultTaskFilterOperator(field.type),
+          value: getDefaultTaskFilterValue(field.type),
+        }))
+      })
+    },
+    [filterFieldByKey, filterFields],
+  )
+
+  const updateCustomViewFilterRuleOperator = React.useCallback(
+    (ruleId: string, operator: TaskFilterOperator) => {
+      setCustomViewFilterDraft((prev: TaskFilterGroupNode) => {
+        return updateTaskFilterRule(prev, ruleId, (rule) => ({
+          ...rule,
+          operator,
+        }))
+      })
+    },
+    [],
+  )
+
+  const updateCustomViewFilterRuleValue = React.useCallback((ruleId: string, value: string | string[]) => {
+    setCustomViewFilterDraft((prev: TaskFilterGroupNode) => {
+      return updateTaskFilterRule(prev, ruleId, (rule) => ({
+        ...rule,
+        value,
+      }))
+    })
+  }, [])
+
   const matchesItem = React.useCallback(
     (item: FilterableTaskItem) => {
       if (normalizedQuickSearch !== "" && !item.text.toLowerCase().includes(normalizedQuickSearch)) {
@@ -849,23 +930,47 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     })
     return orderMap
   }, [customViewMatchedTaskIds])
+  const activeCustomViewUsesLegacyQuery = React.useMemo(() => {
+    if (activeCustomView == null) {
+      return false
+    }
+    return hasLegacyCustomTaskViewQuery(activeCustomView) &&
+      !hasAnyCustomTaskViewFilterRules(activeCustomView.filter)
+  }, [activeCustomView])
   const filteredCustomViewTaskItems = React.useMemo(() => {
-    if (!isCustomTaskViewsTab(tab)) {
+    if (!isCustomTaskViewsTab(tab) || activeCustomView == null) {
       return []
     }
 
+    if (activeCustomViewUsesLegacyQuery) {
+      return allTaskItems
+        .filter((item: AllTaskItem) => customViewMatchedTaskIdSet.has(item.blockId))
+        .sort((left: AllTaskItem, right: AllTaskItem) => {
+          const leftOrder = customViewTaskOrderMap.get(left.blockId) ?? Number.MAX_SAFE_INTEGER
+          const rightOrder = customViewTaskOrderMap.get(right.blockId) ?? Number.MAX_SAFE_INTEGER
+          if (leftOrder !== rightOrder) {
+            return leftOrder - rightOrder
+          }
+          return left.blockId - right.blockId
+        })
+        .filter(matchesItem)
+    }
+
     return allTaskItems
-      .filter((item: AllTaskItem) => customViewMatchedTaskIdSet.has(item.blockId))
-      .sort((left: AllTaskItem, right: AllTaskItem) => {
-        const leftOrder = customViewTaskOrderMap.get(left.blockId) ?? Number.MAX_SAFE_INTEGER
-        const rightOrder = customViewTaskOrderMap.get(right.blockId) ?? Number.MAX_SAFE_INTEGER
-        if (leftOrder !== rightOrder) {
-          return leftOrder - rightOrder
-        }
-        return left.blockId - right.blockId
-      })
+      .filter((item: AllTaskItem) =>
+        evaluateTaskFilterGroup(activeCustomView.filter, item, filterFieldByKey)
+      )
       .filter(matchesItem)
-  }, [allTaskItems, customViewMatchedTaskIdSet, customViewTaskOrderMap, matchesItem, tab])
+  }, [
+    activeCustomView,
+    activeCustomViewUsesLegacyQuery,
+    allTaskItems,
+    customViewMatchedTaskIdSet,
+    customViewTaskOrderMap,
+    filterFieldByKey,
+    matchesItem,
+    tab,
+  ])
   const isDashboardTab = tab === "dashboard"
   const isReviewDueTab = tab === "review-due"
   const isAllTasksTab = tab === "all-tasks"
@@ -1328,7 +1433,44 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     { value: "or", label: t("OR") },
   ]
 
-  const renderFilterRuleNode = (rule: TaskFilterRuleNode, depth: number) => {
+  interface TaskFilterEditorBindings {
+    menuContainerRef: React.MutableRefObject<HTMLDivElement | null>
+    addRule: (groupId: string) => void
+    addGroup: (groupId: string) => void
+    removeNode: (nodeId: string) => void
+    updateGroupLogic: (groupId: string, logic: TaskFilterGroupLogic) => void
+    updateRuleField: (ruleId: string, fieldKey: string) => void
+    updateRuleOperator: (ruleId: string, operator: TaskFilterOperator) => void
+    updateRuleValue: (ruleId: string, value: string | string[]) => void
+  }
+
+  const quickFilterEditorBindings: TaskFilterEditorBindings = {
+    menuContainerRef: filterPopupContainerRef,
+    addRule: addFilterRule,
+    addGroup: addFilterGroup,
+    removeNode: removeFilterNode,
+    updateGroupLogic: updateFilterGroupLogic,
+    updateRuleField: updateFilterRuleField,
+    updateRuleOperator: updateFilterRuleOperator,
+    updateRuleValue: updateFilterRuleValue,
+  }
+
+  const customViewFilterEditorBindings: TaskFilterEditorBindings = {
+    menuContainerRef: customViewFilterPopupContainerRef,
+    addRule: addCustomViewFilterRule,
+    addGroup: addCustomViewFilterGroup,
+    removeNode: removeCustomViewFilterNode,
+    updateGroupLogic: updateCustomViewFilterGroupLogic,
+    updateRuleField: updateCustomViewFilterRuleField,
+    updateRuleOperator: updateCustomViewFilterRuleOperator,
+    updateRuleValue: updateCustomViewFilterRuleValue,
+  }
+
+  const renderFilterRuleNode = (
+    rule: TaskFilterRuleNode,
+    depth: number,
+    bindings: TaskFilterEditorBindings,
+  ) => {
     const fallbackField = filterFields[0] ?? createTaskNameFilterField()
     const field = filterFieldByKey.get(rule.fieldKey) ?? fallbackField
     const operatorOptions = getTaskFilterOperatorOptions(field.type)
@@ -1366,16 +1508,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               multiSelection: multiValueEnabled,
               filter: true,
               onChange: (selected: string[]) =>
-                updateFilterRuleValue(rule.id, multiValueEnabled ? selected : (selected[0] ?? "")),
+                bindings.updateRuleValue(rule.id, multiValueEnabled ? selected : (selected[0] ?? "")),
               width: "100%",
-              menuContainer: filterPopupContainerRef,
+              menuContainer: bindings.menuContainerRef,
             })
           : React.createElement(Input, {
               value: multiValueEnabled ? ruleValueList.join(", ") : selectedSingleValue,
               placeholder: multiValueEnabled ? t("Use comma to separate multiple values") : t("Value"),
               onChange: (event: Event) => {
                 const target = event.target as HTMLInputElement | null
-                updateFilterRuleValue(
+                bindings.updateRuleValue(
                   rule.id,
                   multiValueEnabled
                     ? splitTaskFilterInputValues(target?.value ?? "")
@@ -1391,9 +1533,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             { value: "true", label: t("True") },
             { value: "false", label: t("False") },
           ],
-          onChange: (selected: string[]) => updateFilterRuleValue(rule.id, selected[0] ?? ""),
+          onChange: (selected: string[]) => bindings.updateRuleValue(rule.id, selected[0] ?? ""),
           width: "100%",
-          menuContainer: filterPopupContainerRef,
+          menuContainer: bindings.menuContainerRef,
         })
       } else {
         valueEditor = React.createElement(Input, {
@@ -1406,7 +1548,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           placeholder: t("Value"),
           onChange: (event: Event) => {
             const target = event.target as HTMLInputElement | null
-            updateFilterRuleValue(rule.id, target?.value ?? "")
+            bindings.updateRuleValue(rule.id, target?.value ?? "")
           },
           width: "100%",
         })
@@ -1443,10 +1585,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           options: filterFieldOptions,
           filter: true,
           onChange: (selected: string[]) => {
-            updateFilterRuleField(rule.id, selected[0] ?? fallbackField.key)
+            bindings.updateRuleField(rule.id, selected[0] ?? fallbackField.key)
           },
           width: "100%",
-          menuContainer: filterPopupContainerRef,
+          menuContainer: bindings.menuContainerRef,
         }),
       ),
       React.createElement(
@@ -1463,11 +1605,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           onChange: (selected: string[]) => {
             const nextOperator = selected[0]
             if (isTaskFilterOperator(nextOperator)) {
-              updateFilterRuleOperator(rule.id, nextOperator)
+              bindings.updateRuleOperator(rule.id, nextOperator)
             }
           },
           width: "100%",
-          menuContainer: filterPopupContainerRef,
+          menuContainer: bindings.menuContainerRef,
         }),
       ),
       React.createElement(
@@ -1502,7 +1644,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           Button,
           {
             variant: "outline",
-            onClick: () => removeFilterNode(rule.id),
+            onClick: () => bindings.removeNode(rule.id),
             title: t("Delete"),
             style: {
               borderRadius: "8px",
@@ -1533,6 +1675,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const renderFilterGroupNode = (
     group: TaskFilterGroupNode,
     depth: number,
+    bindings: TaskFilterEditorBindings,
     isRoot: boolean = false,
   ): React.ReactElement => {
     return React.createElement(
@@ -1564,7 +1707,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           selected: group.logic,
           options: groupLogicOptions,
           onChange: (value: string) => {
-            updateFilterGroupLogic(group.id, value === "or" ? "or" : "and")
+            bindings.updateGroupLogic(group.id, value === "or" ? "or" : "and")
           },
           style: {
             minWidth: "112px",
@@ -1574,7 +1717,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           Button,
           {
             variant: "outline",
-            onClick: () => addFilterRule(group.id),
+            onClick: () => bindings.addRule(group.id),
             style: {
               borderRadius: "8px",
             },
@@ -1585,7 +1728,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           Button,
           {
             variant: "outline",
-            onClick: () => addFilterGroup(group.id),
+            onClick: () => bindings.addGroup(group.id),
             style: {
               borderRadius: "8px",
             },
@@ -1597,7 +1740,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               Button,
               {
                 variant: "outline",
-                onClick: () => removeFilterNode(group.id),
+                onClick: () => bindings.removeNode(group.id),
                 style: {
                   borderRadius: "8px",
                 },
@@ -1620,9 +1763,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           )
         : group.children.map((child) => {
             if (child.kind === "group") {
-              return renderFilterGroupNode(child, depth + 1)
+              return renderFilterGroupNode(child, depth + 1, bindings)
             }
-            return renderFilterRuleNode(child, depth + 1)
+            return renderFilterRuleNode(child, depth + 1, bindings)
           }),
     )
   }
@@ -2120,7 +2263,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 },
                 t("Build expression with AND/OR groups"),
               ),
-              renderFilterGroupNode(filterRoot, 0, true),
+              renderFilterGroupNode(filterRoot, 0, quickFilterEditorBindings, true),
             ),
           ),
         ),
@@ -2700,11 +2843,62 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               fontWeight: 600,
             },
           },
-          t("Custom view query"),
+          t("Custom view rules"),
+        ),
+        editingCustomViewUsesLegacyQuery
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "12px",
+                  color: "var(--orca-color-text-yellow, #b7791f)",
+                  background: "rgba(183, 121, 31, 0.08)",
+                  border: "1px solid rgba(183, 121, 31, 0.26)",
+                  borderRadius: "8px",
+                  padding: "8px 10px",
+                },
+              },
+              t("Legacy custom view query detected. Add rules and save to migrate."),
+            )
+          : null,
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "8px",
+              flexWrap: "wrap",
+            },
+          },
+          React.createElement(
+            "div",
+            {
+              style: {
+                fontSize: "12px",
+                color: "var(--orca-color-text-2)",
+              },
+            },
+            t("Rule count: ${count}", { count: String(customViewFilterRuleCount) }),
+          ),
+          React.createElement(
+            Button,
+            {
+              variant: "outline",
+              disabled: customViewFilterRuleCount === 0,
+              onClick: () => clearCustomViewFilters(),
+              style: {
+                borderRadius: "8px",
+              },
+            },
+            t("Clear rules"),
+          ),
         ),
         React.createElement(
           "div",
           {
+            ref: customViewFilterPopupContainerRef,
             style: {
               flex: "1 1 auto",
               minHeight: "300px",
@@ -2716,12 +2910,27 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               background: "rgba(148, 163, 184, 0.06)",
             },
           },
-          React.createElement(QueryConditionsBuilder, {
-            value: customViewQueryDraft,
-            onChange: (nextValue: QueryDescription2) => {
-              setCustomViewQueryDraft(normalizeCustomTaskViewQuery(nextValue))
+          React.createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              },
             },
-          }),
+            React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "12px",
+                  color: "var(--orca-color-text-2)",
+                },
+              },
+              t("Build expression with AND/OR groups"),
+            ),
+            renderFilterGroupNode(customViewFilterDraft, 0, customViewFilterEditorBindings, true),
+          ),
         ),
         React.createElement(
           "div",
