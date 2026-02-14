@@ -8,6 +8,7 @@ import { getMirrorId } from "../core/block-utils"
 import {
   buildTaskFieldLabels,
   getTaskPropertiesFromRef,
+  normalizeTaskValuesForStatus,
   toRefDataForSave,
   validateNumericField,
 } from "../core/task-properties"
@@ -696,7 +697,7 @@ function TaskPropertyPopupView(props: {
             insertedTaskId,
             dependsOnValues,
           )
-          const valuesToSave = {
+          const valuesToSave = normalizeTaskValuesForStatus({
             status: statusValue,
             startTime: startTimeValue,
             endTime: endTimeValue,
@@ -718,7 +719,7 @@ function TaskPropertyPopupView(props: {
             dependsOn: dependencyRefIds,
             dependsMode: hasDependencies ? dependsModeValue : "ALL",
             dependencyDelay: hasDependencies ? dependencyDelay.value : null,
-          }
+          }, props.schema)
           const payload = toRefDataForSave(valuesToSave, props.schema)
           await orca.commands.invokeEditorCommand(
             "core.editor.insertTag",
@@ -769,7 +770,7 @@ function TaskPropertyPopupView(props: {
         dependsOnValues,
       )
       const previousValues = getTaskPropertiesFromRef(taskRef.data, props.schema)
-      const valuesToSave = {
+      const valuesToSave = normalizeTaskValuesForStatus({
         status: statusValue,
         startTime: startTimeValue,
         endTime: endTimeValue,
@@ -791,7 +792,7 @@ function TaskPropertyPopupView(props: {
         dependsOn: dependencyRefIds,
         dependsMode: hasDependencies ? dependsModeValue : "ALL",
         dependencyDelay: hasDependencies ? dependencyDelay.value : null,
-      }
+      }, props.schema)
 
       const payload = toRefDataForSave(
         valuesToSave,

@@ -42,6 +42,25 @@ export interface TaskPropertyValues {
   dependencyDelay: number | null
 }
 
+export function normalizeTaskValuesForStatus(
+  values: TaskPropertyValues,
+  schema: TaskSchemaDefinition,
+): TaskPropertyValues {
+  const [, , doneStatus] = schema.statusChoices
+  if (values.status !== doneStatus) {
+    return values
+  }
+
+  return {
+    ...values,
+    reviewEnabled: false,
+    reviewType: "single",
+    nextReview: null,
+    reviewEvery: "",
+    lastReviewed: null,
+  }
+}
+
 export interface TaskFieldLabels {
   title: string
   status: string

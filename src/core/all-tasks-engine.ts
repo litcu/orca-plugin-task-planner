@@ -1,6 +1,9 @@
 import type { Block, BlockProperty, BlockRef, DbId } from "../orca.d.ts"
 import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
-import { getTaskPropertiesFromRef } from "./task-properties"
+import {
+  getTaskPropertiesFromRef,
+  normalizeTaskValuesForStatus,
+} from "./task-properties"
 import type { TaskSchemaDefinition } from "./task-schema"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
 import {
@@ -306,12 +309,12 @@ export async function cycleTaskStatusInView(
   const effectiveTaskRef = taskRefFromState ?? taskTagRef
   const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema)
   const nextStatus = getNextStatus(values.status, schema)
-  const [, doingStatus] = schema.statusChoices
+  const [, doingStatus, doneStatus] = schema.statusChoices
   const dependsMode =
     values.dependsMode === "ALL" || values.dependsMode === "ANY"
       ? values.dependsMode
       : schema.dependencyModeChoices[0]
-  const nextValues = {
+  const nextValues = normalizeTaskValuesForStatus({
     ...values,
     status: nextStatus,
     startTime:
@@ -319,8 +322,8 @@ export async function cycleTaskStatusInView(
         ? new Date()
         : values.startTime,
     endTime: values.endTime,
-  }
-  const payload = [
+  }, schema)
+  const payload: Array<{ name: string; type?: number; value: unknown }> = [
     { name: schema.propertyNames.status, value: nextValues.status },
     {
       name: schema.propertyNames.startTime,
@@ -337,6 +340,12 @@ export async function cycleTaskStatusInView(
       value: dependsMode,
     },
   ]
+  if (nextStatus === doneStatus) {
+    payload.push({
+      name: schema.propertyNames.review,
+      value: null,
+    })
+  }
 
   if (effectiveTaskRef != null) {
     try {

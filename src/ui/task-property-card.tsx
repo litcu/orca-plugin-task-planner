@@ -4,6 +4,7 @@ import { getMirrorId } from "../core/block-utils"
 import {
   buildTaskFieldLabels,
   getTaskPropertiesFromRef,
+  normalizeTaskValuesForStatus,
   toRefDataForSave,
   validateNumericField,
 } from "../core/task-properties"
@@ -569,7 +570,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
             intervalText: reviewIntervalText,
           })
         : ""
-      const valuesToSave = {
+      const valuesToSave = normalizeTaskValuesForStatus({
         status: statusValue,
         startTime: startTimeValue,
         endTime: endTimeValue,
@@ -591,7 +592,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         dependsOn: dependencyRefIds,
         dependsMode: hasDependencies ? dependsModeValue : "ALL",
         dependencyDelay: hasDependencies ? dependencyDelay.value : null,
-      }
+      }, props.schema)
       const payload = toRefDataForSave(
         valuesToSave,
         props.schema,

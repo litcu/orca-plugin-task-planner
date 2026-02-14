@@ -157,6 +157,7 @@ export function evaluateNextAction(
   }
 
   const score = calculateTaskScoreFromValues(values, now)
+  const forceActiveByReview = values.reviewEnabled
 
   return {
     item: {
@@ -183,7 +184,7 @@ export function evaluateNextAction(
       parentTaskName,
       taskTagRef: taskRef,
     },
-    isNextAction: blockedReason.length === 0,
+    isNextAction: forceActiveByReview || blockedReason.length === 0,
     blockedReason,
   }
 }
