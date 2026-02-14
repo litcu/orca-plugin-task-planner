@@ -1251,47 +1251,76 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
             React.createElement(
               "div",
               {
-                style: inlineDualControlLayoutStyle,
-              },
-              React.createElement(Select, {
-                selected: [reviewModeValue],
-                options: reviewModeOptions,
-                onChange: (selected: string[]) => {
-                  updateReviewEditor({
-                    mode: (selected[0] ?? "day") as ReviewMode,
-                  })
+                style: {
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
                 },
-                menuContainer: popupMenuContainerRef,
-                width: "100%",
-              }),
+              },
               React.createElement(
                 "div",
                 {
-                  style: {
-                    display: "grid",
-                    gridTemplateColumns: "74px auto",
-                    alignItems: "center",
-                    gap: "8px",
-                  },
+                  style: inlineDualControlLayoutStyle,
                 },
-                React.createElement(Input, {
-                  value: reviewIntervalText,
-                  placeholder: "1",
-                  onChange: (event: Event) => {
+                React.createElement(Select, {
+                  selected: [reviewModeValue],
+                  options: reviewModeOptions,
+                  onChange: (selected: string[]) => {
                     updateReviewEditor({
-                      intervalText: (event.target as HTMLInputElement).value,
+                      mode: (selected[0] ?? "day") as ReviewMode,
                     })
                   },
+                  menuContainer: popupMenuContainerRef,
+                  width: "100%",
                 }),
                 React.createElement(
-                  "span",
-                  { style: hintTextStyle },
-                  reviewModeValue === "day"
-                    ? t("day(s)")
-                    : reviewModeValue === "week"
-                      ? t("week(s)")
-                      : t("month(s)"),
+                  "div",
+                  {
+                    style: {
+                      display: "grid",
+                      gridTemplateColumns: "74px auto",
+                      alignItems: "center",
+                      gap: "8px",
+                    },
+                  },
+                  React.createElement(Input, {
+                    value: reviewIntervalText,
+                    type: "number",
+                    min: 1,
+                    step: 1,
+                    placeholder: "1",
+                    onChange: (event: Event) => {
+                      const rawValue = (event.target as HTMLInputElement).value
+                      updateReviewEditor({
+                        intervalText: rawValue.replace(/[^\d]/g, ""),
+                      })
+                    },
+                    onBlur: () => {
+                      const parsed = Number(reviewIntervalText)
+                      if (reviewIntervalText.trim() === "" || Number.isNaN(parsed) || parsed < 1) {
+                        updateReviewEditor({
+                          intervalText: "1",
+                        })
+                      }
+                    },
+                  }),
+                  React.createElement(
+                    "span",
+                    { style: hintTextStyle },
+                    reviewModeValue === "day"
+                      ? t("day(s)")
+                      : reviewModeValue === "week"
+                        ? t("week(s)")
+                        : t("month(s)"),
+                  ),
                 ),
+              ),
+              React.createElement(
+                "div",
+                {
+                  style: hintTextStyle,
+                },
+                t("Enter a positive integer, e.g. 1"),
               ),
             ),
           )

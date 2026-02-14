@@ -1,12 +1,3 @@
-import type {
-  Block,
-  DbId,
-  QueryDescription2,
-  QueryGroup2,
-  QueryItem2,
-} from "../orca.d.ts"
-import { getMirrorIdFromBlock } from "./block-utils"
-
 export type CustomTaskViewFilterGroupLogic = "and" | "or"
 export type CustomTaskViewFilterFieldType =
   | "text"
@@ -27,6 +18,7 @@ export type CustomTaskViewFilterOperator =
   | "gte"
   | "lt"
   | "lte"
+  | "between"
   | "before"
   | "after"
   | "empty"
@@ -55,14 +47,11 @@ export interface CustomTaskView {
   id: string
   name: string
   filter: CustomTaskViewFilterGroupNode
-  legacyQuery: QueryDescription2 | null
   createdAt: number
   updatedAt: number
 }
 
 const CUSTOM_TASK_VIEWS_DATA_KEY = "taskCustomViews.v1"
-const CUSTOM_TASK_QUERY_PAGE_SIZE = 5000
-const CUSTOM_QUERY_GROUP_KINDS = new Set<number>([100, 101, 102, 103, 104, 105, 106])
 const CUSTOM_TASK_VIEW_FILTER_OPERATOR_SET = new Set<CustomTaskViewFilterOperator>([
   "eq",
   "neq",
@@ -74,6 +63,7 @@ const CUSTOM_TASK_VIEW_FILTER_OPERATOR_SET = new Set<CustomTaskViewFilterOperato
   "gte",
   "lt",
   "lte",
+  "between",
   "before",
   "after",
   "empty",
@@ -87,18 +77,6 @@ let customTaskViewFilterNodeSeed = 0
 export function createCustomTaskViewId(): string {
   const randomPart = Math.random().toString(36).slice(2, 10)
   return `view-${Date.now().toString(36)}-${randomPart}`
-}
-
-export function createDefaultCustomTaskViewQuery(): QueryDescription2 {
-  return {
-    q: createDefaultCustomTaskViewGroup(),
-  }
-}
-
-export function cloneCustomTaskViewQuery(
-  value: QueryDescription2,
-): QueryDescription2 {
-  return normalizeCustomTaskViewQuery(value)
 }
 
 export function createDefaultCustomTaskViewFilterGroup(
@@ -123,46 +101,11 @@ export function normalizeCustomTaskViewName(value: string): string {
   return value.replace(/\s+/g, " ").trim()
 }
 
-export function normalizeCustomTaskViewQuery(value: unknown): QueryDescription2 {
-  const cloned = cloneRecord(value)
-  if (cloned == null) {
-    return createDefaultCustomTaskViewQuery()
-  }
-
-  return {
-    ...(cloned as QueryDescription2),
-    q: normalizeCustomTaskViewGroup(cloned.q),
-  }
-}
-
 export function normalizeCustomTaskViewFilterGroup(
   value: unknown,
 ): CustomTaskViewFilterGroupNode {
   const normalized = normalizeCustomTaskViewFilterGroupInternal(value, true)
   return normalized ?? createDefaultCustomTaskViewFilterGroup()
-}
-
-export function hasAnyCustomTaskViewFilterRules(
-  group: CustomTaskViewFilterGroupNode,
-): boolean {
-  for (const child of group.children) {
-    if (child.kind === "rule") {
-      return true
-    }
-    if (hasAnyCustomTaskViewFilterRules(child)) {
-      return true
-    }
-  }
-  return false
-}
-
-export function hasLegacyCustomTaskViewQuery(view: CustomTaskView): boolean {
-  if (view.legacyQuery == null) {
-    return false
-  }
-
-  const userGroup = normalizeScopedCustomTaskQueryGroup(view.legacyQuery.q)
-  return userGroup != null
 }
 
 export async function loadCustomTaskViews(pluginName: string): Promise<CustomTaskView[]> {
@@ -190,188 +133,6 @@ export async function saveCustomTaskViews(
     CUSTOM_TASK_VIEWS_DATA_KEY,
     JSON.stringify(normalizedViews),
   )
-}
-
-export async function executeCustomTaskViewQuery(
-  view: CustomTaskView,
-  taskTagName: string,
-): Promise<DbId[]> {
-  if (!hasLegacyCustomTaskViewQuery(view) || view.legacyQuery == null) {
-    return []
-  }
-
-  const description = buildCustomTaskQueryDescription(view.legacyQuery, taskTagName)
-  const legacyDescription = convertQueryDescriptionToLegacy(description)
-  const rawResult = await orca.invokeBackend("query", legacyDescription) as unknown
-  const result = normalizeQueryResultList(rawResult)
-
-  const matchedIds: DbId[] = []
-  const seenIds = new Set<DbId>()
-
-  for (const item of result) {
-    const taskId = extractDbIdFromQueryItem(item)
-    if (taskId == null) {
-      continue
-    }
-
-    const normalizedTaskId = isRecord(item) && typeof item.id === "number"
-      ? getMirrorIdFromBlock(item as Pick<Block, "id" | "properties">)
-      : taskId
-
-    if (seenIds.has(normalizedTaskId)) {
-      continue
-    }
-
-    seenIds.add(normalizedTaskId)
-    matchedIds.push(normalizedTaskId)
-  }
-
-  return matchedIds
-}
-
-function buildCustomTaskQueryDescription(
-  query: QueryDescription2,
-  taskTagName: string,
-): QueryDescription2 {
-  const normalizedQuery = normalizeCustomTaskViewQuery(query)
-  const userGroup = normalizeScopedCustomTaskQueryGroup(normalizedQuery.q)
-  const scopedConditions: QueryItem2[] = [{ kind: 4, name: taskTagName }]
-
-  if (userGroup != null) {
-    scopedConditions.push(userGroup)
-  }
-
-  return {
-    ...normalizedQuery,
-    page: 1,
-    pageSize: CUSTOM_TASK_QUERY_PAGE_SIZE,
-    q: {
-      kind: 100,
-      conditions: scopedConditions,
-    },
-  }
-}
-
-function normalizeScopedCustomTaskQueryGroup(
-  value: QueryDescription2["q"],
-): QueryDescription2["q"] | null {
-  if (!isRecord(value) || !isCustomQueryGroupKind(value.kind)) {
-    return null
-  }
-
-  const conditions = Array.isArray(value.conditions) ? value.conditions : []
-  if (conditions.length === 0) {
-    return null
-  }
-
-  return value
-}
-
-function convertQueryDescriptionToLegacy(
-  description: QueryDescription2,
-): QueryDescription2 {
-  const legacyGroup = convertQueryGroupToLegacy(description.q)
-  if (legacyGroup == null) {
-    return description
-  }
-
-  return {
-    ...description,
-    q: legacyGroup as unknown as QueryGroup2,
-  }
-}
-
-function convertQueryGroupToLegacy(
-  value: QueryDescription2["q"],
-): Record<string, unknown> | null {
-  if (!isRecord(value) || typeof value.kind !== "number") {
-    return null
-  }
-
-  const legacyKind = mapLegacyGroupKind(value.kind)
-  if (legacyKind == null) {
-    return null
-  }
-
-  const cloned = cloneRecord(value) ?? {}
-  const rawConditions = Array.isArray(cloned.conditions) ? cloned.conditions : []
-  const legacyConditions = rawConditions
-    .map((item) => convertQueryItemToLegacy(item))
-    .filter((item): item is Record<string, unknown> => item != null)
-
-  return {
-    ...cloned,
-    kind: legacyKind,
-    conditions: legacyConditions,
-  }
-}
-
-function convertQueryItemToLegacy(
-  value: unknown,
-): Record<string, unknown> | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  if (typeof value.kind === "number" && isCustomQueryGroupKind(value.kind)) {
-    return convertQueryGroupToLegacy(value as unknown as QueryDescription2["q"])
-  }
-
-  return cloneRecord(value)
-}
-
-function mapLegacyGroupKind(kind: number): 1 | 2 | null {
-  if (kind === 100 || kind === 102 || kind === 104 || kind === 106) {
-    return 1
-  }
-  if (kind === 101 || kind === 103 || kind === 105) {
-    return 2
-  }
-  return null
-}
-
-function normalizeQueryResultList(value: unknown): unknown[] {
-  if (Array.isArray(value)) {
-    return value
-  }
-
-  if (!isRecord(value)) {
-    return []
-  }
-
-  if (Array.isArray(value.blocks)) {
-    return value.blocks
-  }
-  if (Array.isArray(value.items)) {
-    return value.items
-  }
-  if (Array.isArray(value.rows)) {
-    return value.rows
-  }
-  if (Array.isArray(value.data)) {
-    return value.data
-  }
-
-  return []
-}
-
-function extractDbIdFromQueryItem(value: unknown): DbId | null {
-  if (typeof value === "number") {
-    return value
-  }
-
-  if (!isRecord(value)) {
-    return null
-  }
-
-  if (typeof value.id === "number") {
-    return value.id
-  }
-  if (typeof value.blockId === "number") {
-    return value.blockId
-  }
-
-  return null
 }
 
 function normalizeCustomTaskViews(value: unknown): CustomTaskView[] {
@@ -411,70 +172,21 @@ function normalizeCustomTaskView(value: unknown): CustomTaskView | null {
   if (name === "") {
     return null
   }
+  if (!isRecord(value.filter)) {
+    return null
+  }
 
+  const filter = normalizeCustomTaskViewFilterGroup(value.filter)
   const createdAt = toUnixTimestamp(value.createdAt) ?? Date.now()
   const updatedAt = toUnixTimestamp(value.updatedAt) ?? createdAt
-  const filter = normalizeCustomTaskViewFilterGroup(value.filter)
-  const legacyQuery = normalizeLegacyCustomTaskViewQuery(
-    value.legacyQuery ?? value.query,
-  )
 
   return {
     id,
     name,
     filter,
-    legacyQuery,
     createdAt,
     updatedAt,
   }
-}
-
-function normalizeLegacyCustomTaskViewQuery(value: unknown): QueryDescription2 | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  const normalized = normalizeCustomTaskViewQuery(value)
-  const scopedGroup = normalizeScopedCustomTaskQueryGroup(normalized.q)
-  return scopedGroup == null ? null : normalized
-}
-
-function createDefaultCustomTaskViewGroup(): QueryGroup2 {
-  return {
-    kind: 100,
-    conditions: [],
-  }
-}
-
-function normalizeCustomTaskViewGroup(value: unknown): QueryGroup2 {
-  if (!isRecord(value) || !isCustomQueryGroupKind(value.kind)) {
-    return createDefaultCustomTaskViewGroup()
-  }
-
-  const cloned = cloneRecord(value) ?? {}
-  const rawConditions = Array.isArray(cloned.conditions) ? cloned.conditions : []
-  const conditions = rawConditions
-    .map((item: unknown) => normalizeCustomTaskQueryItem(item))
-    .filter((item: QueryItem2 | null): item is QueryItem2 => item != null)
-
-  return {
-    ...(cloned as unknown as QueryGroup2),
-    kind: value.kind,
-    conditions,
-  }
-}
-
-function normalizeCustomTaskQueryItem(value: unknown): QueryItem2 | null {
-  if (!isRecord(value) || typeof value.kind !== "number") {
-    return null
-  }
-
-  if (isCustomQueryGroupKind(value.kind)) {
-    return normalizeCustomTaskViewGroup(value)
-  }
-
-  const cloned = cloneRecord(value)
-  return cloned == null ? null : (cloned as unknown as QueryItem2)
 }
 
 function normalizeCustomTaskViewFilterGroupInternal(
@@ -534,7 +246,7 @@ function normalizeCustomTaskViewFilterRuleNode(
     kind: "rule",
     fieldKey,
     operator,
-    value: normalizeCustomTaskViewFilterRuleValue(value.value),
+    value: normalizeCustomTaskViewFilterRuleValue(value.value, operator),
   }
 }
 
@@ -550,9 +262,14 @@ function normalizeCustomTaskViewFilterOperator(
 
 function normalizeCustomTaskViewFilterRuleValue(
   value: unknown,
+  operator: CustomTaskViewFilterOperator,
 ): string | string[] {
+  if (operator === "between") {
+    return normalizeCustomTaskViewFilterRangeValueList(value)
+  }
+
   if (Array.isArray(value)) {
-    return normalizeCustomTaskViewFilterTextValues(
+    return normalizeCustomTaskViewFilterValueList(
       value.map((item) => toStringValue(item)),
     )
   }
@@ -560,26 +277,33 @@ function normalizeCustomTaskViewFilterRuleValue(
   return toStringValue(value)
 }
 
-function normalizeCustomTaskViewFilterTextValues(values: string[]): string[] {
+function normalizeCustomTaskViewFilterValueList(values: string[]): string[] {
   const normalizedValues: string[] = []
-  const seen = new Set<string>()
 
   for (const rawValue of values) {
     const value = rawValue.replace(/\s+/g, " ").trim()
-    if (value === "") {
-      continue
+    if (value !== "") {
+      normalizedValues.push(value)
     }
-
-    const dedupKey = value.toLowerCase()
-    if (seen.has(dedupKey)) {
-      continue
-    }
-
-    seen.add(dedupKey)
-    normalizedValues.push(value)
   }
 
   return normalizedValues
+}
+
+function normalizeCustomTaskViewFilterRangeValueList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return [
+      normalizeCustomTaskViewFilterEditorValue(toStringValue(value[0])),
+      normalizeCustomTaskViewFilterEditorValue(toStringValue(value[1])),
+    ]
+  }
+
+  const normalized = normalizeCustomTaskViewFilterEditorValue(toStringValue(value))
+  return [normalized, ""]
+}
+
+function normalizeCustomTaskViewFilterEditorValue(value: string): string {
+  return value.replace(/\s+/g, " ").trim()
 }
 
 function normalizeCustomTaskViewFilterNodeId(
@@ -609,27 +333,6 @@ function toStringValue(value: unknown): string {
     return value ? "true" : "false"
   }
   return ""
-}
-
-function isCustomQueryGroupKind(value: unknown): value is QueryGroup2["kind"] {
-  return typeof value === "number" && CUSTOM_QUERY_GROUP_KINDS.has(value)
-}
-
-function cloneRecord(value: unknown): Record<string, unknown> | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  try {
-    const serialized = JSON.stringify(value)
-    if (typeof serialized !== "string") {
-      return null
-    }
-    const parsed = JSON.parse(serialized) as unknown
-    return isRecord(parsed) ? parsed : null
-  } catch {
-    return null
-  }
 }
 
 function toUnixTimestamp(value: unknown): number | null {

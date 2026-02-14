@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   Block,
   BlockProperty,
   BlockRef,
@@ -39,9 +39,6 @@ import {
   cloneCustomTaskViewFilterGroup,
   createCustomTaskViewId,
   createDefaultCustomTaskViewFilterGroup,
-  executeCustomTaskViewQuery,
-  hasAnyCustomTaskViewFilterRules,
-  hasLegacyCustomTaskViewQuery,
   loadCustomTaskViews,
   normalizeCustomTaskViewFilterGroup,
   normalizeCustomTaskViewName,
@@ -54,6 +51,8 @@ import {
   type CustomTaskViewFilterRuleNode,
   type CustomTaskView,
 } from "../core/custom-task-views"
+import { getMirrorId } from "../core/block-utils"
+import { parseReviewRule, type ReviewUnit } from "../core/task-review"
 import { t } from "../libs/l10n"
 import { TaskDashboard, type TaskDashboardData } from "./task-dashboard"
 import { TaskPropertyPanelCard } from "./task-property-card"
@@ -86,7 +85,7 @@ interface TaskDropTarget {
 }
 
 type TaskFilterGroupLogic = CustomTaskViewFilterGroupLogic
-type TaskFilterFieldType = CustomTaskViewFilterFieldType
+type TaskFilterFieldType = CustomTaskViewFilterFieldType | "review-rule"
 type TaskFilterOperator = CustomTaskViewFilterOperator
 type TaskFilterRuleNode = CustomTaskViewFilterRuleNode
 type TaskFilterGroupNode = CustomTaskViewFilterGroupNode
@@ -96,13 +95,26 @@ interface TaskFilterField {
   key: string
   label: string
   type: TaskFilterFieldType
-  options: string[]
+  options: TaskFilterFieldOption[]
+  operatorOptions?: TaskFilterOperator[]
+  resolveOptionLabel?: (value: string) => string
+  defaultValue?: string | string[]
   extractValue: (item: FilterableTaskItem) => unknown
 }
 
+interface TaskFilterFieldOption {
+  value: string
+  label: string
+}
+
 interface FilterableTaskItem {
+  blockId?: DbId
+  sourceBlockId?: DbId
   status: string
   text: string
+  reviewEnabled?: boolean
+  reviewType?: string
+  reviewEvery?: string
   labels?: string[]
   taskTagRef?: BlockRef | null
 }
@@ -123,6 +135,7 @@ type BlockedReasonCountMap = Partial<Record<NextActionBlockedReason, number>>
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
   const Button = orca.components.Button
+  const DatePicker = orca.components.DatePicker
   const Input = orca.components.Input
   const ModalOverlay = orca.components.ModalOverlay
   const Popup = orca.components.Popup
@@ -138,6 +151,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const filterButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
   const filterPopupContainerRef = React.useRef<HTMLDivElement | null>(null)
   const customViewFilterPopupContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const filterMenuContainerRef = React.useRef<HTMLElement | null>(null)
+  if (filterMenuContainerRef.current == null) {
+    filterMenuContainerRef.current = document.body
+  }
   const [loading, setLoading] = React.useState(true)
   const [errorText, setErrorText] = React.useState("")
   const [customViews, setCustomViews] = React.useState<CustomTaskView[]>([])
@@ -151,7 +168,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     createDefaultCustomTaskViewFilterGroup()
   )
   const [savingCustomView, setSavingCustomView] = React.useState(false)
-  const [customViewMatchedTaskIds, setCustomViewMatchedTaskIds] = React.useState<DbId[]>([])
   const [filterPanelVisible, setFilterPanelVisible] = React.useState(false)
   const [quickSearchKeyword, setQuickSearchKeyword] = React.useState("")
   const [taskTagProperties, setTaskTagProperties] = React.useState<BlockProperty[]>([])
@@ -187,12 +203,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
     return customViews.find((view: CustomTaskView) => view.id === activeCustomViewId) ?? null
   }, [activeCustomViewId, customViews])
-  const editingCustomView = React.useMemo(() => {
-    if (editingCustomViewId == null) {
-      return null
-    }
-    return customViews.find((view: CustomTaskView) => view.id === editingCustomViewId) ?? null
-  }, [customViews, editingCustomViewId])
 
   const loadByTab = React.useCallback(
     async (
@@ -214,37 +224,15 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           setNextActionItems(selectNextActionsFromEvaluations(evaluations))
           setDashboardBlockedCounts(countBlockedReasons(evaluations))
           setDashboardGeneratedAt(new Date())
-          setCustomViewMatchedTaskIds([])
         } else if (targetTab === "next-actions") {
           const nextActions = await collectNextActions(props.schema)
           setNextActionItems(nextActions)
-          setCustomViewMatchedTaskIds([])
         } else if (isCustomTaskViewsTab(targetTab)) {
-          const customViewId = getCustomTaskViewIdFromTab(targetTab)
-          const customView = customViews.find((view: CustomTaskView) => view.id === customViewId) ??
-            null
           const allTasks = await collectAllTasks(props.schema)
           setAllTaskItems(allTasks)
-
-          if (customView == null) {
-            setCustomViewMatchedTaskIds([])
-          } else {
-            const shouldUseLegacyQuery = hasLegacyCustomTaskViewQuery(customView) &&
-              !hasAnyCustomTaskViewFilterRules(customView.filter)
-            if (shouldUseLegacyQuery) {
-              const matchedIds = await executeCustomTaskViewQuery(
-                customView,
-                props.schema.tagAlias,
-              )
-              setCustomViewMatchedTaskIds(matchedIds)
-            } else {
-              setCustomViewMatchedTaskIds([])
-            }
-          }
         } else {
           const allTasks = await collectAllTasks(props.schema)
           setAllTaskItems(allTasks)
-          setCustomViewMatchedTaskIds([])
         }
 
         setErrorText("")
@@ -406,7 +394,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     setEditingCustomViewId(view.id)
     setCustomViewNameDraft(view.name)
     setCustomViewNameError("")
-    setCustomViewFilterDraft(cloneCustomTaskViewFilterGroup(view.filter))
+    setCustomViewFilterDraft(
+      ensureUniqueTaskFilterNodeIds(cloneCustomTaskViewFilterGroup(view.filter)),
+    )
     setCustomViewsPanelVisible(false)
     setCustomViewEditorVisible(true)
   }, [])
@@ -428,8 +418,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     }
     setCustomViewNameError("")
 
-    const filter = normalizeCustomTaskViewFilterGroup(customViewFilterDraft)
-    const hasFilterRules = hasAnyCustomTaskViewFilterRules(filter)
+    const filter = ensureUniqueTaskFilterNodeIds(
+      normalizeCustomTaskViewFilterGroup(customViewFilterDraft),
+    )
     const now = Date.now()
     let savedViewId = editingCustomViewId
     let nextViews: CustomTaskView[] = []
@@ -452,7 +443,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           ...view,
           name,
           filter,
-          legacyQuery: hasFilterRules ? null : view.legacyQuery,
           updatedAt: now,
         }
       })
@@ -464,7 +454,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           id: savedViewId,
           name,
           filter,
-          legacyQuery: null,
           createdAt: now,
           updatedAt: now,
         },
@@ -691,9 +680,66 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       ...nextActionItems.flatMap((item: NextActionItem) => item.labels ?? []),
     ])
   }, [allTaskItems, nextActionItems])
+  const knownTaskNameById = React.useMemo(() => {
+    const map = new Map<string, string>()
+
+    const appendName = (taskName: string, rawIds: Array<DbId | null | undefined>) => {
+      const normalizedName = taskName.replace(/\s+/g, " ").trim()
+      if (normalizedName === "") {
+        return
+      }
+
+      for (const rawId of rawIds) {
+        if (rawId == null) {
+          continue
+        }
+
+        const aliasIds = [rawId, getMirrorId(rawId)]
+        for (const aliasId of aliasIds) {
+          const key = String(aliasId)
+          if (!map.has(key)) {
+            map.set(key, normalizedName)
+          }
+        }
+      }
+    }
+
+    for (const item of allTaskItems) {
+      appendName(item.text, [item.blockId, item.sourceBlockId, item.taskTagRef?.from])
+    }
+    for (const item of nextActionItems) {
+      appendName(item.text, [item.blockId, item.sourceBlockId, item.taskTagRef?.from])
+    }
+
+    return map
+  }, [allTaskItems, nextActionItems])
+  const knownBlockRefOptionLabels = React.useMemo(() => {
+    return collectKnownTaskFilterBlockRefOptionLabels(
+      [...allTaskItems, ...nextActionItems],
+      knownTaskNameById,
+    )
+  }, [allTaskItems, knownTaskNameById, nextActionItems])
+  const knownPropertyValueOptions = React.useMemo(() => {
+    return collectKnownTaskFilterPropertyOptions(
+      [...allTaskItems, ...nextActionItems],
+      knownBlockRefOptionLabels,
+    )
+  }, [allTaskItems, knownBlockRefOptionLabels, nextActionItems])
   const filterFields = React.useMemo(() => {
-    return buildTaskFilterFields(props.schema, taskTagProperties, knownLabelValues)
-  }, [knownLabelValues, props.schema, taskTagProperties])
+    return buildTaskFilterFields(
+      props.schema,
+      taskTagProperties,
+      knownLabelValues,
+      knownPropertyValueOptions,
+      knownBlockRefOptionLabels,
+    )
+  }, [
+    knownBlockRefOptionLabels,
+    knownLabelValues,
+    knownPropertyValueOptions,
+    props.schema,
+    taskTagProperties,
+  ])
   const filterFieldByKey = React.useMemo(() => {
     const map = new Map<string, TaskFilterField>()
     for (const field of filterFields) {
@@ -716,13 +762,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const customViewFilterRuleCount = React.useMemo(() => {
     return countEffectiveTaskFilterRules(customViewFilterDraft, filterFieldByKey)
   }, [customViewFilterDraft, filterFieldByKey])
-  const editingCustomViewUsesLegacyQuery = React.useMemo(() => {
-    if (editingCustomView == null) {
-      return false
-    }
-    return hasLegacyCustomTaskViewQuery(editingCustomView) &&
-      !hasAnyCustomTaskViewFilterRules(editingCustomView.filter)
-  }, [editingCustomView])
   const normalizedQuickSearch = React.useMemo(() => {
     return quickSearchKeyword.trim().toLowerCase()
   }, [quickSearchKeyword])
@@ -772,31 +811,44 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         return updateTaskFilterRule(prev, ruleId, (rule) => ({
           ...rule,
           fieldKey: field.key,
-          operator: getDefaultTaskFilterOperator(field.type),
-          value: getDefaultTaskFilterValue(field.type),
+          operator: getDefaultTaskFilterOperatorForField(field),
+          value: getDefaultTaskFilterValueForField(field),
         }))
       })
     },
     [filterFieldByKey, filterFields],
   )
 
-  const updateFilterRuleOperator = React.useCallback((ruleId: string, operator: TaskFilterOperator) => {
-    setFilterRoot((prev: TaskFilterGroupNode) => {
-      return updateTaskFilterRule(prev, ruleId, (rule) => ({
-        ...rule,
-        operator,
-      }))
-    })
-  }, [])
+  const updateFilterRuleOperator = React.useCallback(
+    (ruleId: string, operator: TaskFilterOperator) => {
+      setFilterRoot((prev: TaskFilterGroupNode) => {
+        return updateTaskFilterRule(prev, ruleId, (rule) => {
+          const field = filterFieldByKey.get(rule.fieldKey) ?? filterFields[0] ?? createTaskNameFilterField()
+          const normalizedOperator = normalizeTaskFilterOperatorForField(field, operator)
+          return {
+            ...rule,
+            operator: normalizedOperator,
+            value: normalizeTaskFilterRuleValueForOperator(field, normalizedOperator, rule.value),
+          }
+        })
+      })
+    },
+    [filterFieldByKey, filterFields],
+  )
 
   const updateFilterRuleValue = React.useCallback((ruleId: string, value: string | string[]) => {
     setFilterRoot((prev: TaskFilterGroupNode) => {
-      return updateTaskFilterRule(prev, ruleId, (rule) => ({
-        ...rule,
-        value,
-      }))
+      return updateTaskFilterRule(prev, ruleId, (rule) => {
+        const field = filterFieldByKey.get(rule.fieldKey) ?? filterFields[0] ?? createTaskNameFilterField()
+        const operator = normalizeTaskFilterOperatorForField(field, rule.operator)
+        return {
+          ...rule,
+          operator,
+          value: normalizeTaskFilterRuleValueForOperator(field, operator, value),
+        }
+      })
     })
-  }, [])
+  }, [filterFieldByKey, filterFields])
 
   const clearCustomViewFilters = React.useCallback(() => {
     setCustomViewFilterDraft(createDefaultCustomTaskViewFilterGroup())
@@ -846,8 +898,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         return updateTaskFilterRule(prev, ruleId, (rule) => ({
           ...rule,
           fieldKey: field.key,
-          operator: getDefaultTaskFilterOperator(field.type),
-          value: getDefaultTaskFilterValue(field.type),
+          operator: getDefaultTaskFilterOperatorForField(field),
+          value: getDefaultTaskFilterValueForField(field),
         }))
       })
     },
@@ -857,23 +909,33 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const updateCustomViewFilterRuleOperator = React.useCallback(
     (ruleId: string, operator: TaskFilterOperator) => {
       setCustomViewFilterDraft((prev: TaskFilterGroupNode) => {
-        return updateTaskFilterRule(prev, ruleId, (rule) => ({
-          ...rule,
-          operator,
-        }))
+        return updateTaskFilterRule(prev, ruleId, (rule) => {
+          const field = filterFieldByKey.get(rule.fieldKey) ?? filterFields[0] ?? createTaskNameFilterField()
+          const normalizedOperator = normalizeTaskFilterOperatorForField(field, operator)
+          return {
+            ...rule,
+            operator: normalizedOperator,
+            value: normalizeTaskFilterRuleValueForOperator(field, normalizedOperator, rule.value),
+          }
+        })
       })
     },
-    [],
+    [filterFieldByKey, filterFields],
   )
 
   const updateCustomViewFilterRuleValue = React.useCallback((ruleId: string, value: string | string[]) => {
     setCustomViewFilterDraft((prev: TaskFilterGroupNode) => {
-      return updateTaskFilterRule(prev, ruleId, (rule) => ({
-        ...rule,
-        value,
-      }))
+      return updateTaskFilterRule(prev, ruleId, (rule) => {
+        const field = filterFieldByKey.get(rule.fieldKey) ?? filterFields[0] ?? createTaskNameFilterField()
+        const operator = normalizeTaskFilterOperatorForField(field, rule.operator)
+        return {
+          ...rule,
+          operator,
+          value: normalizeTaskFilterRuleValueForOperator(field, operator, value),
+        }
+      })
     })
-  }, [])
+  }, [filterFieldByKey, filterFields])
 
   const matchesItem = React.useCallback(
     (item: FilterableTaskItem) => {
@@ -920,40 +982,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       .filter(matchesItem)
       .sort(compareReviewDueItems)
   }, [allTaskItems, matchesItem, props.schema.statusChoices])
-  const customViewMatchedTaskIdSet = React.useMemo(() => {
-    return new Set(customViewMatchedTaskIds)
-  }, [customViewMatchedTaskIds])
-  const customViewTaskOrderMap = React.useMemo(() => {
-    const orderMap = new Map<DbId, number>()
-    customViewMatchedTaskIds.forEach((taskId: DbId, index: number) => {
-      orderMap.set(taskId, index)
-    })
-    return orderMap
-  }, [customViewMatchedTaskIds])
-  const activeCustomViewUsesLegacyQuery = React.useMemo(() => {
-    if (activeCustomView == null) {
-      return false
-    }
-    return hasLegacyCustomTaskViewQuery(activeCustomView) &&
-      !hasAnyCustomTaskViewFilterRules(activeCustomView.filter)
-  }, [activeCustomView])
   const filteredCustomViewTaskItems = React.useMemo(() => {
     if (!isCustomTaskViewsTab(tab) || activeCustomView == null) {
       return []
-    }
-
-    if (activeCustomViewUsesLegacyQuery) {
-      return allTaskItems
-        .filter((item: AllTaskItem) => customViewMatchedTaskIdSet.has(item.blockId))
-        .sort((left: AllTaskItem, right: AllTaskItem) => {
-          const leftOrder = customViewTaskOrderMap.get(left.blockId) ?? Number.MAX_SAFE_INTEGER
-          const rightOrder = customViewTaskOrderMap.get(right.blockId) ?? Number.MAX_SAFE_INTEGER
-          if (leftOrder !== rightOrder) {
-            return leftOrder - rightOrder
-          }
-          return left.blockId - right.blockId
-        })
-        .filter(matchesItem)
     }
 
     return allTaskItems
@@ -963,10 +994,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       .filter(matchesItem)
   }, [
     activeCustomView,
-    activeCustomViewUsesLegacyQuery,
     allTaskItems,
-    customViewMatchedTaskIdSet,
-    customViewTaskOrderMap,
     filterFieldByKey,
     matchesItem,
     tab,
@@ -1434,7 +1462,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   ]
 
   interface TaskFilterEditorBindings {
-    menuContainerRef: React.MutableRefObject<HTMLDivElement | null>
+    menuContainerRef: React.MutableRefObject<HTMLElement | null>
     addRule: (groupId: string) => void
     addGroup: (groupId: string) => void
     removeNode: (nodeId: string) => void
@@ -1445,7 +1473,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   }
 
   const quickFilterEditorBindings: TaskFilterEditorBindings = {
-    menuContainerRef: filterPopupContainerRef,
+    menuContainerRef: filterMenuContainerRef,
     addRule: addFilterRule,
     addGroup: addFilterGroup,
     removeNode: removeFilterNode,
@@ -1456,7 +1484,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   }
 
   const customViewFilterEditorBindings: TaskFilterEditorBindings = {
-    menuContainerRef: customViewFilterPopupContainerRef,
+    menuContainerRef: filterMenuContainerRef,
     addRule: addCustomViewFilterRule,
     addGroup: addCustomViewFilterGroup,
     removeNode: removeCustomViewFilterNode,
@@ -1466,6 +1494,101 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     updateRuleValue: updateCustomViewFilterRuleValue,
   }
 
+  interface TaskFilterDateValueEditorProps {
+    value: string
+    placeholder: string
+    menuContainerRef: React.MutableRefObject<HTMLElement | null>
+    onChange: (nextValue: string) => void
+  }
+
+  const TaskFilterDateValueEditor = (
+    editorProps: TaskFilterDateValueEditorProps,
+  ): React.ReactElement => {
+    const anchorRef = React.useRef<HTMLDivElement | null>(null)
+    const [pickerVisible, setPickerVisible] = React.useState(false)
+    const selectedDate = React.useMemo(() => {
+      return parseTaskFilterEditorDateValue(editorProps.value)
+    }, [editorProps.value])
+    const hasValue = editorProps.value.trim() !== ""
+    const displayText = selectedDate == null ? "" : formatTaskFilterDateDisplayText(selectedDate)
+
+    return React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
+          minWidth: 0,
+        },
+      },
+      React.createElement(
+        "div",
+        {
+          ref: anchorRef,
+          style: {
+            flex: "1 1 auto",
+            minWidth: 0,
+          },
+        },
+        React.createElement(Input, {
+          value: displayText,
+          placeholder: editorProps.placeholder,
+          readOnly: true,
+          onClick: () => setPickerVisible(true),
+          width: "100%",
+        }),
+      ),
+      React.createElement(
+        Button,
+        {
+          variant: "outline",
+          onClick: () => {
+            if (hasValue) {
+              editorProps.onChange("")
+              return
+            }
+            setPickerVisible(true)
+          },
+          title: hasValue ? t("Clear") : t("Pick"),
+          style: {
+            borderRadius: "8px",
+            width: "30px",
+            minWidth: "30px",
+            height: "30px",
+            padding: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          },
+        },
+        React.createElement("i", {
+          className: hasValue ? "ti ti-x" : "ti ti-calendar-event",
+          style: {
+            fontSize: "13px",
+            lineHeight: 1,
+          },
+        }),
+      ),
+      pickerVisible
+        ? React.createElement(DatePicker, {
+            mode: "datetime",
+            visible: true,
+            value: selectedDate ?? new Date(),
+            refElement: anchorRef,
+            menuContainer: editorProps.menuContainerRef,
+            onChange: (next: Date | [Date, Date]) => {
+              if (next instanceof Date) {
+                editorProps.onChange(formatTaskFilterDateEditorValue(next))
+              }
+              setPickerVisible(false)
+            },
+            onClose: () => setPickerVisible(false),
+          })
+        : null,
+    )
+  }
+
   const renderFilterRuleNode = (
     rule: TaskFilterRuleNode,
     depth: number,
@@ -1473,32 +1596,35 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   ) => {
     const fallbackField = filterFields[0] ?? createTaskNameFilterField()
     const field = filterFieldByKey.get(rule.fieldKey) ?? fallbackField
-    const operatorOptions = getTaskFilterOperatorOptions(field.type)
-    const selectedOperator = operatorOptions.some((item) => item.value === rule.operator)
-      ? rule.operator
-      : getDefaultTaskFilterOperator(field.type)
+    const operatorOptions = getTaskFilterOperatorOptionsForField(field)
+    const selectedOperator = normalizeTaskFilterOperatorForField(field, rule.operator)
+    const showOperatorSelector = operatorOptions.length > 1
     const needsValue = doesTaskFilterOperatorNeedValue(selectedOperator)
     const ruleValueList = toTaskFilterRuleValues(rule.value)
     const selectedSingleValue = ruleValueList[0] ?? ""
-    const multiValueEnabled = (field.type === "multi-select" || field.type === "block-refs") &&
-      (selectedOperator === "contains" ||
-        selectedOperator === "contains-any" ||
-        selectedOperator === "contains-all" ||
-        selectedOperator === "not-contains" ||
-        selectedOperator === "eq" ||
-        selectedOperator === "neq")
+    const [selectedRangeStartValue, selectedRangeEndValue] = toTaskFilterRuleEditorRangeValues(
+      rule.value,
+    )
+    const rangeValueEnabled = isTaskFilterRangeOperator(field.type, selectedOperator)
+    const multiValueEnabled = isTaskFilterMultiValueOperator(field.type, selectedOperator)
     const operatorSelectOptions = operatorOptions.map((item) => ({
       value: item.value,
       label: item.label,
     }))
+    const reviewRuleUnitOptions = [
+      { value: "day", label: t("By day") },
+      { value: "week", label: t("By week") },
+      { value: "month", label: t("By month") },
+    ]
 
     let valueEditor: React.ReactNode = null
     if (needsValue) {
       if (field.type === "single-select" || field.type === "multi-select" || field.type === "block-refs") {
-        const options = field.options.map((option: string) => ({
-          value: option,
-          label: option,
-        }))
+        const options = extendTaskFilterOptionsWithValues(
+          field.options,
+          ruleValueList,
+          field.resolveOptionLabel,
+        )
         valueEditor = options.length > 0
           ? React.createElement(Select, {
               selected: multiValueEnabled
@@ -1527,24 +1653,132 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               width: "100%",
             })
       } else if (field.type === "boolean") {
+        const options = field.options.length > 0
+          ? field.options
+          : [
+              { value: "true", label: t("True") },
+              { value: "false", label: t("False") },
+            ]
         valueEditor = React.createElement(Select, {
           selected: selectedSingleValue === "" ? [] : [selectedSingleValue],
-          options: [
-            { value: "true", label: t("True") },
-            { value: "false", label: t("False") },
-          ],
+          options,
           onChange: (selected: string[]) => bindings.updateRuleValue(rule.id, selected[0] ?? ""),
           width: "100%",
           menuContainer: bindings.menuContainerRef,
         })
+      } else if (field.type === "review-rule") {
+        const parsed = parseTaskFilterReviewRuleEditorValue(selectedSingleValue)
+        valueEditor = React.createElement(
+          "div",
+          {
+            style: {
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) 72px",
+              gap: "6px",
+            },
+          },
+          React.createElement(Select, {
+            selected: [parsed.unit],
+            options: reviewRuleUnitOptions,
+            onChange: (selected: string[]) => {
+              const nextUnit = selected[0]
+              if (nextUnit === "day" || nextUnit === "week" || nextUnit === "month") {
+                bindings.updateRuleValue(
+                  rule.id,
+                  serializeTaskFilterReviewRuleEditorValue(nextUnit, parsed.intervalText),
+                )
+              }
+            },
+            width: "100%",
+            menuContainer: bindings.menuContainerRef,
+          }),
+          React.createElement(Input, {
+            value: parsed.intervalText,
+            type: "number",
+            min: 1,
+            step: 1,
+            placeholder: "1",
+            onChange: (event: Event) => {
+              const rawValue = (event.target as HTMLInputElement | null)?.value ?? ""
+              bindings.updateRuleValue(
+                rule.id,
+                serializeTaskFilterReviewRuleEditorValue(parsed.unit, rawValue),
+              )
+            },
+            onBlur: () => {
+              const parsedNumber = Number(parsed.intervalText)
+              if (parsed.intervalText.trim() === "" || Number.isNaN(parsedNumber) || parsedNumber < 1) {
+                bindings.updateRuleValue(
+                  rule.id,
+                  serializeTaskFilterReviewRuleEditorValue(parsed.unit, "1"),
+                )
+              }
+            },
+            width: "100%",
+          }),
+        )
+      } else if (rangeValueEnabled) {
+        valueEditor = React.createElement(
+          "div",
+          {
+            style: {
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+              gap: "6px",
+            },
+          },
+          field.type === "datetime"
+            ? React.createElement(TaskFilterDateValueEditor, {
+                value: selectedRangeStartValue,
+                placeholder: t("Start value"),
+                menuContainerRef: bindings.menuContainerRef,
+                onChange: (nextValue: string) => {
+                  bindings.updateRuleValue(rule.id, [nextValue, selectedRangeEndValue])
+                },
+              })
+            : React.createElement(Input, {
+                value: selectedRangeStartValue,
+                type: "number",
+                placeholder: t("Start value"),
+                onChange: (event: Event) => {
+                  const target = event.target as HTMLInputElement | null
+                  bindings.updateRuleValue(rule.id, [target?.value ?? "", selectedRangeEndValue])
+                },
+                width: "100%",
+              }),
+          field.type === "datetime"
+            ? React.createElement(TaskFilterDateValueEditor, {
+                value: selectedRangeEndValue,
+                placeholder: t("End value"),
+                menuContainerRef: bindings.menuContainerRef,
+                onChange: (nextValue: string) => {
+                  bindings.updateRuleValue(rule.id, [selectedRangeStartValue, nextValue])
+                },
+              })
+            : React.createElement(Input, {
+                value: selectedRangeEndValue,
+                type: "number",
+                placeholder: t("End value"),
+                onChange: (event: Event) => {
+                  const target = event.target as HTMLInputElement | null
+                  bindings.updateRuleValue(rule.id, [selectedRangeStartValue, target?.value ?? ""])
+                },
+                width: "100%",
+              }),
+        )
+      } else if (field.type === "datetime") {
+        valueEditor = React.createElement(TaskFilterDateValueEditor, {
+          value: selectedSingleValue,
+          placeholder: t("Value"),
+          menuContainerRef: bindings.menuContainerRef,
+          onChange: (nextValue: string) => {
+            bindings.updateRuleValue(rule.id, nextValue)
+          },
+        })
       } else {
         valueEditor = React.createElement(Input, {
           value: selectedSingleValue,
-          type: field.type === "number"
-            ? "number"
-            : field.type === "datetime"
-              ? "datetime-local"
-              : "text",
+          type: field.type === "number" ? "number" : "text",
           placeholder: t("Value"),
           onChange: (event: Event) => {
             const target = event.target as HTMLInputElement | null
@@ -1591,27 +1825,29 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           menuContainer: bindings.menuContainerRef,
         }),
       ),
-      React.createElement(
-        "div",
-        {
-          style: {
-            flex: "0 0 124px",
-            minWidth: "124px",
-          },
-        },
-        React.createElement(Select, {
-          selected: [selectedOperator],
-          options: operatorSelectOptions,
-          onChange: (selected: string[]) => {
-            const nextOperator = selected[0]
-            if (isTaskFilterOperator(nextOperator)) {
-              bindings.updateRuleOperator(rule.id, nextOperator)
-            }
-          },
-          width: "100%",
-          menuContainer: bindings.menuContainerRef,
-        }),
-      ),
+      showOperatorSelector
+        ? React.createElement(
+            "div",
+            {
+              style: {
+                flex: "0 0 124px",
+                minWidth: "124px",
+              },
+            },
+            React.createElement(Select, {
+              selected: [selectedOperator],
+              options: operatorSelectOptions,
+              onChange: (selected: string[]) => {
+                const nextOperator = selected[0]
+                if (isTaskFilterOperator(nextOperator)) {
+                  bindings.updateRuleOperator(rule.id, nextOperator)
+                }
+              },
+              width: "100%",
+              menuContainer: bindings.menuContainerRef,
+            }),
+          )
+        : null,
       React.createElement(
         "div",
         {
@@ -2845,22 +3081,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           },
           t("Custom view rules"),
         ),
-        editingCustomViewUsesLegacyQuery
-          ? React.createElement(
-              "div",
-              {
-                style: {
-                  fontSize: "12px",
-                  color: "var(--orca-color-text-yellow, #b7791f)",
-                  background: "rgba(183, 121, 31, 0.08)",
-                  border: "1px solid rgba(183, 121, 31, 0.26)",
-                  borderRadius: "8px",
-                  padding: "8px 10px",
-                },
-              },
-              t("Legacy custom view query detected. Add rules and save to migrate."),
-            )
-          : null,
         React.createElement(
           "div",
           {
@@ -3177,7 +3397,43 @@ let taskFilterNodeSeed = 0
 
 function createTaskFilterNodeId(prefix: string): string {
   taskFilterNodeSeed += 1
-  return `${prefix}-${taskFilterNodeSeed}`
+  const randomPart = Math.random().toString(36).slice(2, 8)
+  return `${prefix}-${Date.now().toString(36)}-${taskFilterNodeSeed.toString(36)}-${randomPart}`
+}
+
+function ensureUniqueTaskFilterNodeIds(
+  root: TaskFilterGroupNode,
+): TaskFilterGroupNode {
+  const usedIds = new Set<string>()
+
+  const cloneNode = (
+    node: TaskFilterNode,
+    isRoot: boolean,
+  ): TaskFilterNode => {
+    const preferredId = typeof node.id === "string" ? node.id.trim() : ""
+    let id = preferredId
+    if (id === "" || usedIds.has(id)) {
+      id = isRoot
+        ? FILTER_GROUP_ROOT_ID
+        : createTaskFilterNodeId(node.kind === "group" ? "group" : "rule")
+    }
+    usedIds.add(id)
+
+    if (node.kind === "rule") {
+      return {
+        ...node,
+        id,
+      }
+    }
+
+    return {
+      ...node,
+      id,
+      children: node.children.map((child) => cloneNode(child, false)),
+    }
+  }
+
+  return cloneNode(root, true) as TaskFilterGroupNode
 }
 
 function createTaskFilterGroup(
@@ -3207,8 +3463,8 @@ function createTaskFilterRule(field: TaskFilterField): TaskFilterRuleNode {
     id: createTaskFilterNodeId("rule"),
     kind: "rule",
     fieldKey: field.key,
-    operator: getDefaultTaskFilterOperator(field.type),
-    value: getDefaultTaskFilterValue(field.type),
+    operator: getDefaultTaskFilterOperatorForField(field),
+    value: getDefaultTaskFilterValueForField(field),
   }
 }
 
@@ -3238,7 +3494,198 @@ function normalizeTaskFilterTextValues(values: string[]): string[] {
   return normalizedValues
 }
 
-function readTaskFilterChoiceValues(property: BlockProperty): string[] {
+function collectKnownTaskFilterBlockRefOptionLabels(
+  items: FilterableTaskItem[],
+  taskNameById: Map<string, string>,
+): Map<string, string> {
+  const result = new Map<string, string>()
+  for (const [id, taskName] of taskNameById.entries()) {
+    const normalizedTaskName = taskName.replace(/\s+/g, " ").trim()
+    if (normalizedTaskName !== "" && !result.has(id)) {
+      result.set(id, normalizedTaskName)
+    }
+  }
+
+  const sourceBlockIds = new Set<DbId>()
+  for (const item of items) {
+    if (item.sourceBlockId != null) {
+      sourceBlockIds.add(item.sourceBlockId)
+    }
+    if (item.blockId != null) {
+      sourceBlockIds.add(item.blockId)
+    }
+
+    if (item.taskTagRef?.from != null) {
+      sourceBlockIds.add(item.taskTagRef.from)
+    }
+  }
+
+  for (const sourceBlockId of sourceBlockIds) {
+    const sourceBlock = orca.state.blocks[sourceBlockId]
+    if (sourceBlock == null || !Array.isArray(sourceBlock.refs)) {
+      continue
+    }
+
+    for (const ref of sourceBlock.refs) {
+      const refKey = String(ref.id)
+      if (result.has(refKey)) {
+        continue
+      }
+
+      const targetCandidates = [String(ref.to), String(getMirrorId(ref.to))]
+      const targetName = targetCandidates
+        .map((candidate) => taskNameById.get(candidate))
+        .find((candidate) => typeof candidate === "string" && candidate.trim() !== "")
+
+      if (typeof targetName === "string" && targetName.trim() !== "") {
+        result.set(refKey, targetName.trim())
+      }
+    }
+  }
+
+  return result
+}
+
+function collectKnownTaskFilterPropertyOptions(
+  items: FilterableTaskItem[],
+  knownBlockRefOptionLabels: Map<string, string>,
+): Map<string, TaskFilterFieldOption[]> {
+  const optionsByProperty = new Map<string, Map<string, TaskFilterFieldOption>>()
+  const appendOption = (
+    propertyName: string,
+    rawValue: unknown,
+    propertyType: number | undefined,
+  ) => {
+    const value = toTaskFilterKnownOptionValue(rawValue)
+    if (value === "") {
+      return
+    }
+
+    let propertyOptions = optionsByProperty.get(propertyName)
+    if (propertyOptions == null) {
+      propertyOptions = new Map<string, TaskFilterFieldOption>()
+      optionsByProperty.set(propertyName, propertyOptions)
+    }
+
+    const dedupKey = value.toLowerCase()
+    if (propertyOptions.has(dedupKey)) {
+      return
+    }
+
+    const label = propertyType === PROP_TYPE_BLOCK_REFS
+      ? formatTaskFilterBlockRefOptionLabel(value, knownBlockRefOptionLabels)
+      : value
+    propertyOptions.set(dedupKey, toTaskFilterOption(value, label))
+  }
+
+  for (const item of items) {
+    const refData = item.taskTagRef?.data
+    if (!Array.isArray(refData)) {
+      continue
+    }
+
+    for (const property of refData) {
+      if (typeof property.name !== "string" || property.name.trim() === "") {
+        continue
+      }
+      if (property.name.startsWith("_")) {
+        continue
+      }
+
+      if (Array.isArray(property.value)) {
+        for (const rawValue of property.value) {
+          appendOption(property.name, rawValue, property.type)
+        }
+        continue
+      }
+
+      appendOption(property.name, property.value, property.type)
+    }
+  }
+
+  const result = new Map<string, TaskFilterFieldOption[]>()
+  for (const [propertyName, propertyOptions] of optionsByProperty.entries()) {
+    result.set(
+      propertyName,
+      Array.from(propertyOptions.values())
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    )
+  }
+  return result
+}
+
+function formatTaskFilterBlockRefOptionLabel(
+  value: string,
+  knownBlockRefOptionLabels: Map<string, string>,
+): string {
+  const knownLabel = knownBlockRefOptionLabels.get(value)
+  if (knownLabel != null && knownLabel.trim() !== "") {
+    return knownLabel
+  }
+
+  const parsed = Number(value)
+  if (!Number.isNaN(parsed)) {
+    const candidateIds = [parsed, getMirrorId(parsed)]
+    for (const candidateId of candidateIds) {
+      const blockText = orca.state.blocks[candidateId]?.text
+      if (typeof blockText === "string" && blockText.trim() !== "") {
+        return blockText.replace(/\s+/g, " ").trim()
+      }
+    }
+  }
+
+  return value
+}
+
+function toTaskFilterKnownOptionValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value.replace(/\s+/g, " ").trim()
+  }
+  if (typeof value === "number" && !Number.isNaN(value)) {
+    return String(value)
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false"
+  }
+  return ""
+}
+
+function extendTaskFilterOptionsWithValues(
+  options: TaskFilterFieldOption[],
+  values: string[],
+  resolveLabel?: (value: string) => string,
+): TaskFilterFieldOption[] {
+  if (values.length === 0) {
+    return options
+  }
+
+  const optionMap = new Map<string, TaskFilterFieldOption>()
+  for (const option of options) {
+    optionMap.set(option.value.toLowerCase(), option)
+  }
+
+  for (const value of values) {
+    const normalized = value.replace(/\s+/g, " ").trim()
+    if (normalized === "") {
+      continue
+    }
+
+    const key = normalized.toLowerCase()
+    if (!optionMap.has(key)) {
+      optionMap.set(
+        key,
+        toTaskFilterOption(
+          normalized,
+          resolveLabel?.(normalized),
+        ),
+      )
+    }
+  }
+
+  return Array.from(optionMap.values())
+}
+
+function readTaskFilterChoiceValues(property: BlockProperty): TaskFilterFieldOption[] {
   const rawChoices = property.typeArgs?.choices
   if (!Array.isArray(rawChoices)) {
     return []
@@ -3256,13 +3703,15 @@ function readTaskFilterChoiceValues(property: BlockProperty): string[] {
     }
     return ""
   })
-  return normalizeTaskFilterTextValues(choices)
+  return normalizeTaskFilterTextValues(choices).map((value) => toTaskFilterOption(value))
 }
 
 function buildTaskFilterFields(
   schema: TaskSchemaDefinition,
   properties: BlockProperty[],
   knownLabelValues: string[],
+  knownPropertyValueOptions: Map<string, TaskFilterFieldOption[]>,
+  knownBlockRefOptionLabels: Map<string, string>,
 ): TaskFilterField[] {
   const fields: TaskFilterField[] = [createTaskNameFilterField()]
   const seenKeys = new Set<string>([FILTER_TASK_NAME_FIELD_KEY])
@@ -3288,7 +3737,13 @@ function buildTaskFilterFields(
       continue
     }
 
-    const field = buildTaskFilterFieldFromProperty(schema, property, knownLabelValues)
+    const field = buildTaskFilterFieldFromProperty(
+      schema,
+      property,
+      knownLabelValues,
+      knownPropertyValueOptions,
+      knownBlockRefOptionLabels,
+    )
     fields.push(field)
     seenKeys.add(key)
   }
@@ -3299,7 +3754,7 @@ function buildTaskFilterFields(
       key: statusKey,
       label: schema.propertyNames.status,
       type: "single-select",
-      options: [...schema.statusChoices],
+      options: schema.statusChoices.map((status) => toTaskFilterOption(status)),
       extractValue: (item: FilterableTaskItem) => item.status,
     })
     seenKeys.add(statusKey)
@@ -3311,7 +3766,7 @@ function buildTaskFilterFields(
       key: labelsKey,
       label: schema.propertyNames.labels,
       type: "multi-select",
-      options: knownLabelValues,
+      options: knownLabelValues.map((label) => toTaskFilterOption(label)),
       extractValue: (item: FilterableTaskItem) => item.labels ?? [],
     })
   }
@@ -3323,11 +3778,17 @@ function buildTaskFilterFieldFromProperty(
   schema: TaskSchemaDefinition,
   property: BlockProperty,
   knownLabelValues: string[],
+  knownPropertyValueOptions: Map<string, TaskFilterFieldOption[]>,
+  knownBlockRefOptionLabels: Map<string, string>,
 ): TaskFilterField {
   const propertyName = property.name
+  const isReviewEveryProperty = isTaskFilterReviewEveryPropertyName(propertyName)
   const key = toTaskFilterFieldKey(propertyName)
   let fieldType: TaskFilterFieldType = "text"
-  let options: string[] = []
+  let options: TaskFilterFieldOption[] = []
+  let operatorOptions: TaskFilterOperator[] | undefined
+  let resolveOptionLabel: ((value: string) => string) | undefined
+  let defaultValue: string | string[] | undefined
 
   if (property.type === PROP_TYPE_TEXT_CHOICES) {
     const subType = typeof property.typeArgs?.subType === "string"
@@ -3339,20 +3800,59 @@ function buildTaskFilterFieldFromProperty(
     fieldType = "number"
   } else if (property.type === PROP_TYPE_BOOLEAN) {
     fieldType = "boolean"
+    options = [
+      toTaskFilterOption("true", t("True")),
+      toTaskFilterOption("false", t("False")),
+    ]
   } else if (property.type === PROP_TYPE_DATE_TIME) {
     fieldType = "datetime"
   } else if (property.type === PROP_TYPE_BLOCK_REFS) {
     fieldType = "block-refs"
+    resolveOptionLabel = (value: string) => {
+      return formatTaskFilterBlockRefOptionLabel(value, knownBlockRefOptionLabels)
+    }
   } else if (property.type === PROP_TYPE_TEXT) {
     fieldType = "text"
   }
 
+  if (isReviewEveryProperty) {
+    fieldType = "review-rule"
+    operatorOptions = ["eq", "neq", "empty", "not-empty"]
+    defaultValue = "day:1"
+  }
+
   if (propertyName === schema.propertyNames.status) {
     fieldType = "single-select"
-    options = options.length > 0 ? options : [...schema.statusChoices]
+    options = options.length > 0
+      ? options
+      : schema.statusChoices.map((status) => toTaskFilterOption(status))
+  } else if (propertyName === schema.propertyNames.review) {
+    fieldType = "single-select"
+    operatorOptions = ["eq", "neq"]
+    options = [
+      toTaskFilterOption("none", t("No review")),
+      toTaskFilterOption("single", t("Single review")),
+      toTaskFilterOption("cycle", t("Cyclic review")),
+    ]
   } else if (propertyName === schema.propertyNames.labels) {
     fieldType = "multi-select"
-    options = options.length > 0 ? options : knownLabelValues
+    options = options.length > 0
+      ? options
+      : knownLabelValues.map((label) => toTaskFilterOption(label))
+  } else if (propertyName === schema.propertyNames.star) {
+    fieldType = "boolean"
+    operatorOptions = ["eq"]
+    options = [
+      toTaskFilterOption("true", t("Starred")),
+      toTaskFilterOption("false", t("Not starred")),
+    ]
+  }
+
+  if (
+    options.length === 0 &&
+    (fieldType === "single-select" || fieldType === "multi-select" || fieldType === "block-refs")
+  ) {
+    options = knownPropertyValueOptions.get(propertyName) ?? []
   }
 
   return {
@@ -3360,9 +3860,21 @@ function buildTaskFilterFieldFromProperty(
     label: propertyName,
     type: fieldType,
     options,
+    operatorOptions,
+    resolveOptionLabel,
+    defaultValue,
     extractValue: (item: FilterableTaskItem) => {
       if (propertyName === schema.propertyNames.status) {
         return item.status
+      }
+      if (propertyName === schema.propertyNames.review) {
+        return resolveTaskFilterReviewMode(item)
+      }
+      if (isReviewEveryProperty) {
+        const rawValue = typeof item.reviewEvery === "string" && item.reviewEvery.trim() !== ""
+          ? item.reviewEvery
+          : readTaskFilterPropertyValue(item.taskTagRef?.data, propertyName)
+        return toTaskFilterReviewRuleValue(rawValue)
       }
       if (propertyName === schema.propertyNames.labels) {
         return item.labels ?? []
@@ -3380,6 +3892,90 @@ function readTaskFilterPropertyValue(
   return property?.value
 }
 
+function resolveTaskFilterReviewMode(item: FilterableTaskItem): string {
+  if (item.reviewEnabled !== true) {
+    return "none"
+  }
+
+  return item.reviewType === "cycle" ? "cycle" : "single"
+}
+
+function isTaskFilterReviewEveryPropertyName(propertyName: string): boolean {
+  const normalized = propertyName.replace(/\s+/g, " ").trim().toLowerCase()
+  return normalized === "review every" || normalized === "回顾周期"
+}
+
+function toTaskFilterReviewRuleValue(value: unknown): string {
+  const parsed = toTaskFilterReviewRuleConfig(value)
+  if (parsed == null) {
+    return ""
+  }
+
+  return `${parsed.unit}:${parsed.interval}`
+}
+
+function toTaskFilterReviewRuleConfig(
+  value: unknown,
+): { unit: ReviewUnit; interval: number } | null {
+  if (typeof value === "string") {
+    const normalized = value.trim()
+    if (normalized === "") {
+      return null
+    }
+
+    const shorthandMatch = normalized.match(/^(day|week|month):(\d+)$/)
+    if (shorthandMatch != null) {
+      const interval = Number(shorthandMatch[2])
+      if (Number.isInteger(interval) && interval >= 1) {
+        return {
+          unit: shorthandMatch[1] as ReviewUnit,
+          interval,
+        }
+      }
+      return null
+    }
+  }
+
+  const parsedRule = parseReviewRule(typeof value === "string" ? value : "")
+  if (parsedRule == null) {
+    return null
+  }
+
+  return {
+    unit: parsedRule.unit,
+    interval: parsedRule.interval,
+  }
+}
+
+function parseTaskFilterReviewRuleEditorValue(
+  value: string,
+): { unit: ReviewUnit; intervalText: string } {
+  const parsed = toTaskFilterReviewRuleConfig(value)
+  if (parsed == null) {
+    return {
+      unit: "day",
+      intervalText: "1",
+    }
+  }
+
+  return {
+    unit: parsed.unit,
+    intervalText: String(parsed.interval),
+  }
+}
+
+function serializeTaskFilterReviewRuleEditorValue(
+  unit: ReviewUnit,
+  intervalText: string,
+): string {
+  const digitsOnly = intervalText.replace(/[^\d]/g, "")
+  if (digitsOnly === "") {
+    return ""
+  }
+
+  return `${unit}:${digitsOnly}`
+}
+
 function isTaskFilterOperator(value: string): value is TaskFilterOperator {
   return value === "eq" ||
     value === "neq" ||
@@ -3391,10 +3987,18 @@ function isTaskFilterOperator(value: string): value is TaskFilterOperator {
     value === "gte" ||
     value === "lt" ||
     value === "lte" ||
+    value === "between" ||
     value === "before" ||
     value === "after" ||
     value === "empty" ||
     value === "not-empty"
+}
+
+function toTaskFilterOption(value: string, label?: string): TaskFilterFieldOption {
+  return {
+    value,
+    label: label ?? value,
+  }
 }
 
 function doesTaskFilterOperatorNeedValue(operator: TaskFilterOperator): boolean {
@@ -3404,6 +4008,15 @@ function doesTaskFilterOperatorNeedValue(operator: TaskFilterOperator): boolean 
 function getTaskFilterOperatorOptions(
   fieldType: TaskFilterFieldType,
 ): Array<{ value: TaskFilterOperator; label: string }> {
+  if (fieldType === "review-rule") {
+    return [
+      { value: "eq", label: t("Equals") },
+      { value: "neq", label: t("Not equals") },
+      { value: "empty", label: t("Is empty") },
+      { value: "not-empty", label: t("Is not empty") },
+    ]
+  }
+
   if (fieldType === "number") {
     return [
       { value: "eq", label: t("Equals") },
@@ -3412,6 +4025,7 @@ function getTaskFilterOperatorOptions(
       { value: "gte", label: t("Greater or equal") },
       { value: "lt", label: t("Less than") },
       { value: "lte", label: t("Less or equal") },
+      { value: "between", label: t("Between") },
       { value: "empty", label: t("Is empty") },
       { value: "not-empty", label: t("Is not empty") },
     ]
@@ -3424,6 +4038,7 @@ function getTaskFilterOperatorOptions(
       { value: "after", label: t("After") },
       { value: "lte", label: t("On or before") },
       { value: "gte", label: t("On or after") },
+      { value: "between", label: t("Between") },
       { value: "empty", label: t("Is empty") },
       { value: "not-empty", label: t("Is not empty") },
     ]
@@ -3460,8 +4075,26 @@ function getTaskFilterOperatorOptions(
   ]
 }
 
+function getTaskFilterOperatorOptionsForField(
+  field: TaskFilterField,
+): Array<{ value: TaskFilterOperator; label: string }> {
+  const baseOptions = getTaskFilterOperatorOptions(field.type)
+  if (field.operatorOptions == null || field.operatorOptions.length === 0) {
+    return baseOptions
+  }
+
+  const allowedSet = new Set<TaskFilterOperator>(field.operatorOptions)
+  const filteredOptions = baseOptions.filter((item) => allowedSet.has(item.value))
+  return filteredOptions.length > 0 ? filteredOptions : baseOptions
+}
+
 function getDefaultTaskFilterOperator(fieldType: TaskFilterFieldType): TaskFilterOperator {
-  if (fieldType === "single-select" || fieldType === "number" || fieldType === "boolean") {
+  if (
+    fieldType === "single-select" ||
+    fieldType === "number" ||
+    fieldType === "boolean" ||
+    fieldType === "review-rule"
+  ) {
     return "eq"
   }
   if (fieldType === "datetime") {
@@ -3473,11 +4106,83 @@ function getDefaultTaskFilterOperator(fieldType: TaskFilterFieldType): TaskFilte
   return "contains"
 }
 
+function getDefaultTaskFilterOperatorForField(field: TaskFilterField): TaskFilterOperator {
+  return getTaskFilterOperatorOptionsForField(field)[0]?.value ??
+    getDefaultTaskFilterOperator(field.type)
+}
+
 function getDefaultTaskFilterValue(fieldType: TaskFilterFieldType): string | string[] {
   if (fieldType === "multi-select" || fieldType === "block-refs") {
     return []
   }
+  if (fieldType === "review-rule") {
+    return "day:1"
+  }
   return ""
+}
+
+function getDefaultTaskFilterValueForField(field: TaskFilterField): string | string[] {
+  if (field.defaultValue != null) {
+    return Array.isArray(field.defaultValue) ? [...field.defaultValue] : field.defaultValue
+  }
+
+  return getDefaultTaskFilterValue(field.type)
+}
+
+function isTaskFilterRangeOperator(
+  fieldType: TaskFilterFieldType,
+  operator: TaskFilterOperator,
+): boolean {
+  return (fieldType === "number" || fieldType === "datetime") && operator === "between"
+}
+
+function isTaskFilterMultiValueOperator(
+  fieldType: TaskFilterFieldType,
+  operator: TaskFilterOperator,
+): boolean {
+  if (fieldType !== "multi-select" && fieldType !== "block-refs") {
+    return false
+  }
+
+  return operator === "contains" ||
+    operator === "contains-any" ||
+    operator === "contains-all" ||
+    operator === "not-contains" ||
+    operator === "eq" ||
+    operator === "neq"
+}
+
+function normalizeTaskFilterRuleValueForOperator(
+  field: TaskFilterField,
+  operator: TaskFilterOperator,
+  value: string | string[],
+): string | string[] {
+  if (!doesTaskFilterOperatorNeedValue(operator)) {
+    return getDefaultTaskFilterValue(field.type)
+  }
+
+  if (isTaskFilterRangeOperator(field.type, operator)) {
+    const [startValue, endValue] = toTaskFilterRuleEditorRangeValues(value)
+    return [startValue, endValue]
+  }
+
+  if (isTaskFilterMultiValueOperator(field.type, operator)) {
+    return toTaskFilterRuleValues(value)
+  }
+
+  return toTaskFilterRuleValues(value)[0] ?? ""
+}
+
+function normalizeTaskFilterOperatorForField(
+  field: TaskFilterField,
+  operator: TaskFilterOperator,
+): TaskFilterOperator {
+  const operatorOptions = getTaskFilterOperatorOptionsForField(field)
+  if (operatorOptions.some((item) => item.value === operator)) {
+    return operator
+  }
+
+  return getDefaultTaskFilterOperatorForField(field)
 }
 
 function countEffectiveTaskFilterRules(
@@ -3500,10 +4205,15 @@ function isTaskFilterRuleEffective(
   if (field == null) {
     return false
   }
-  if (!doesTaskFilterOperatorNeedValue(rule.operator)) {
+  const operator = normalizeTaskFilterOperatorForField(field, rule.operator)
+  if (!doesTaskFilterOperatorNeedValue(operator)) {
     return true
   }
-  return toTaskFilterRuleValues(rule.value).length > 0
+  const values = toTaskFilterRuleValues(rule.value)
+  if (operator === "between") {
+    return values.length >= 2
+  }
+  return values.length > 0
 }
 
 function appendRuleToTaskFilterGroup(
@@ -3657,12 +4367,13 @@ function evaluateTaskFilterRule(
   if (field == null) {
     return true
   }
+  const operator = normalizeTaskFilterOperatorForField(field, rule.operator)
 
   const rawValue = field.extractValue(item)
-  if (rule.operator === "empty") {
+  if (operator === "empty") {
     return isTaskFilterEmptyValue(rawValue, field.type)
   }
-  if (rule.operator === "not-empty") {
+  if (operator === "not-empty") {
     return !isTaskFilterEmptyValue(rawValue, field.type)
   }
 
@@ -3673,53 +4384,81 @@ function evaluateTaskFilterRule(
   const rawTarget = targets[0] ?? ""
 
   if (field.type === "number") {
+    if (operator === "between") {
+      const [startValue, endValue] = toTaskFilterRuleRangeValues(rule.value) ?? []
+      const currentNumber = toTaskFilterNumber(rawValue)
+      const startNumber = toTaskFilterNumber(startValue)
+      const endNumber = toTaskFilterNumber(endValue)
+      if (currentNumber == null || startNumber == null || endNumber == null) {
+        return false
+      }
+
+      const minValue = Math.min(startNumber, endNumber)
+      const maxValue = Math.max(startNumber, endNumber)
+      return currentNumber >= minValue && currentNumber <= maxValue
+    }
+
     const currentNumber = toTaskFilterNumber(rawValue)
     const targetNumber = Number(rawTarget)
     if (currentNumber == null || Number.isNaN(targetNumber)) {
       return false
     }
 
-    if (rule.operator === "eq") {
+    if (operator === "eq") {
       return currentNumber === targetNumber
     }
-    if (rule.operator === "neq") {
+    if (operator === "neq") {
       return currentNumber !== targetNumber
     }
-    if (rule.operator === "gt") {
+    if (operator === "gt") {
       return currentNumber > targetNumber
     }
-    if (rule.operator === "gte") {
+    if (operator === "gte") {
       return currentNumber >= targetNumber
     }
-    if (rule.operator === "lt") {
+    if (operator === "lt") {
       return currentNumber < targetNumber
     }
-    if (rule.operator === "lte") {
+    if (operator === "lte") {
       return currentNumber <= targetNumber
     }
     return false
   }
 
   if (field.type === "datetime") {
+    if (operator === "between") {
+      const [startValue, endValue] = toTaskFilterRuleRangeValues(rule.value) ?? []
+      const currentMs = toTaskFilterDateMs(rawValue)
+      const startMs = toTaskFilterDateMs(startValue)
+      const endMs = toTaskFilterDateMs(endValue)
+      if (currentMs == null || startMs == null || endMs == null) {
+        return false
+      }
+
+      const minValue = Math.min(startMs, endMs)
+      const maxValue = Math.max(startMs, endMs)
+      return currentMs >= minValue && currentMs <= maxValue
+    }
+
     const currentMs = toTaskFilterDateMs(rawValue)
     const targetMs = toTaskFilterDateMs(rawTarget)
     if (currentMs == null || targetMs == null) {
       return false
     }
 
-    if (rule.operator === "eq") {
+    if (operator === "eq") {
       return currentMs === targetMs
     }
-    if (rule.operator === "before") {
+    if (operator === "before") {
       return currentMs < targetMs
     }
-    if (rule.operator === "after") {
+    if (operator === "after") {
       return currentMs > targetMs
     }
-    if (rule.operator === "gte") {
+    if (operator === "gte") {
       return currentMs >= targetMs
     }
-    if (rule.operator === "lte") {
+    if (operator === "lte") {
       return currentMs <= targetMs
     }
     return false
@@ -3732,11 +4471,27 @@ function evaluateTaskFilterRule(
       return false
     }
 
-    if (rule.operator === "eq") {
+    if (operator === "eq") {
       return currentValue === targetValue
     }
-    if (rule.operator === "neq") {
+    if (operator === "neq") {
       return currentValue !== targetValue
+    }
+    return false
+  }
+
+  if (field.type === "review-rule") {
+    const currentRule = toTaskFilterReviewRuleValue(rawValue)
+    const targetRule = toTaskFilterReviewRuleValue(rawTarget)
+    if (targetRule === "") {
+      return false
+    }
+
+    if (operator === "eq") {
+      return currentRule === targetRule
+    }
+    if (operator === "neq") {
+      return currentRule !== targetRule
     }
     return false
   }
@@ -3746,22 +4501,22 @@ function evaluateTaskFilterRule(
     const targetSet = normalizeTaskFilterTextValues(targets).map((target) => target.toLowerCase())
     const valueSet = normalizeTaskFilterTextValues(values).map((value) => value.toLowerCase())
 
-    if (rule.operator === "contains" || rule.operator === "contains-any") {
+    if (operator === "contains" || operator === "contains-any") {
       return targetSet.some((target) => valueSet.includes(target))
     }
-    if (rule.operator === "contains-all") {
+    if (operator === "contains-all") {
       return targetSet.every((target) => valueSet.includes(target))
     }
-    if (rule.operator === "not-contains") {
+    if (operator === "not-contains") {
       return targetSet.every((target) => !valueSet.includes(target))
     }
-    if (rule.operator === "eq") {
+    if (operator === "eq") {
       if (valueSet.length !== targetSet.length) {
         return false
       }
       return targetSet.every((target) => valueSet.includes(target))
     }
-    if (rule.operator === "neq") {
+    if (operator === "neq") {
       if (valueSet.length !== targetSet.length) {
         return true
       }
@@ -3773,16 +4528,16 @@ function evaluateTaskFilterRule(
   const textValue = toTaskFilterText(rawValue)
   const targetText = rawTarget.toLowerCase()
 
-  if (rule.operator === "contains") {
+  if (operator === "contains") {
     return textValue.includes(targetText)
   }
-  if (rule.operator === "not-contains") {
+  if (operator === "not-contains") {
     return !textValue.includes(targetText)
   }
-  if (rule.operator === "eq") {
+  if (operator === "eq") {
     return textValue === targetText
   }
-  if (rule.operator === "neq") {
+  if (operator === "neq") {
     return textValue !== targetText
   }
 
@@ -3808,25 +4563,96 @@ function isTaskFilterEmptyValue(value: unknown, fieldType: TaskFilterFieldType):
   if (fieldType === "datetime") {
     return toTaskFilterDateMs(value) == null
   }
+  if (fieldType === "review-rule") {
+    return toTaskFilterReviewRuleConfig(value) == null
+  }
 
   return toTaskFilterText(value) === ""
 }
 
 function toTaskFilterRuleValues(value: string | string[]): string[] {
   if (Array.isArray(value)) {
-    return normalizeTaskFilterTextValues(value)
+    return value
+      .map((rawValue) => rawValue.replace(/\s+/g, " ").trim())
+      .filter((normalizedValue) => normalizedValue !== "")
   }
 
   if (typeof value === "string") {
-    return normalizeTaskFilterTextValues([value])
+    const normalizedValue = value.replace(/\s+/g, " ").trim()
+    return normalizedValue === "" ? [] : [normalizedValue]
   }
 
   return []
 }
 
+function toTaskFilterRuleEditorRangeValues(
+  value: string | string[],
+): [string, string] {
+  if (Array.isArray(value)) {
+    return [
+      toTaskFilterEditorValue(value[0]),
+      toTaskFilterEditorValue(value[1]),
+    ]
+  }
+
+  if (typeof value === "string") {
+    return [toTaskFilterEditorValue(value), ""]
+  }
+
+  return ["", ""]
+}
+
+function toTaskFilterRuleRangeValues(
+  value: string | string[],
+): [string, string] | null {
+  const values = toTaskFilterRuleValues(value)
+  if (values.length < 2) {
+    return null
+  }
+  return [values[0] ?? "", values[1] ?? ""]
+}
+
+function parseTaskFilterEditorDateValue(value: string): Date | null {
+  const ms = toTaskFilterDateMs(value)
+  if (ms == null) {
+    return null
+  }
+
+  const date = new Date(ms)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatTaskFilterDateEditorValue(value: Date): string {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, "0")
+  const day = String(value.getDate()).padStart(2, "0")
+  const hour = String(value.getHours()).padStart(2, "0")
+  const minute = String(value.getMinutes()).padStart(2, "0")
+  return `${year}-${month}-${day}T${hour}:${minute}`
+}
+
+function formatTaskFilterDateDisplayText(value: Date): string {
+  const locale = orca.state.locale === "zh-CN" ? "zh-CN" : undefined
+  return value.toLocaleString(locale, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+}
+
+function toTaskFilterEditorValue(value: unknown): string {
+  if (typeof value !== "string") {
+    return ""
+  }
+  return value.replace(/\s+/g, " ").trim()
+}
+
 function splitTaskFilterInputValues(rawValue: string): string[] {
   return normalizeTaskFilterTextValues(
-    rawValue.split(/[\n,，;；]+/g),
+    rawValue.split(/[\n,\uFF0C\u3001;\uFF1B]+/g),
   )
 }
 
@@ -4156,3 +4982,5 @@ function collectCollapsibleNodeIds(nodes: TaskTreeNode[]): DbId[] {
   nodes.forEach(walk)
   return ids
 }
+
+
