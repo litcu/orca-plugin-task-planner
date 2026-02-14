@@ -51,6 +51,7 @@ export function TaskListRow(props: TaskListRowProps) {
   const [focused, setFocused] = React.useState(false)
   const statusColor = resolveStatusColor(props.item.status, props.schema)
   const statusVisualState = resolveStatusVisualState(props.item.status, props.schema)
+  const isCompleted = props.item.status === props.schema.statusChoices[2]
   const dueInfo = resolveDueInfo(props.item.endTime, props.isChinese)
   const dueBadgeStyle = resolveDueBadgeStyle(dueInfo.tone)
   const reviewInfo = resolveReviewInfo(props.item.nextReview, props.isChinese)
@@ -91,19 +92,29 @@ export function TaskListRow(props: TaskListRowProps) {
         borderRadius: "9px",
         background: props.contextOnly
           ? "linear-gradient(120deg, rgba(148, 163, 184, 0.08), var(--orca-color-bg-2))"
+          : isCompleted
+            ? hovered || focused
+              ? "linear-gradient(120deg, rgba(148, 163, 184, 0.2), var(--orca-color-bg-1) 58%, rgba(148, 163, 184, 0.1))"
+              : "linear-gradient(120deg, rgba(148, 163, 184, 0.16), var(--orca-color-bg-1) 58%, rgba(148, 163, 184, 0.08))"
           : hovered || focused
             ? "linear-gradient(120deg, rgba(37, 99, 235, 0.12), var(--orca-color-bg-1) 58%, rgba(37, 99, 235, 0.04))"
             : "linear-gradient(120deg, var(--orca-color-bg-2), var(--orca-color-bg-1) 58%, rgba(148, 163, 184, 0.06))",
-        borderColor: hovered || focused
-          ? "var(--orca-color-text-blue, #2563eb)"
-          : "var(--orca-color-border)",
-        boxShadow: hovered || focused
-          ? "0 6px 14px rgba(15, 23, 42, 0.13)"
-          : "0 1px 3px rgba(15, 23, 42, 0.08)",
+        borderColor: isCompleted
+          ? hovered || focused
+            ? "rgba(148, 163, 184, 0.65)"
+            : "rgba(148, 163, 184, 0.4)"
+          : hovered || focused
+            ? "var(--orca-color-text-blue, #2563eb)"
+            : "var(--orca-color-border)",
+        boxShadow: isCompleted
+          ? "0 1px 3px rgba(15, 23, 42, 0.06)"
+          : hovered || focused
+            ? "0 6px 14px rgba(15, 23, 42, 0.13)"
+            : "0 1px 3px rgba(15, 23, 42, 0.08)",
         transform: hovered ? "translateY(-1px)" : "translateY(0)",
         transition:
           "transform 170ms ease, box-shadow 170ms ease, background 170ms ease, border-color 170ms ease",
-        opacity: props.contextOnly ? 0.78 : 1,
+        opacity: props.contextOnly ? 0.78 : isCompleted ? 0.86 : 1,
         animationName: "mloTaskRowEnter",
         animationDuration: "260ms",
         animationTimingFunction: "cubic-bezier(.2,.8,.2,1)",
@@ -235,7 +246,7 @@ export function TaskListRow(props: TaskListRowProps) {
         style: {
           border: "none",
           background: "transparent",
-          color: "var(--orca-color-text)",
+          color: isCompleted ? "var(--orca-color-text-2)" : "var(--orca-color-text)",
           textAlign: "left",
           cursor: "pointer",
           padding: 0,
@@ -260,6 +271,8 @@ export function TaskListRow(props: TaskListRowProps) {
             lineHeight: 1.25,
             fontWeight: props.contextOnly ? 500 : 560,
             letterSpacing: "0.01em",
+            color: isCompleted ? "var(--orca-color-text-2)" : "var(--orca-color-text)",
+            textDecoration: isCompleted ? "line-through" : "none",
           },
         },
         props.item.text,
@@ -290,9 +303,15 @@ export function TaskListRow(props: TaskListRowProps) {
                     padding: "0 6px",
                     height: "16px",
                     borderRadius: "999px",
-                    border: "1px solid rgba(37, 99, 235, 0.24)",
-                    background: "rgba(37, 99, 235, 0.12)",
-                    color: "var(--orca-color-text-blue, #2563eb)",
+                    border: isCompleted
+                      ? "1px solid rgba(148, 163, 184, 0.3)"
+                      : "1px solid rgba(37, 99, 235, 0.24)",
+                    background: isCompleted
+                      ? "rgba(148, 163, 184, 0.09)"
+                      : "rgba(37, 99, 235, 0.12)",
+                    color: isCompleted
+                      ? "var(--orca-color-text-2)"
+                      : "var(--orca-color-text-blue, #2563eb)",
                     fontSize: "10px",
                     lineHeight: 1,
                     flexShrink: 0,
@@ -624,7 +643,7 @@ function StatusIcon(props: { state: StatusVisualState }) {
 function resolveStatusColor(status: string, schema: TaskSchemaDefinition): string {
   const [, doingStatus, doneStatus] = schema.statusChoices
   if (status === doneStatus) {
-    return "var(--orca-color-text-green)"
+    return "var(--orca-color-text-2)"
   }
   if (status === doingStatus) {
     return "var(--orca-color-text-yellow)"

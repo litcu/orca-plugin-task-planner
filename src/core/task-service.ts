@@ -1,6 +1,7 @@
 import type { Block, BlockProperty, CursorData, DbId } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId } from "./block-utils"
+import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
@@ -193,6 +194,7 @@ async function cycleTaskTagStatus(
     blockId,
     schema,
   )
+  invalidateNextActionEvaluationCache()
 }
 
 function getNextStatus(

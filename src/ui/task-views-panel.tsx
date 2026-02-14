@@ -10,6 +10,7 @@ import {
 import {
   collectNextActionEvaluations,
   collectNextActions,
+  selectNextActionsFromEvaluations,
   type NextActionBlockedReason,
   type NextActionItem,
 } from "../core/dependency-engine"
@@ -181,13 +182,12 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
       try {
         if (targetTab === "dashboard") {
-          const [allTasks, nextActions, evaluations] = await Promise.all([
+          const [allTasks, evaluations] = await Promise.all([
             collectAllTasks(props.schema),
-            collectNextActions(props.schema),
             collectNextActionEvaluations(props.schema),
           ])
           setAllTaskItems(allTasks)
-          setNextActionItems(nextActions)
+          setNextActionItems(selectNextActionsFromEvaluations(evaluations))
           setDashboardBlockedCounts(countBlockedReasons(evaluations))
           setDashboardGeneratedAt(new Date())
         } else if (targetTab === "next-actions") {

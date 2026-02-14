@@ -7,6 +7,7 @@ import { resolveEffectiveNextReview, type TaskReviewType } from "./task-review"
 
 const TAG_REF_TYPE = 2
 const ONE_HOUR_MS = 60 * 60 * 1000
+const NEXT_ACTION_CACHE_TTL_MS = 1500
 
 // Next Actions 运行时数据，供视图层直接渲染。
 export interface NextActionItem {
@@ -43,6 +44,11 @@ export interface NextActionEvaluation {
   blockedReason: NextActionBlockedReason[]
 }
 
+interface CollectNextActionEvaluationsOptions {
+  includeCompleted?: boolean
+  useCache?: boolean
+}
+
 interface DependencyCycleContext {
   componentByTaskId: Map<DbId, number>
   componentSizeById: Map<number, number>
@@ -65,32 +71,68 @@ interface DependencyCompletionState {
   completedAtMs: number | null
 }
 
+interface NextActionEvaluationCacheEntry {
+  key: string
+  expiresAtMs: number
+  evaluations: NextActionEvaluation[]
+}
+
+let nextActionEvaluationCache: NextActionEvaluationCacheEntry | null = null
+
 export async function collectNextActions(
   schema: TaskSchemaDefinition,
   now: Date = new Date(),
 ): Promise<NextActionItem[]> {
   const evaluations = await collectNextActionEvaluations(schema, now)
+  return selectNextActionsFromEvaluations(evaluations)
+}
+
+export async function collectNextActionEvaluations(
+  schema: TaskSchemaDefinition,
+  now: Date = new Date(),
+  options: CollectNextActionEvaluationsOptions = {},
+): Promise<NextActionEvaluation[]> {
+  const includeCompleted = options.includeCompleted === true
+  const useCache = options.useCache !== false
+  const nowMs = now.getTime()
+  const cacheKey = buildNextActionCacheKey(schema.tagAlias, nowMs, includeCompleted)
+  const cached = useCache ? readNextActionEvaluationCache(cacheKey, nowMs) : null
+  if (cached != null) {
+    return cached
+  }
+
+  const taskBlocks = await queryTaskBlocks(schema.tagAlias)
+  const taskMap = buildTaskMap(taskBlocks)
+  const cycleContext = buildDependencyCycleContext(taskBlocks, taskMap, schema)
+  const subtaskContext = await buildSubtaskContext(taskBlocks, schema)
+
+  const candidateBlocks = includeCompleted
+    ? taskBlocks
+    : taskBlocks.filter((block) => !isCompletedTaskBlock(block, schema))
+  const evaluations = candidateBlocks.map((block) => {
+    return evaluateNextAction(block, taskMap, schema, now, cycleContext, subtaskContext)
+  })
+
+  const sortedEvaluations = evaluations
+    .sort((left, right) => left.item.blockId - right.item.blockId)
+  if (useCache) {
+    writeNextActionEvaluationCache(cacheKey, sortedEvaluations, nowMs)
+  }
+
+  return sortedEvaluations
+}
+
+export function selectNextActionsFromEvaluations(
+  evaluations: NextActionEvaluation[],
+): NextActionItem[] {
   return evaluations
     .filter((evaluation) => evaluation.isNextAction)
     .map((evaluation) => evaluation.item)
     .sort(compareNextActionItems)
 }
 
-export async function collectNextActionEvaluations(
-  schema: TaskSchemaDefinition,
-  now: Date = new Date(),
-): Promise<NextActionEvaluation[]> {
-  const taskBlocks = await queryTaskBlocks(schema.tagAlias)
-  const taskMap = buildTaskMap(taskBlocks)
-  const cycleContext = buildDependencyCycleContext(taskBlocks, taskMap, schema)
-  const subtaskContext = await buildSubtaskContext(taskBlocks, schema)
-
-  const evaluations = taskBlocks.map((block) => {
-    return evaluateNextAction(block, taskMap, schema, now, cycleContext, subtaskContext)
-  })
-
-  return evaluations
-    .sort((left, right) => left.item.blockId - right.item.blockId)
+export function invalidateNextActionEvaluationCache() {
+  nextActionEvaluationCache = null
 }
 
 export function evaluateNextAction(
@@ -195,6 +237,23 @@ async function queryTaskBlocks(tagAlias: string): Promise<Block[]> {
   ])) as Block[]
 
   return raw.filter((block) => findTaskTagRef(block, tagAlias) != null)
+}
+
+function isCompletedTaskBlock(
+  block: Block,
+  schema: TaskSchemaDefinition,
+): boolean {
+  const taskRef = resolveTaskRefFromBlock(block, schema.tagAlias)
+  const status = getTaskStatus(taskRef?.data, schema)
+  return isDoneStatus(status, schema)
+}
+
+function resolveTaskRefFromBlock(
+  block: Block,
+  tagAlias: string,
+): BlockRef | null {
+  const liveBlock = getLiveTaskBlock(block)
+  return findTaskTagRef(liveBlock, tagAlias) ?? findTaskTagRef(block, tagAlias)
 }
 
 function buildTaskMap(blocks: Block[]): Map<DbId, Block> {
@@ -847,6 +906,47 @@ function compareNextActionItems(left: NextActionItem, right: NextActionItem): nu
   }
 
   return left.blockId - right.blockId
+}
+
+function buildNextActionCacheKey(
+  tagAlias: string,
+  nowMs: number,
+  includeCompleted: boolean,
+): string {
+  const nowBucket = Math.floor(nowMs / NEXT_ACTION_CACHE_TTL_MS)
+  return `${tagAlias}|${includeCompleted ? 1 : 0}|${nowBucket}`
+}
+
+function readNextActionEvaluationCache(
+  key: string,
+  nowMs: number,
+): NextActionEvaluation[] | null {
+  if (nextActionEvaluationCache == null) {
+    return null
+  }
+
+  if (nextActionEvaluationCache.key !== key) {
+    return null
+  }
+
+  if (nextActionEvaluationCache.expiresAtMs < nowMs) {
+    nextActionEvaluationCache = null
+    return null
+  }
+
+  return nextActionEvaluationCache.evaluations
+}
+
+function writeNextActionEvaluationCache(
+  key: string,
+  evaluations: NextActionEvaluation[],
+  nowMs: number,
+) {
+  nextActionEvaluationCache = {
+    key,
+    expiresAtMs: nowMs + NEXT_ACTION_CACHE_TTL_MS,
+    evaluations,
+  }
 }
 
 function normalizeDueTime(endTime: Date | null): number {

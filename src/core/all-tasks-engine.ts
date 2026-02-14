@@ -1,5 +1,6 @@
 import type { Block, BlockProperty, BlockRef, DbId } from "../orca.d.ts"
 import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
+import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
@@ -361,6 +362,7 @@ export async function cycleTaskStatusInView(
         sourceBlockId ?? blockId,
         schema,
       )
+      invalidateNextActionEvaluationCache()
       return
     } catch (error) {
       console.error(error)
@@ -387,6 +389,7 @@ export async function cycleTaskStatusInView(
         sourceBlockId ?? blockId,
         schema,
       )
+      invalidateNextActionEvaluationCache()
       return
     } catch (error) {
       lastError = error
@@ -422,6 +425,7 @@ export async function toggleTaskStarInView(
         taskTagRef,
         payload,
       )
+      invalidateNextActionEvaluationCache()
       return
     } catch (error) {
       console.error(error)
@@ -442,6 +446,7 @@ export async function toggleTaskStarInView(
         schema.tagAlias,
         payload,
       )
+      invalidateNextActionEvaluationCache()
       return
     } catch (error) {
       lastError = error
@@ -493,6 +498,7 @@ export async function markTaskReviewedInView(
         effectiveTaskRef,
         payload,
       )
+      invalidateNextActionEvaluationCache()
       return
     } catch (error) {
       console.error(error)
@@ -513,6 +519,7 @@ export async function markTaskReviewedInView(
         schema.tagAlias,
         payload,
       )
+      invalidateNextActionEvaluationCache()
       return
     } catch (error) {
       lastError = error
@@ -567,6 +574,7 @@ export async function moveTaskInView(
           journalBlock.id,
           "lastChild",
         )
+        invalidateNextActionEvaluationCache()
         return
       } catch (error) {
         lastError = error
@@ -601,6 +609,7 @@ export async function moveTaskInView(
           targetId,
           position,
         )
+        invalidateNextActionEvaluationCache()
         return
       } catch (error) {
         lastError = error

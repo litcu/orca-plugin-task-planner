@@ -12,6 +12,7 @@ import {
   toRefDataForSave,
   validateNumericField,
 } from "../core/task-properties"
+import { invalidateNextActionEvaluationCache } from "../core/dependency-engine"
 import { createRecurringTaskInTodayJournal } from "../core/task-recurrence"
 
 import { t } from "../libs/l10n"
@@ -734,6 +735,7 @@ function TaskPropertyPopupView(props: {
           throw new Error(t("Failed to add task"))
         }
 
+        invalidateNextActionEvaluationCache()
         setLastSavedSnapshot(snapshot)
         setLastFailedSnapshot(null)
         props.onTaskCreated?.(createdTaskId)
@@ -812,6 +814,7 @@ function TaskPropertyPopupView(props: {
         sourceBlockId,
         props.schema,
       )
+      invalidateNextActionEvaluationCache()
       setLastSavedSnapshot(snapshot)
       setLastFailedSnapshot(null)
       void refreshActivationInfo()

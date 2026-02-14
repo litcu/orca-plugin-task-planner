@@ -1,5 +1,6 @@
 import type { Block, BlockRef, DbId } from "../orca.d.ts"
 import { getMirrorId } from "./block-utils"
+import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
   toRefDataForSave,
@@ -54,6 +55,7 @@ export async function createRecurringTaskInTodayJournal(
         blockCacheById,
       )
     })
+    invalidateNextActionEvaluationCache()
     return true
   } catch (error) {
     console.error(error)

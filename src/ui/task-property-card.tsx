@@ -8,6 +8,7 @@ import {
   toRefDataForSave,
   validateNumericField,
 } from "../core/task-properties"
+import { invalidateNextActionEvaluationCache } from "../core/dependency-engine"
 import { createRecurringTaskInTodayJournal } from "../core/task-recurrence"
 
 import { t } from "../libs/l10n"
@@ -611,6 +612,7 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         sourceBlockId,
         props.schema,
       )
+      invalidateNextActionEvaluationCache()
       setLastSavedSnapshot(snapshot)
       setLastFailedSnapshot(null)
       void refreshActivationInfo()
