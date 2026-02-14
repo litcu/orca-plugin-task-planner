@@ -7,7 +7,12 @@ import {
   subscribePreferredTaskViewsTab,
   type TaskViewsTab,
 } from "../core/task-views-state"
-import { collectNextActions, type NextActionItem } from "../core/dependency-engine"
+import {
+  collectNextActionEvaluations,
+  collectNextActions,
+  type NextActionBlockedReason,
+  type NextActionItem,
+} from "../core/dependency-engine"
 import {
   collectAllTasks,
   cycleTaskStatusInView,
@@ -21,6 +26,7 @@ import {
   type MyLifeOrganizedSettings,
 } from "../core/plugin-settings"
 import { t } from "../libs/l10n"
+import { TaskDashboard, type TaskDashboardData } from "./task-dashboard"
 import { TaskPropertyPanelCard } from "./task-property-card"
 import { TaskListRow, type TaskListRowItem } from "./task-list-row"
 import { openTaskPropertyPopup } from "./task-property-panel"
@@ -116,6 +122,9 @@ const PROP_TYPE_TEXT_CHOICES = 6
 const FILTER_TASK_NAME_FIELD_KEY = "__task_name__"
 const FILTER_GROUP_ROOT_ID = "__root__"
 const DAY_MS = 24 * 60 * 60 * 1000
+const DASHBOARD_DUE_DAYS = 7
+
+type BlockedReasonCountMap = Partial<Record<NextActionBlockedReason, number>>
 
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
@@ -151,6 +160,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [dropTarget, setDropTarget] = React.useState<TaskDropTarget | null>(null)
   const [nextActionItems, setNextActionItems] = React.useState<NextActionItem[]>([])
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
+  const [dashboardBlockedCounts, setDashboardBlockedCounts] = React.useState<BlockedReasonCountMap>(
+    {},
+  )
+  const [dashboardGeneratedAt, setDashboardGeneratedAt] = React.useState<Date>(() => new Date())
   const [selectedTaskId, setSelectedTaskId] = React.useState<DbId | null>(null)
   const [panelSettings, setPanelSettings] = React.useState<MyLifeOrganizedSettings>(() =>
     getPluginSettings(props.pluginName)
@@ -167,7 +180,17 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       }
 
       try {
-        if (targetTab === "next-actions") {
+        if (targetTab === "dashboard") {
+          const [allTasks, nextActions, evaluations] = await Promise.all([
+            collectAllTasks(props.schema),
+            collectNextActions(props.schema),
+            collectNextActionEvaluations(props.schema),
+          ])
+          setAllTaskItems(allTasks)
+          setNextActionItems(nextActions)
+          setDashboardBlockedCounts(countBlockedReasons(evaluations))
+          setDashboardGeneratedAt(new Date())
+        } else if (targetTab === "next-actions") {
           const nextActions = await collectNextActions(props.schema)
           setNextActionItems(nextActions)
         } else {
@@ -569,6 +592,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       .filter(matchesItem)
       .sort(compareReviewDueItems)
   }, [allTaskItems, matchesItem, props.schema.statusChoices])
+  const isDashboardTab = tab === "dashboard"
   const isReviewDueTab = tab === "review-due"
   const isAllTasksTab = tab === "all-tasks"
   const showParentTaskContext = tab === "next-actions"
@@ -920,18 +944,40 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     [draggingTaskId, isDescendantTask, moveTaskFromDrop, movingIds.size, resolveDropPosition],
   )
 
-  const viewName = tab === "next-actions"
-    ? t("Active Tasks")
-    : tab === "all-tasks"
-      ? t("All Tasks")
-      : tab === "starred-tasks"
-        ? t("Starred Tasks")
-        : tab === "due-soon"
-          ? t("Due Soon")
-          : t("Review")
+  const dashboardData = React.useMemo((): TaskDashboardData => {
+    return buildTaskDashboardData({
+      allTaskItems,
+      nextActionItems,
+      blockedCounts: dashboardBlockedCounts,
+      schema: props.schema,
+      dueSoonDays: panelSettings.dueSoonDays,
+      dueSoonIncludeOverdue: panelSettings.dueSoonIncludeOverdue,
+    })
+  }, [
+    allTaskItems,
+    dashboardBlockedCounts,
+    nextActionItems,
+    panelSettings.dueSoonDays,
+    panelSettings.dueSoonIncludeOverdue,
+    props.schema,
+  ])
+
+  const viewName = tab === "dashboard"
+    ? t("Dashboard")
+    : tab === "next-actions"
+      ? t("Active Tasks")
+      : tab === "all-tasks"
+        ? t("All Tasks")
+        : tab === "starred-tasks"
+          ? t("Starred Tasks")
+          : tab === "due-soon"
+            ? t("Due Soon")
+            : t("Review")
   const visibleCount = isAllTasksTab
     ? visibleAllTaskRows.length
-    : flatVisibleItems.length
+    : isDashboardTab
+      ? allTaskItems.length
+      : flatVisibleItems.length
   const emptyText = tab === "next-actions"
     ? t("No actionable tasks")
     : tab === "all-tasks"
@@ -940,17 +986,23 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         ? t("No starred tasks")
         : tab === "due-soon"
           ? t("No due soon tasks")
-          : t("No tasks to review")
-  const panelAccentGlow = tab === "next-actions"
-    ? "rgba(37, 99, 235, 0.18)"
-    : tab === "all-tasks"
-      ? "rgba(183, 121, 31, 0.2)"
-      : tab === "starred-tasks"
-        ? "rgba(214, 158, 46, 0.18)"
-        : tab === "due-soon"
-          ? "rgba(221, 107, 32, 0.18)"
-          : "rgba(56, 161, 105, 0.2)"
-  const countText = t("Showing ${count} items", { count: String(visibleCount) })
+          : tab === "dashboard"
+            ? t("No task data yet")
+            : t("No tasks to review")
+  const panelAccentGlow = tab === "dashboard"
+    ? "rgba(13, 148, 136, 0.2)"
+    : tab === "next-actions"
+      ? "rgba(37, 99, 235, 0.18)"
+      : tab === "all-tasks"
+        ? "rgba(183, 121, 31, 0.2)"
+        : tab === "starred-tasks"
+          ? "rgba(214, 158, 46, 0.18)"
+          : tab === "due-soon"
+            ? "rgba(221, 107, 32, 0.18)"
+            : "rgba(56, 161, 105, 0.2)"
+  const countText = isDashboardTab
+    ? t("Total ${count} tasks", { count: String(visibleCount) })
+    : t("Showing ${count} items", { count: String(visibleCount) })
   const groupLogicOptions = [
     { value: "and", label: t("AND") },
     { value: "or", label: t("OR") },
@@ -1338,6 +1390,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           selected: tab,
           options: [
             {
+              value: "dashboard",
+              label: t("Dashboard"),
+            },
+            {
               value: "next-actions",
               label: t("Active Tasks"),
             },
@@ -1391,7 +1447,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         "div",
         {
           style: {
-            display: "flex",
+            display: isDashboardTab ? "none" : "flex",
             alignItems: "center",
             gap: "8px",
             flexWrap: "wrap",
@@ -1611,16 +1667,61 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             )
           : null,
       ),
+      isDashboardTab
+        ? React.createElement(
+            "div",
+            {
+              style: {
+                flex: "1 1 auto",
+                minWidth: 0,
+                fontSize: "12px",
+                color: "var(--orca-color-text-2)",
+              },
+            },
+            t("Live metrics across your tasks"),
+          )
+        : null,
       React.createElement(
         "div",
         {
           style: {
             display: "flex",
             alignItems: "center",
+            gap: "8px",
             justifyContent: "flex-end",
             flex: "0 0 auto",
           },
         },
+        isDashboardTab
+          ? React.createElement(
+              Button,
+              {
+                variant: "outline",
+                onClick: () => {
+                  void loadByTab(tab, { silent: true })
+                },
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  whiteSpace: "nowrap",
+                  borderRadius: "8px",
+                },
+              },
+              React.createElement("i", {
+                className: "ti ti-refresh",
+                style: {
+                  fontSize: "14px",
+                  lineHeight: 1,
+                },
+              }),
+              React.createElement(
+                "span",
+                null,
+                t("Refresh"),
+              ),
+            )
+          : null,
         React.createElement(
           Button,
           {
@@ -1703,7 +1804,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               errorText,
             )
           : null,
-        !loading && isReviewDueTab && visibleCount > 0
+        !loading && !isDashboardTab && isReviewDueTab && visibleCount > 0
           ? React.createElement(
               "div",
               {
@@ -1802,10 +1903,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                   background: "rgba(148, 163, 184, 0.08)",
                 },
               },
-              t("Loading..."),
+              isDashboardTab ? t("Loading dashboard...") : t("Loading..."),
             )
           : null,
-        !loading && visibleCount === 0
+        !loading && !isDashboardTab && visibleCount === 0
           ? React.createElement(
               "div",
               {
@@ -1820,7 +1921,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               emptyText,
             )
           : null,
-        !loading && visibleCount > 0
+        !loading && isDashboardTab
+          ? React.createElement(TaskDashboard, {
+              data: dashboardData,
+              generatedAt: dashboardGeneratedAt,
+              onOpenTask: (blockId: DbId) => {
+                openTaskProperty(blockId)
+              },
+            })
+          : null,
+        !loading && !isDashboardTab && visibleCount > 0
           ? React.createElement(
               "div",
               {
@@ -1950,6 +2060,200 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         : null,
     ),
   )
+}
+
+interface BuildTaskDashboardDataParams {
+  allTaskItems: AllTaskItem[]
+  nextActionItems: NextActionItem[]
+  blockedCounts: BlockedReasonCountMap
+  schema: TaskSchemaDefinition
+  dueSoonDays: number
+  dueSoonIncludeOverdue: boolean
+}
+
+function countBlockedReasons(
+  evaluations: Array<{ blockedReason: NextActionBlockedReason[] }>,
+): BlockedReasonCountMap {
+  const counts: BlockedReasonCountMap = {}
+
+  for (const evaluation of evaluations) {
+    for (const reason of evaluation.blockedReason) {
+      counts[reason] = (counts[reason] ?? 0) + 1
+    }
+  }
+
+  return counts
+}
+
+function buildTaskDashboardData(
+  params: BuildTaskDashboardDataParams,
+): TaskDashboardData {
+  const {
+    allTaskItems,
+    nextActionItems,
+    blockedCounts,
+    schema,
+    dueSoonDays,
+    dueSoonIncludeOverdue,
+  } = params
+  const now = new Date()
+  const nowMs = now.getTime()
+  const [todoStatus, doingStatus, doneStatus] = schema.statusChoices
+
+  const doneTasks = allTaskItems.filter((item: AllTaskItem) => item.status === doneStatus).length
+  const statusCounts = {
+    todo: allTaskItems.filter((item: AllTaskItem) => item.status === todoStatus).length,
+    doing: allTaskItems.filter((item: AllTaskItem) => item.status === doingStatus).length,
+    done: doneTasks,
+  }
+  const openItems = allTaskItems.filter((item: AllTaskItem) => item.status !== doneStatus)
+  const dueSoonEndMs = nowMs + Math.max(1, dueSoonDays) * DAY_MS
+  const dueSoonTasks = openItems.filter((item: AllTaskItem) => {
+    return isDueSoon(item.endTime, nowMs, dueSoonEndMs, dueSoonIncludeOverdue)
+  }).length
+  const overdueTasks = openItems.filter((item: AllTaskItem) => {
+    const endMs = item.endTime?.getTime()
+    return typeof endMs === "number" && !Number.isNaN(endMs) && endMs < nowMs
+  }).length
+  const reviewDueTasks = openItems.filter((item: AllTaskItem) => {
+    return isTaskDueForReview(item, nowMs)
+  }).length
+  const starredTasks = allTaskItems.filter((item: AllTaskItem) => item.star).length
+  const completionRate = allTaskItems.length === 0 ? 0 : (doneTasks / allTaskItems.length) * 100
+  const averageActionScore = nextActionItems.length === 0
+    ? null
+    : nextActionItems.reduce((total, item) => total + item.score, 0) / nextActionItems.length
+
+  return {
+    totalTasks: allTaskItems.length,
+    actionableTasks: nextActionItems.length,
+    doneTasks,
+    completionRate,
+    starredTasks,
+    dueSoonTasks,
+    overdueTasks,
+    reviewDueTasks,
+    averageActionScore,
+    statusSlices: [
+      {
+        key: "todo",
+        label: todoStatus,
+        count: statusCounts.todo,
+        color: "linear-gradient(90deg, rgba(15, 23, 42, 0.42), rgba(15, 23, 42, 0.7))",
+      },
+      {
+        key: "doing",
+        label: doingStatus,
+        count: statusCounts.doing,
+        color: "linear-gradient(90deg, rgba(217, 119, 6, 0.55), rgba(217, 119, 6, 0.84))",
+      },
+      {
+        key: "done",
+        label: doneStatus,
+        count: statusCounts.done,
+        color: "linear-gradient(90deg, rgba(15, 118, 110, 0.6), rgba(15, 118, 110, 0.88))",
+      },
+    ],
+    dueBuckets: buildDashboardDueBuckets(openItems, now),
+    blockerItems: buildDashboardBlockerItems(blockedCounts),
+    topActions: nextActionItems.slice(0, 6).map((item: NextActionItem) => ({
+      blockId: item.blockId,
+      text: item.text,
+      score: item.score,
+      endTime: item.endTime,
+    })),
+  }
+}
+
+function buildDashboardDueBuckets(
+  openItems: AllTaskItem[],
+  now: Date,
+): TaskDashboardData["dueBuckets"] {
+  const buckets: TaskDashboardData["dueBuckets"] = []
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfTodayMs = startOfToday.getTime()
+  const locale = orca.state.locale === "zh-CN" ? "zh-CN" : undefined
+  const weekdayFormatter = new Intl.DateTimeFormat(locale, { weekday: "short" })
+
+  const overdueCount = openItems.filter((item: AllTaskItem) => {
+    const dueMs = item.endTime?.getTime()
+    return typeof dueMs === "number" && !Number.isNaN(dueMs) && dueMs < startOfTodayMs
+  }).length
+  buckets.push({
+    key: "overdue",
+    label: t("Overdue"),
+    count: overdueCount,
+    isPast: true,
+  })
+
+  for (let offset = 0; offset < DASHBOARD_DUE_DAYS; offset += 1) {
+    const dayStartMs = startOfTodayMs + offset * DAY_MS
+    const dayEndMs = dayStartMs + DAY_MS
+    const dayStart = new Date(dayStartMs)
+    const count = openItems.filter((item: AllTaskItem) => {
+      const dueMs = item.endTime?.getTime()
+      return typeof dueMs === "number" &&
+        !Number.isNaN(dueMs) &&
+        dueMs >= dayStartMs &&
+        dueMs < dayEndMs
+    }).length
+
+    buckets.push({
+      key: `day-${offset}`,
+      label: offset === 0 ? t("Today") : weekdayFormatter.format(dayStart),
+      count,
+      isPast: false,
+    })
+  }
+
+  return buckets
+}
+
+function buildDashboardBlockerItems(
+  blockedCounts: BlockedReasonCountMap,
+): TaskDashboardData["blockerItems"] {
+  const reasonOrder: NextActionBlockedReason[] = [
+    "dependency-unmet",
+    "has-open-children",
+    "not-started",
+    "dependency-delayed",
+    "ancestor-dependency-unmet",
+    "completed",
+    "canceled",
+  ]
+
+  return reasonOrder
+    .map((reason) => ({
+      key: reason,
+      label: resolveBlockedReasonLabel(reason),
+      count: blockedCounts[reason] ?? 0,
+    }))
+    .filter((item) => item.count > 0)
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 6)
+}
+
+function resolveBlockedReasonLabel(reason: NextActionBlockedReason): string {
+  if (reason === "completed") {
+    return t("Blocked by completion")
+  }
+  if (reason === "canceled") {
+    return t("Blocked by cancellation")
+  }
+  if (reason === "not-started") {
+    return t("Blocked by start time")
+  }
+  if (reason === "dependency-unmet") {
+    return t("Blocked by dependencies")
+  }
+  if (reason === "dependency-delayed") {
+    return t("Blocked by dependency delay")
+  }
+  if (reason === "has-open-children") {
+    return t("Blocked by open subtasks")
+  }
+
+  return t("Blocked by ancestor dependencies")
 }
 
 let taskFilterNodeSeed = 0
