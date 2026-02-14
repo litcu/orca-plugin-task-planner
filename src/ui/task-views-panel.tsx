@@ -1,10 +1,20 @@
-import type { Block, BlockProperty, BlockRef, DbId, PanelProps } from "../orca.d.ts"
+import type {
+  Block,
+  BlockProperty,
+  BlockRef,
+  DbId,
+  PanelProps,
+  QueryDescription2,
+} from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "../core/task-schema"
 import {
+  getCustomTaskViewIdFromTab,
   getPreferredTaskViewsTab,
+  isCustomTaskViewsTab,
   isTaskViewsTab,
   setPreferredTaskViewsTab,
   subscribePreferredTaskViewsTab,
+  toCustomTaskViewsTab,
   type TaskViewsTab,
 } from "../core/task-views-state"
 import {
@@ -26,6 +36,17 @@ import {
   getPluginSettings,
   type MyLifeOrganizedSettings,
 } from "../core/plugin-settings"
+import {
+  cloneCustomTaskViewQuery,
+  createCustomTaskViewId,
+  createDefaultCustomTaskViewQuery,
+  executeCustomTaskViewQuery,
+  loadCustomTaskViews,
+  normalizeCustomTaskViewName,
+  normalizeCustomTaskViewQuery,
+  saveCustomTaskViews,
+  type CustomTaskView,
+} from "../core/custom-task-views"
 import { t } from "../libs/l10n"
 import { TaskDashboard, type TaskDashboardData } from "./task-dashboard"
 import { TaskPropertyPanelCard } from "./task-property-card"
@@ -131,7 +152,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
   const Button = orca.components.Button
   const Input = orca.components.Input
+  const ModalOverlay = orca.components.ModalOverlay
   const Popup = orca.components.Popup
+  const QueryConditionsBuilder = orca.components.QueryConditionsBuilder
   const Select = orca.components.Select
   const Segmented = orca.components.Segmented
   const Switch = orca.components.Switch
@@ -140,10 +163,23 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [tab, setTab] = React.useState<TaskViewsTab>(() => {
     return getPreferredTaskViewsTab()
   })
+  const customViewsButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
   const filterButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
   const filterPopupContainerRef = React.useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [errorText, setErrorText] = React.useState("")
+  const [customViews, setCustomViews] = React.useState<CustomTaskView[]>([])
+  const [customViewsLoaded, setCustomViewsLoaded] = React.useState(false)
+  const [customViewsPanelVisible, setCustomViewsPanelVisible] = React.useState(false)
+  const [customViewEditorVisible, setCustomViewEditorVisible] = React.useState(false)
+  const [editingCustomViewId, setEditingCustomViewId] = React.useState<string | null>(null)
+  const [customViewNameDraft, setCustomViewNameDraft] = React.useState("")
+  const [customViewNameError, setCustomViewNameError] = React.useState("")
+  const [customViewQueryDraft, setCustomViewQueryDraft] = React.useState<QueryDescription2>(() =>
+    createDefaultCustomTaskViewQuery()
+  )
+  const [savingCustomView, setSavingCustomView] = React.useState(false)
+  const [customViewMatchedTaskIds, setCustomViewMatchedTaskIds] = React.useState<DbId[]>([])
   const [filterPanelVisible, setFilterPanelVisible] = React.useState(false)
   const [quickSearchKeyword, setQuickSearchKeyword] = React.useState("")
   const [taskTagProperties, setTaskTagProperties] = React.useState<BlockProperty[]>([])
@@ -169,6 +205,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [panelSettings, setPanelSettings] = React.useState<MyLifeOrganizedSettings>(() =>
     getPluginSettings(props.pluginName)
   )
+  const activeCustomViewId = React.useMemo(() => {
+    return getCustomTaskViewIdFromTab(tab)
+  }, [tab])
+  const activeCustomView = React.useMemo(() => {
+    if (activeCustomViewId == null) {
+      return null
+    }
+
+    return customViews.find((view: CustomTaskView) => view.id === activeCustomViewId) ?? null
+  }, [activeCustomViewId, customViews])
 
   const loadByTab = React.useCallback(
     async (
@@ -190,12 +236,31 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           setNextActionItems(selectNextActionsFromEvaluations(evaluations))
           setDashboardBlockedCounts(countBlockedReasons(evaluations))
           setDashboardGeneratedAt(new Date())
+          setCustomViewMatchedTaskIds([])
         } else if (targetTab === "next-actions") {
           const nextActions = await collectNextActions(props.schema)
           setNextActionItems(nextActions)
+          setCustomViewMatchedTaskIds([])
+        } else if (isCustomTaskViewsTab(targetTab)) {
+          const customViewId = getCustomTaskViewIdFromTab(targetTab)
+          const customView = customViews.find((view: CustomTaskView) => view.id === customViewId) ??
+            null
+          const allTasks = await collectAllTasks(props.schema)
+          setAllTaskItems(allTasks)
+
+          if (customView == null) {
+            setCustomViewMatchedTaskIds([])
+          } else {
+            const matchedIds = await executeCustomTaskViewQuery(
+              customView,
+              props.schema.tagAlias,
+            )
+            setCustomViewMatchedTaskIds(matchedIds)
+          }
         } else {
           const allTasks = await collectAllTasks(props.schema)
           setAllTaskItems(allTasks)
+          setCustomViewMatchedTaskIds([])
         }
 
         setErrorText("")
@@ -208,7 +273,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         }
       }
     },
-    [props.schema],
+    [customViews, props.schema],
   )
 
   const loadTaskTagProperties = React.useCallback(async () => {
@@ -245,6 +310,48 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   }, [props.pluginName])
 
   React.useEffect(() => {
+    let cancelled = false
+    setCustomViewsLoaded(false)
+
+    const run = async () => {
+      try {
+        const views = await loadCustomTaskViews(props.pluginName)
+        if (cancelled) {
+          return
+        }
+
+        setCustomViews(views)
+      } catch (error) {
+        console.error(error)
+        if (!cancelled) {
+          setErrorText(t("Failed to load custom views"))
+        }
+      } finally {
+        if (!cancelled) {
+          setCustomViewsLoaded(true)
+        }
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [props.pluginName])
+
+  React.useEffect(() => {
+    if (!isCustomTaskViewsTab(tab) || !customViewsLoaded) {
+      return
+    }
+
+    const customViewId = getCustomTaskViewIdFromTab(tab)
+    const exists = customViews.some((view: CustomTaskView) => view.id === customViewId)
+    if (!exists) {
+      setPreferredTaskViewsTab("next-actions")
+    }
+  }, [customViews, customViewsLoaded, tab])
+
+  React.useEffect(() => {
     void loadByTab(tab)
   }, [loadByTab, tab])
 
@@ -261,6 +368,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
   React.useEffect(() => {
     setFilterPanelVisible(false)
+    setCustomViewsPanelVisible(false)
   }, [tab])
 
   React.useEffect(() => {
@@ -288,6 +396,145 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       unsubscribe()
     }
   }, [loadByTab, selectedTaskId, tab])
+
+  const openCustomViewTab = React.useCallback((viewId: string) => {
+    setPreferredTaskViewsTab(toCustomTaskViewsTab(viewId))
+    setCustomViewsPanelVisible(false)
+  }, [])
+
+  const openCreateCustomViewEditor = React.useCallback(() => {
+    setEditingCustomViewId(null)
+    setCustomViewNameDraft("")
+    setCustomViewNameError("")
+    setCustomViewQueryDraft(createDefaultCustomTaskViewQuery())
+    setCustomViewsPanelVisible(false)
+    setCustomViewEditorVisible(true)
+  }, [])
+
+  const openEditCustomViewEditor = React.useCallback((view: CustomTaskView) => {
+    setEditingCustomViewId(view.id)
+    setCustomViewNameDraft(view.name)
+    setCustomViewNameError("")
+    setCustomViewQueryDraft(cloneCustomTaskViewQuery(view.query))
+    setCustomViewsPanelVisible(false)
+    setCustomViewEditorVisible(true)
+  }, [])
+
+  const closeCustomViewEditor = React.useCallback(() => {
+    if (savingCustomView) {
+      return
+    }
+
+    setCustomViewNameError("")
+    setCustomViewEditorVisible(false)
+  }, [savingCustomView])
+
+  const saveCustomView = React.useCallback(async () => {
+    const name = normalizeCustomTaskViewName(customViewNameDraft)
+    if (name === "") {
+      setCustomViewNameError(t("Custom view name is required"))
+      return
+    }
+    setCustomViewNameError("")
+
+    const query = normalizeCustomTaskViewQuery(customViewQueryDraft)
+    const now = Date.now()
+    let savedViewId = editingCustomViewId
+    let nextViews: CustomTaskView[] = []
+
+    if (editingCustomViewId != null) {
+      const existingView = customViews.find((view: CustomTaskView) => {
+        return view.id === editingCustomViewId
+      })
+      if (existingView == null) {
+        setErrorText(t("Custom view no longer exists"))
+        return
+      }
+
+      nextViews = customViews.map((view: CustomTaskView) => {
+        if (view.id !== editingCustomViewId) {
+          return view
+        }
+
+        return {
+          ...view,
+          name,
+          query,
+          updatedAt: now,
+        }
+      })
+    } else {
+      savedViewId = createCustomTaskViewId()
+      nextViews = [
+        ...customViews,
+        {
+          id: savedViewId,
+          name,
+          query,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]
+    }
+
+    setSavingCustomView(true)
+    try {
+      await saveCustomTaskViews(props.pluginName, nextViews)
+      setCustomViews(nextViews)
+      setCustomViewNameError("")
+      setCustomViewEditorVisible(false)
+      setCustomViewsPanelVisible(false)
+      setErrorText("")
+
+      if (savedViewId != null) {
+        setPreferredTaskViewsTab(toCustomTaskViewsTab(savedViewId))
+      }
+    } catch (error) {
+      console.error(error)
+      setErrorText(t("Failed to save custom view"))
+    } finally {
+      setSavingCustomView(false)
+    }
+  }, [
+    customViewNameDraft,
+    customViewQueryDraft,
+    customViews,
+    editingCustomViewId,
+    props.pluginName,
+  ])
+
+  const deleteCustomView = React.useCallback(
+    async (view: CustomTaskView) => {
+      const confirmed = window.confirm(
+        t("Delete custom view: ${name}?", {
+          name: view.name,
+        }),
+      )
+      if (!confirmed) {
+        return
+      }
+
+      const nextViews = customViews.filter((item: CustomTaskView) => item.id !== view.id)
+      try {
+        await saveCustomTaskViews(props.pluginName, nextViews)
+        setCustomViews(nextViews)
+        setErrorText("")
+
+        if (editingCustomViewId === view.id) {
+          setCustomViewEditorVisible(false)
+          setEditingCustomViewId(null)
+        }
+
+        if (activeCustomViewId === view.id) {
+          setPreferredTaskViewsTab("next-actions")
+        }
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to delete custom view"))
+      }
+    },
+    [activeCustomViewId, customViews, editingCustomViewId, props.pluginName],
+  )
 
   const toggleTaskStatus = React.useCallback(
     async (item: TaskListRowItem) => {
@@ -592,9 +839,37 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       .filter(matchesItem)
       .sort(compareReviewDueItems)
   }, [allTaskItems, matchesItem, props.schema.statusChoices])
+  const customViewMatchedTaskIdSet = React.useMemo(() => {
+    return new Set(customViewMatchedTaskIds)
+  }, [customViewMatchedTaskIds])
+  const customViewTaskOrderMap = React.useMemo(() => {
+    const orderMap = new Map<DbId, number>()
+    customViewMatchedTaskIds.forEach((taskId: DbId, index: number) => {
+      orderMap.set(taskId, index)
+    })
+    return orderMap
+  }, [customViewMatchedTaskIds])
+  const filteredCustomViewTaskItems = React.useMemo(() => {
+    if (!isCustomTaskViewsTab(tab)) {
+      return []
+    }
+
+    return allTaskItems
+      .filter((item: AllTaskItem) => customViewMatchedTaskIdSet.has(item.blockId))
+      .sort((left: AllTaskItem, right: AllTaskItem) => {
+        const leftOrder = customViewTaskOrderMap.get(left.blockId) ?? Number.MAX_SAFE_INTEGER
+        const rightOrder = customViewTaskOrderMap.get(right.blockId) ?? Number.MAX_SAFE_INTEGER
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder
+        }
+        return left.blockId - right.blockId
+      })
+      .filter(matchesItem)
+  }, [allTaskItems, customViewMatchedTaskIdSet, customViewTaskOrderMap, matchesItem, tab])
   const isDashboardTab = tab === "dashboard"
   const isReviewDueTab = tab === "review-due"
   const isAllTasksTab = tab === "all-tasks"
+  const isCustomViewTab = isCustomTaskViewsTab(tab)
   const showParentTaskContext = tab === "next-actions"
   const flatVisibleItems = React.useMemo((): TaskListRowItem[] => {
     if (tab === "next-actions") {
@@ -613,8 +888,13 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       return filteredReviewDueTaskItems
     }
 
+    if (isCustomTaskViewsTab(tab)) {
+      return filteredCustomViewTaskItems
+    }
+
     return []
   }, [
+    filteredCustomViewTaskItems,
     filteredDueSoonTaskItems,
     filteredNextActionItems,
     filteredReviewDueTaskItems,
@@ -961,6 +1241,40 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     panelSettings.dueSoonIncludeOverdue,
     props.schema,
   ])
+  const taskViewSegmentedOptions = React.useMemo(() => {
+    const baseOptions = [
+      {
+        value: "dashboard",
+        label: t("Dashboard"),
+      },
+      {
+        value: "next-actions",
+        label: t("Active Tasks"),
+      },
+      {
+        value: "all-tasks",
+        label: t("All Tasks"),
+      },
+      {
+        value: "starred-tasks",
+        label: t("Starred Tasks"),
+      },
+      {
+        value: "due-soon",
+        label: t("Due Soon"),
+      },
+      {
+        value: "review-due",
+        label: t("Review"),
+      },
+    ]
+
+    const customOptions = customViews.map((view: CustomTaskView) => ({
+      value: toCustomTaskViewsTab(view.id),
+      label: view.name,
+    }))
+    return [...baseOptions, ...customOptions]
+  }, [customViews])
 
   const viewName = tab === "dashboard"
     ? t("Dashboard")
@@ -968,11 +1282,13 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       ? t("Active Tasks")
       : tab === "all-tasks"
         ? t("All Tasks")
-        : tab === "starred-tasks"
-          ? t("Starred Tasks")
-          : tab === "due-soon"
-            ? t("Due Soon")
-            : t("Review")
+      : tab === "starred-tasks"
+        ? t("Starred Tasks")
+        : tab === "due-soon"
+          ? t("Due Soon")
+          : tab === "review-due"
+            ? t("Review")
+            : activeCustomView?.name ?? t("Custom View")
   const visibleCount = isAllTasksTab
     ? visibleAllTaskRows.length
     : isDashboardTab
@@ -986,6 +1302,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         ? t("No starred tasks")
         : tab === "due-soon"
           ? t("No due soon tasks")
+          : isCustomViewTab
+            ? t("No tasks in custom view")
           : tab === "dashboard"
             ? t("No task data yet")
             : t("No tasks to review")
@@ -999,6 +1317,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           ? "rgba(214, 158, 46, 0.18)"
           : tab === "due-soon"
             ? "rgba(221, 107, 32, 0.18)"
+            : isCustomViewTab
+              ? "rgba(12, 74, 110, 0.18)"
             : "rgba(56, 161, 105, 0.2)"
   const countText = isDashboardTab
     ? t("Total ${count} tasks", { count: String(visibleCount) })
@@ -1388,32 +1708,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         ),
         React.createElement(Segmented, {
           selected: tab,
-          options: [
-            {
-              value: "dashboard",
-              label: t("Dashboard"),
-            },
-            {
-              value: "next-actions",
-              label: t("Active Tasks"),
-            },
-            {
-              value: "all-tasks",
-              label: t("All Tasks"),
-            },
-            {
-              value: "starred-tasks",
-              label: t("Starred Tasks"),
-            },
-            {
-              value: "due-soon",
-              label: t("Due Soon"),
-            },
-            {
-              value: "review-due",
-              label: t("Review"),
-            },
-          ],
+          options: taskViewSegmentedOptions,
           onChange: (value: string) => {
             if (isTaskViewsTab(value)) {
               setPreferredTaskViewsTab(value)
@@ -1454,6 +1749,234 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             flex: "1 1 420px",
           },
         },
+        React.createElement(
+          "div",
+          {
+            ref: customViewsButtonAnchorRef,
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+            },
+          },
+          React.createElement(
+            Button,
+            {
+              variant: isCustomViewTab ? "soft" : "outline",
+              onClick: () => {
+                setCustomViewsPanelVisible((prev: boolean) => !prev)
+              },
+              title: t("Custom views"),
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                whiteSpace: "nowrap",
+                borderRadius: "8px",
+              },
+            },
+            React.createElement("i", {
+              className: "ti ti-layout-grid-add",
+              style: {
+                fontSize: "14px",
+                lineHeight: 1,
+              },
+            }),
+            React.createElement(
+              "span",
+              null,
+              t("Custom views"),
+            ),
+          ),
+        ),
+        React.createElement(
+          Popup,
+          {
+            refElement: customViewsButtonAnchorRef,
+            visible: customViewsPanelVisible,
+            onClose: () => setCustomViewsPanelVisible(false),
+            defaultPlacement: "bottom",
+            alignment: "left",
+            offset: 6,
+          },
+          React.createElement(
+            "div",
+            {
+              style: {
+                width: "min(440px, calc(100vw - 24px))",
+                maxWidth: "100%",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                padding: "10px",
+                borderRadius: "12px",
+                border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+                background:
+                  "linear-gradient(160deg, var(--orca-color-bg-1), var(--orca-color-bg-2) 82%)",
+                boxShadow: "0 12px 28px rgba(15, 23, 42, 0.18)",
+              },
+            },
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                },
+              },
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: "var(--orca-color-text-1, var(--orca-color-text))",
+                  },
+                },
+                t("Custom views"),
+              ),
+              React.createElement(
+                Button,
+                {
+                  variant: "outline",
+                  onClick: () => {
+                    openCreateCustomViewEditor()
+                  },
+                  style: {
+                    borderRadius: "8px",
+                  },
+                },
+                t("New view"),
+              ),
+            ),
+            !customViewsLoaded
+              ? React.createElement(
+                  "div",
+                  {
+                    style: {
+                      fontSize: "12px",
+                      color: "var(--orca-color-text-2)",
+                    },
+                  },
+                  t("Loading..."),
+                )
+              : customViews.length === 0
+                ? React.createElement(
+                    "div",
+                    {
+                      style: {
+                        fontSize: "12px",
+                        color: "var(--orca-color-text-2)",
+                      },
+                    },
+                    t("No custom views yet"),
+                  )
+                : React.createElement(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "6px",
+                        maxHeight: "320px",
+                        overflow: "auto",
+                      },
+                    },
+                    customViews.map((view: CustomTaskView) => {
+                      const selected = tab === toCustomTaskViewsTab(view.id)
+                      return React.createElement(
+                        "div",
+                        {
+                          key: view.id,
+                          style: {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            padding: "2px 0",
+                          },
+                        },
+                        React.createElement(
+                          Button,
+                          {
+                            variant: selected ? "soft" : "outline",
+                            onClick: () => {
+                              openCustomViewTab(view.id)
+                            },
+                            style: {
+                              borderRadius: "8px",
+                              flex: "1 1 auto",
+                              justifyContent: "flex-start",
+                              minWidth: 0,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            },
+                            title: view.name,
+                          },
+                          view.name,
+                        ),
+                        React.createElement(
+                          Button,
+                          {
+                            variant: "outline",
+                            onClick: () => {
+                              openEditCustomViewEditor(view)
+                            },
+                            title: t("Edit custom view"),
+                            style: {
+                              borderRadius: "8px",
+                              width: "30px",
+                              minWidth: "30px",
+                              height: "30px",
+                              padding: 0,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            },
+                          },
+                          React.createElement("i", {
+                            className: "ti ti-pencil",
+                            style: {
+                              fontSize: "13px",
+                              lineHeight: 1,
+                            },
+                          }),
+                        ),
+                        React.createElement(
+                          Button,
+                          {
+                            variant: "outline",
+                            onClick: () => {
+                              void deleteCustomView(view)
+                            },
+                            title: t("Delete custom view"),
+                            style: {
+                              borderRadius: "8px",
+                              width: "30px",
+                              minWidth: "30px",
+                              height: "30px",
+                              padding: 0,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: "var(--orca-color-text-red, #c53030)",
+                              borderColor: "rgba(197, 48, 48, 0.35)",
+                              background: "rgba(197, 48, 48, 0.08)",
+                            },
+                          },
+                          React.createElement("i", {
+                            className: "ti ti-trash",
+                            style: {
+                              fontSize: "13px",
+                              lineHeight: 1,
+                            },
+                          }),
+                        ),
+                      )
+                    }),
+                  ),
+          ),
+        ),
         React.createElement(
           "div",
           {
@@ -2058,6 +2581,191 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             onClose: closeTaskProperty,
           })
         : null,
+    ),
+    React.createElement(
+      ModalOverlay,
+      {
+        visible: customViewEditorVisible,
+        canClose: false,
+        blurred: true,
+        onClose: () => {
+          closeCustomViewEditor()
+        },
+      },
+      React.createElement(
+        "div",
+        {
+          style: {
+            width: "min(860px, calc(100vw - 28px))",
+            maxHeight: "calc(100vh - 40px)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+            padding: "14px",
+            borderRadius: "14px",
+            border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+            background:
+              "linear-gradient(150deg, var(--orca-color-bg-1), var(--orca-color-bg-2) 82%)",
+            boxShadow: "0 24px 52px rgba(15, 23, 42, 0.32)",
+          },
+        },
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "8px",
+              flexWrap: "wrap",
+            },
+          },
+          React.createElement(
+            "div",
+            {
+              style: {
+                fontSize: "16px",
+                fontWeight: 700,
+              },
+            },
+            editingCustomViewId == null ? t("Create custom view") : t("Edit custom view"),
+          ),
+          React.createElement(
+            Button,
+            {
+              variant: "outline",
+              disabled: savingCustomView,
+              onClick: () => {
+                closeCustomViewEditor()
+              },
+              style: {
+                borderRadius: "8px",
+              },
+            },
+            t("Cancel"),
+          ),
+        ),
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+            },
+          },
+          React.createElement(
+            "div",
+            {
+              style: {
+                fontSize: "12px",
+                color: "var(--orca-color-text-2)",
+                fontWeight: 600,
+              },
+            },
+            t("View name"),
+          ),
+          React.createElement(Input, {
+            value: customViewNameDraft,
+            placeholder: t("View name"),
+            onChange: (event: Event) => {
+              const target = event.target as HTMLInputElement | null
+              setCustomViewNameDraft(target?.value ?? "")
+              if (customViewNameError !== "") {
+                setCustomViewNameError("")
+              }
+            },
+            disabled: savingCustomView,
+            width: "100%",
+          }),
+          customViewNameError !== ""
+            ? React.createElement(
+                "div",
+                {
+                  style: {
+                    color: "var(--orca-color-text-red, #c53030)",
+                    fontSize: "12px",
+                  },
+                },
+                customViewNameError,
+              )
+            : null,
+        ),
+        React.createElement(
+          "div",
+          {
+            style: {
+              fontSize: "12px",
+              color: "var(--orca-color-text-2)",
+              fontWeight: 600,
+            },
+          },
+          t("Custom view query"),
+        ),
+        React.createElement(
+          "div",
+          {
+            style: {
+              flex: "1 1 auto",
+              minHeight: "300px",
+              maxHeight: "calc(100vh - 250px)",
+              overflow: "auto",
+              border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+              borderRadius: "10px",
+              padding: "10px",
+              background: "rgba(148, 163, 184, 0.06)",
+            },
+          },
+          React.createElement(QueryConditionsBuilder, {
+            value: customViewQueryDraft,
+            onChange: (nextValue: QueryDescription2) => {
+              setCustomViewQueryDraft(normalizeCustomTaskViewQuery(nextValue))
+            },
+          }),
+        ),
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              gap: "8px",
+            },
+          },
+          React.createElement(
+            Button,
+            {
+              variant: "outline",
+              disabled: savingCustomView,
+              onClick: () => {
+                closeCustomViewEditor()
+              },
+              style: {
+                borderRadius: "8px",
+              },
+            },
+            t("Cancel"),
+          ),
+          React.createElement(
+            Button,
+            {
+              variant: "solid",
+              disabled: savingCustomView,
+              onClick: () => {
+                void saveCustomView()
+              },
+              style: {
+                borderRadius: "8px",
+                background: "var(--orca-color-text-blue, #2563eb)",
+                borderColor: "var(--orca-color-text-blue, #2563eb)",
+                color: "#fff",
+              },
+            },
+            savingCustomView ? t("Saving...") : t("Save view"),
+          ),
+        ),
+      ),
     ),
   )
 }
