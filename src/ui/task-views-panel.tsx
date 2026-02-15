@@ -2085,20 +2085,75 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             countText,
           ),
         ),
-        React.createElement(Segmented, {
-          selected: tab,
-          options: taskViewSegmentedOptions,
-          onChange: (value: string) => {
-            if (isTaskViewsTab(value)) {
-              setPreferredTaskViewsTab(value)
-            }
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: "8px",
+              flexWrap: "wrap",
+              flex: "1 1 320px",
+              minWidth: "280px",
+            },
           },
-          style: {
-            minWidth: "280px",
-            flex: "1 1 320px",
-            maxWidth: "620px",
-          },
-        }),
+          React.createElement(Segmented, {
+            selected: tab,
+            options: taskViewSegmentedOptions,
+            onChange: (value: string) => {
+              if (isTaskViewsTab(value)) {
+                setPreferredTaskViewsTab(value)
+              }
+            },
+            style: {
+              minWidth: "280px",
+              flex: "1 1 320px",
+              maxWidth: "620px",
+            },
+          }),
+          !isDashboardTab
+            ? React.createElement(
+                "div",
+                {
+                  ref: customViewsButtonAnchorRef,
+                  style: {
+                    display: "inline-flex",
+                    alignItems: "center",
+                  },
+                },
+                React.createElement(
+                  Button,
+                  {
+                    variant: isCustomViewTab ? "soft" : "outline",
+                    onClick: () => {
+                      setCustomViewsPanelVisible((prev: boolean) => !prev)
+                    },
+                    title: t("Custom views"),
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      whiteSpace: "nowrap",
+                      borderRadius: "8px",
+                    },
+                  },
+                  React.createElement("i", {
+                    className: "ti ti-layout-grid-add",
+                    style: {
+                      fontSize: "14px",
+                      lineHeight: 1,
+                    },
+                  }),
+                  React.createElement(
+                    "span",
+                    null,
+                    t("Custom views"),
+                  ),
+                ),
+              )
+            : null,
+        ),
       ),
     ),
     React.createElement(
@@ -2128,45 +2183,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             flex: "1 1 420px",
           },
         },
-        React.createElement(
-          "div",
-          {
-            ref: customViewsButtonAnchorRef,
-            style: {
-              display: "inline-flex",
-              alignItems: "center",
-            },
-          },
-          React.createElement(
-            Button,
-            {
-              variant: isCustomViewTab ? "soft" : "outline",
-              onClick: () => {
-                setCustomViewsPanelVisible((prev: boolean) => !prev)
-              },
-              title: t("Custom views"),
-              style: {
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                whiteSpace: "nowrap",
-                borderRadius: "8px",
-              },
-            },
-            React.createElement("i", {
-              className: "ti ti-layout-grid-add",
-              style: {
-                fontSize: "14px",
-                lineHeight: 1,
-              },
-            }),
-            React.createElement(
-              "span",
-              null,
-              t("Custom views"),
-            ),
-          ),
-        ),
         React.createElement(
           Popup,
           {
