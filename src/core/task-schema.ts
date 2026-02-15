@@ -21,15 +21,10 @@ interface TaskSchemaPropertyNames {
   status: string
   startTime: string
   endTime: string
-  review: string
-  importance: string
-  urgency: string
-  effort: string
   dependsOn: string
   dependsMode: string
   dependencyDelay: string
   star: string
-  repeatRule: string
   labels: string
   remark: string
 }
@@ -50,15 +45,10 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
       status: "Status",
       startTime: "Start time",
       endTime: "End time",
-      review: "Review",
-      importance: "Importance",
-      urgency: "Urgency",
-      effort: "Effort",
       dependsOn: "Depends on",
       dependsMode: "Depends mode",
       dependencyDelay: "Dependency delay",
       star: "Star",
-      repeatRule: "Repeat rule",
       labels: "Labels",
       remark: "Remark",
     },
@@ -72,15 +62,10 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
       status: "\u72b6\u6001",
       startTime: "\u5f00\u59cb\u65f6\u95f4",
       endTime: "\u7ed3\u675f\u65f6\u95f4",
-      review: "\u56de\u987e",
-      importance: "\u91cd\u8981\u6027",
-      urgency: "\u7d27\u6025\u5ea6",
-      effort: "\u5de5\u4f5c\u91cf",
       dependsOn: "\u4f9d\u8d56\u4efb\u52a1",
       dependsMode: "\u4f9d\u8d56\u6a21\u5f0f",
       dependencyDelay: "\u4f9d\u8d56\u5ef6\u8fdf",
       star: "\u6536\u85cf",
-      repeatRule: "\u91cd\u590d\u89c4\u5219",
       labels: "\u6807\u7b7e",
       remark: "\u5907\u6ce8",
     },
@@ -88,6 +73,19 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
     dependencyModeChoices: ["ALL", "ANY"],
   },
 }
+
+const RETIRED_TASK_PROPERTY_NAMES = [
+  "Review",
+  "\u56de\u987e",
+  "Importance",
+  "\u91cd\u8981\u6027",
+  "Urgency",
+  "\u7d27\u6025\u5ea6",
+  "Effort",
+  "\u5de5\u4f5c\u91cf",
+  "Repeat rule",
+  "\u91cd\u590d\u89c4\u5219",
+]
 
 export interface EnsureTaskSchemaResult {
   taskTagId: DbId
@@ -156,6 +154,13 @@ export async function ensureTaskTagSchema(
     null,
     [taskBlock.id],
     buildTaskTagProperties(targetSchema, taskBlock.properties),
+  )
+
+  await orca.commands.invokeEditorCommand(
+    "core.editor.deleteProperties",
+    null,
+    [taskBlock.id],
+    RETIRED_TASK_PROPERTY_NAMES,
   )
 
   return {
@@ -278,38 +283,6 @@ function buildTaskTagProperties(
       pos: findPos(names.endTime),
     },
     {
-      name: names.review,
-      type: PROP_TYPE.TEXT,
-      pos: findPos(names.review),
-    },
-    {
-      name: names.importance,
-      type: PROP_TYPE.NUMBER,
-      typeArgs: {
-        defaultEnabled: true,
-        default: DEFAULT_TASK_SCORE,
-      },
-      pos: findPos(names.importance),
-    },
-    {
-      name: names.urgency,
-      type: PROP_TYPE.NUMBER,
-      typeArgs: {
-        defaultEnabled: true,
-        default: DEFAULT_TASK_SCORE,
-      },
-      pos: findPos(names.urgency),
-    },
-    {
-      name: names.effort,
-      type: PROP_TYPE.NUMBER,
-      typeArgs: {
-        defaultEnabled: true,
-        default: DEFAULT_TASK_SCORE,
-      },
-      pos: findPos(names.effort),
-    },
-    {
       name: names.dependsOn,
       type: PROP_TYPE.BLOCK_REFS,
       typeArgs: {
@@ -341,11 +314,6 @@ function buildTaskTagProperties(
       name: names.star,
       type: PROP_TYPE.BOOLEAN,
       pos: findPos(names.star),
-    },
-    {
-      name: names.repeatRule,
-      type: PROP_TYPE.TEXT,
-      pos: findPos(names.repeatRule),
     },
     {
       name: names.labels,

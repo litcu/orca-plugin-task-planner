@@ -6,6 +6,7 @@ import {
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
   toRefDataForSave,
+  toTaskMetaPropertyForSave,
   validateNumericField,
 } from "../core/task-properties"
 import { invalidateNextActionEvaluationCache } from "../core/dependency-engine"
@@ -55,8 +56,8 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
     (ref) => ref.type === TAG_REF_TYPE && ref.alias === props.schema.tagAlias,
   )
   const initialValues = React.useMemo(() => {
-    return getTaskPropertiesFromRef(taskRef?.data, props.schema)
-  }, [props.schema, taskRef])
+    return getTaskPropertiesFromRef(taskRef?.data, props.schema, block)
+  }, [block, props.schema, taskRef])
   const initialDependsOnForEditor = React.useMemo(() => {
     return normalizeDependsOnForSelect(
       block,
@@ -564,7 +565,12 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
       const dependencyRefIds = await ensureDependencyRefIds(sourceBlockId, dependsOnValues)
       const normalizedTaskLabels = normalizeTaskLabelValues(taskLabelsValue)
       await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
-      const previousValues = getTaskPropertiesFromRef(taskRef.data, props.schema)
+      const sourceTaskBlock = orca.state.blocks[sourceBlockId] ?? block ?? null
+      const previousValues = getTaskPropertiesFromRef(
+        taskRef.data,
+        props.schema,
+        sourceTaskBlock,
+      )
       const reviewEvery = reviewEnabledValue && reviewTypeValue === "cycle"
         ? buildReviewRuleFromEditorState({
             mode: reviewModeValue,
@@ -605,6 +611,12 @@ export function TaskPropertyPanelCard(props: TaskPropertyPanelCardProps) {
         sourceBlockId,
         props.schema.tagAlias,
         payload,
+      )
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setProperties",
+        null,
+        [sourceBlockId],
+        [toTaskMetaPropertyForSave(valuesToSave, sourceTaskBlock)],
       )
       await createRecurringTaskInTodayJournal(
         previousValues.status,

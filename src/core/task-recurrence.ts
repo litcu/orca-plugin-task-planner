@@ -4,6 +4,7 @@ import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
   toRefDataForSave,
+  toTaskMetaPropertyForSave,
   type TaskPropertyValues,
 } from "./task-properties"
 import type { TaskSchemaDefinition } from "./task-schema"
@@ -45,6 +46,13 @@ export async function createRecurringTaskInTodayJournal(
         sourceTaskId,
         schema.tagAlias,
         toRefDataForSave(recurringValues, schema),
+      )
+      const sourceBlock = orca.state.blocks[sourceTaskId] ?? null
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setProperties",
+        null,
+        [sourceTaskId],
+        [toTaskMetaPropertyForSave(recurringValues, sourceBlock)],
       )
 
       await reopenDescendantTasks(

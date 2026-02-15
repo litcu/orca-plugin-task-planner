@@ -155,7 +155,7 @@ export function evaluateNextAction(
     blockedReason.push(isDoneStatus(status, schema) ? "completed" : "canceled")
   }
 
-  const values = getTaskPropertiesFromRef(taskRef?.data, schema)
+  const values = getTaskPropertiesFromRef(taskRef?.data, schema, liveTaskBlock)
   const parentTaskName = resolveParentTaskName(taskId, taskMap, schema, subtaskContext)
 
   if (values.startTime != null && values.startTime.getTime() > now.getTime()) {
@@ -679,7 +679,11 @@ function hasAncestorDependencyUnmet(
     const ancestorBlock = taskMap.get(ancestorTaskId) ?? orca.state.blocks[ancestorTaskId]
     if (ancestorBlock != null) {
       const ancestorRef = findTaskTagRef(ancestorBlock, schema.tagAlias)
-      const ancestorValues = getTaskPropertiesFromRef(ancestorRef?.data, schema)
+      const ancestorValues = getTaskPropertiesFromRef(
+        ancestorRef?.data,
+        schema,
+        getLiveTaskBlock(ancestorBlock),
+      )
       const dependencyResult = evaluateDependencyEligibility(
         ancestorBlock,
         ancestorValues.dependsOn,
@@ -750,7 +754,7 @@ function buildDependencyCycleContext(
     const sourceBlock = getLiveTaskBlock(block)
     const sourceId = getMirrorId(sourceBlock.id)
     const taskRef = findTaskTagRef(sourceBlock, schema.tagAlias)
-    const values = getTaskPropertiesFromRef(taskRef?.data, schema)
+    const values = getTaskPropertiesFromRef(taskRef?.data, schema, sourceBlock)
     const edges: DbId[] = []
 
     for (const dependencyId of values.dependsOn) {

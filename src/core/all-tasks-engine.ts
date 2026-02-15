@@ -4,13 +4,13 @@ import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
+  toTaskMetaPropertyForSave,
 } from "./task-properties"
 import type { TaskSchemaDefinition } from "./task-schema"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
 import {
   resolveEffectiveNextReview,
   resolveNextReviewAfterMarkReviewed,
-  stringifyTaskReviewState,
   type TaskReviewType,
 } from "./task-review"
 
@@ -63,7 +63,7 @@ export async function collectAllTasks(
       continue
     }
 
-    const values = getTaskPropertiesFromRef(taskRef.data, schema)
+    const values = getTaskPropertiesFromRef(taskRef.data, schema, liveBlock)
     const parentBlockId = liveBlock.parent != null ? getMirrorId(liveBlock.parent) : null
     taskMap.set(blockId, {
       blockId,
@@ -306,11 +306,17 @@ export async function cycleTaskStatusInView(
   taskTagRef?: BlockRef | null,
   sourceBlockId?: DbId | null,
 ): Promise<void> {
+  const targetIds = collectCandidateIds(
+    sourceBlockId ?? null,
+    getMirrorId(blockId),
+    blockId,
+  )
+  const taskBlock = resolveTaskBlockFromCandidates(targetIds)
   const taskRefFromState = resolveTaskRefFromState(blockId, schema)
   const effectiveTaskRef = taskRefFromState ?? taskTagRef
-  const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema)
+  const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema, taskBlock)
   const nextStatus = getNextStatus(values.status, schema)
-  const [, doingStatus, doneStatus] = schema.statusChoices
+  const [, doingStatus] = schema.statusChoices
   const dependsMode =
     values.dependsMode === "ALL" || values.dependsMode === "ANY"
       ? values.dependsMode
@@ -341,12 +347,7 @@ export async function cycleTaskStatusInView(
       value: dependsMode,
     },
   ]
-  if (nextStatus === doneStatus) {
-    payload.push({
-      name: schema.propertyNames.review,
-      value: null,
-    })
-  }
+  const metaProperty = toTaskMetaPropertyForSave(nextValues, taskBlock)
 
   if (effectiveTaskRef != null) {
     try {
@@ -355,6 +356,12 @@ export async function cycleTaskStatusInView(
         null,
         effectiveTaskRef,
         payload,
+      )
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setProperties",
+        null,
+        [targetIds[0] ?? blockId],
+        [metaProperty],
       )
       await createRecurringTaskInTodayJournal(
         values.status,
@@ -369,10 +376,6 @@ export async function cycleTaskStatusInView(
     }
   }
 
-  const targetIds = [sourceBlockId ?? null, getMirrorId(blockId), blockId]
-    .filter((id): id is DbId => id != null && !Number.isNaN(id))
-    .filter((id, index, all) => all.indexOf(id) === index)
-
   let lastError: unknown = null
   for (const targetId of targetIds) {
     try {
@@ -382,6 +385,12 @@ export async function cycleTaskStatusInView(
         targetId,
         schema.tagAlias,
         payload,
+      )
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setProperties",
+        null,
+        [targetId],
+        [metaProperty],
       )
       await createRecurringTaskInTodayJournal(
         values.status,
@@ -465,9 +474,15 @@ export async function markTaskReviewedInView(
   taskTagRef?: BlockRef | null,
   sourceBlockId?: DbId | null,
 ): Promise<void> {
+  const targetIds = collectCandidateIds(
+    sourceBlockId ?? null,
+    getMirrorId(blockId),
+    blockId,
+  )
+  const taskBlock = resolveTaskBlockFromCandidates(targetIds)
   const taskRefFromState = resolveTaskRefFromState(blockId, schema)
   const effectiveTaskRef = taskRefFromState ?? taskTagRef
-  const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema)
+  const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema, taskBlock)
   const reviewedAt = new Date()
   const nextReview = resolveNextReviewAfterMarkReviewed({
     enabled: values.reviewEnabled,
@@ -476,48 +491,21 @@ export async function markTaskReviewedInView(
     reviewEvery: values.reviewEvery,
     lastReviewed: values.lastReviewed,
   }, reviewedAt)
-  const reviewValue = stringifyTaskReviewState({
-    enabled: values.reviewEnabled,
-    type: values.reviewType,
+  const nextValues = {
+    ...values,
     nextReview,
-    reviewEvery: values.reviewEvery,
     lastReviewed: reviewedAt,
-  })
-  const payload = [
-    {
-      name: schema.propertyNames.review,
-      value: reviewValue,
-    },
-  ]
-
-  if (effectiveTaskRef != null) {
-    try {
-      await orca.commands.invokeEditorCommand(
-        "core.editor.setRefData",
-        null,
-        effectiveTaskRef,
-        payload,
-      )
-      invalidateNextActionEvaluationCache()
-      return
-    } catch (error) {
-      console.error(error)
-    }
   }
-
-  const targetIds = [sourceBlockId ?? null, getMirrorId(blockId), blockId]
-    .filter((id): id is DbId => id != null && !Number.isNaN(id))
-    .filter((id, index, all) => all.indexOf(id) === index)
+  const metaProperty = toTaskMetaPropertyForSave(nextValues, taskBlock)
 
   let lastError: unknown = null
   for (const targetId of targetIds) {
     try {
       await orca.commands.invokeEditorCommand(
-        "core.editor.insertTag",
+        "core.editor.setProperties",
         null,
-        targetId,
-        schema.tagAlias,
-        payload,
+        [targetId],
+        [metaProperty],
       )
       invalidateNextActionEvaluationCache()
       return
@@ -625,6 +613,17 @@ export async function moveTaskInView(
 
 function getLiveTaskBlock(block: Block): Block {
   return orca.state.blocks[getMirrorId(block.id)] ?? block
+}
+
+function resolveTaskBlockFromCandidates(candidateIds: DbId[]): Block | null {
+  for (const candidateId of candidateIds) {
+    const block = orca.state.blocks[candidateId]
+    if (block != null) {
+      return getLiveTaskBlock(block)
+    }
+  }
+
+  return null
 }
 
 function collectCandidateIds(...candidates: Array<DbId | null | undefined>): DbId[] {

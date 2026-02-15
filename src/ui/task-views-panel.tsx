@@ -3842,14 +3842,6 @@ function buildTaskFilterFieldFromProperty(
     options = options.length > 0
       ? options
       : schema.statusChoices.map((status) => toTaskFilterOption(status))
-  } else if (propertyName === schema.propertyNames.review) {
-    fieldType = "single-select"
-    operatorOptions = ["eq", "neq"]
-    options = [
-      toTaskFilterOption("none", t("No review")),
-      toTaskFilterOption("single", t("Single review")),
-      toTaskFilterOption("cycle", t("Cyclic review")),
-    ]
   } else if (propertyName === schema.propertyNames.labels) {
     fieldType = "multi-select"
     options = options.length > 0
@@ -3883,9 +3875,6 @@ function buildTaskFilterFieldFromProperty(
       if (propertyName === schema.propertyNames.status) {
         return item.status
       }
-      if (propertyName === schema.propertyNames.review) {
-        return resolveTaskFilterReviewMode(item)
-      }
       if (isReviewEveryProperty) {
         const rawValue = typeof item.reviewEvery === "string" && item.reviewEvery.trim() !== ""
           ? item.reviewEvery
@@ -3906,14 +3895,6 @@ function readTaskFilterPropertyValue(
 ): unknown {
   const property = refData?.find((item) => item.name === propertyName)
   return property?.value
-}
-
-function resolveTaskFilterReviewMode(item: FilterableTaskItem): string {
-  if (item.reviewEnabled !== true) {
-    return "none"
-  }
-
-  return item.reviewType === "cycle" ? "cycle" : "single"
 }
 
 function isTaskFilterReviewEveryPropertyName(propertyName: string): boolean {

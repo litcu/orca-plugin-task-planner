@@ -1,11 +1,14 @@
-import type { BlockProperty, DbId } from "../orca.d.ts"
+import type { Block, BlockProperty, DbId } from "../orca.d.ts"
 import type { TaskSchemaDefinition } from "./task-schema"
 import {
-  buildTaskReviewStateFromLegacyFields,
-  parseTaskReviewState,
-  stringifyTaskReviewState,
   type TaskReviewType,
 } from "./task-review"
+import {
+  TASK_META_PROPERTY_NAME,
+  TASK_META_SCHEMA_VERSION,
+  readTaskMetaFromBlock,
+  toTaskMetaProperty,
+} from "./task-meta"
 import { t } from "../libs/l10n"
 
 const PROP_TYPE = {
@@ -16,10 +19,6 @@ const PROP_TYPE = {
   DATE_TIME: 5,
   TEXT_CHOICES: 6,
 } as const
-
-const LEGACY_NEXT_REVIEW_NAMES = ["Next review", "\u4e0b\u6b21\u56de\u987e"]
-const LEGACY_REVIEW_EVERY_NAMES = ["Review every", "\u56de\u987e\u5468\u671f"]
-const LEGACY_LAST_REVIEWED_NAMES = ["Last reviewed", "\u4e0a\u6b21\u56de\u987e"]
 
 export interface TaskPropertyValues {
   status: string
@@ -122,31 +121,26 @@ export function buildTaskFieldLabels(_locale: string): TaskFieldLabels {
 export function getTaskPropertiesFromRef(
   refData: BlockProperty[] | undefined,
   schema: TaskSchemaDefinition,
+  taskBlock?: Block | null,
 ): TaskPropertyValues {
   const names = schema.propertyNames
   const labelsFromChoices = getStringArray(refData, names.labels)
-
-  const hasReviewProperty = hasProperty(refData, names.review)
-  const reviewFromJson = parseTaskReviewState(getString(refData, names.review))
-  const reviewFromLegacy = readLegacyReviewState(refData)
-  const review = hasReviewProperty ? reviewFromJson : (reviewFromLegacy.enabled
-    ? reviewFromLegacy
-    : reviewFromJson)
+  const meta = readTaskMetaFromBlock(taskBlock)
 
   return {
     status: getString(refData, names.status) ?? schema.statusChoices[0],
     startTime: getDate(refData, names.startTime),
     endTime: getDate(refData, names.endTime),
-    reviewEnabled: review.enabled,
-    reviewType: review.type,
-    nextReview: review.nextReview,
-    reviewEvery: review.reviewEvery,
-    lastReviewed: review.lastReviewed,
-    importance: getNumber(refData, names.importance),
-    urgency: getNumber(refData, names.urgency),
-    effort: getNumber(refData, names.effort),
+    reviewEnabled: meta.review.enabled,
+    reviewType: meta.review.type,
+    nextReview: toDate(meta.review.nextReviewAt),
+    reviewEvery: meta.review.reviewEvery,
+    lastReviewed: toDate(meta.review.lastReviewedAt),
+    importance: meta.priority.importance,
+    urgency: meta.priority.urgency,
+    effort: meta.priority.effort,
     star: getBoolean(refData, names.star),
-    repeatRule: getString(refData, names.repeatRule) ?? "",
+    repeatRule: meta.recurrence.repeatRule,
     labels: labelsFromChoices ?? parseTaskLabels(getString(refData, names.labels) ?? ""),
     remark: getString(refData, names.remark) ?? "",
     dependsOn: getDbIdArray(refData, names.dependsOn),
@@ -160,14 +154,6 @@ export function toRefDataForSave(
   schema: TaskSchemaDefinition,
 ): BlockProperty[] {
   const names = schema.propertyNames
-
-  const reviewValue = stringifyTaskReviewState({
-    enabled: values.reviewEnabled,
-    type: values.reviewType,
-    nextReview: values.nextReview,
-    reviewEvery: values.reviewEvery,
-    lastReviewed: values.lastReviewed,
-  })
 
   return [
     {
@@ -186,34 +172,9 @@ export function toRefDataForSave(
       value: values.endTime,
     },
     {
-      name: names.review,
-      type: PROP_TYPE.TEXT,
-      value: reviewValue,
-    },
-    {
-      name: names.importance,
-      type: PROP_TYPE.NUMBER,
-      value: values.importance,
-    },
-    {
-      name: names.urgency,
-      type: PROP_TYPE.NUMBER,
-      value: values.urgency,
-    },
-    {
-      name: names.effort,
-      type: PROP_TYPE.NUMBER,
-      value: values.effort,
-    },
-    {
       name: names.star,
       type: PROP_TYPE.BOOLEAN,
       value: values.star,
-    },
-    {
-      name: names.repeatRule,
-      type: PROP_TYPE.TEXT,
-      value: values.repeatRule.trim() === "" ? null : values.repeatRule.trim(),
     },
     {
       name: names.labels,
@@ -241,6 +202,42 @@ export function toRefDataForSave(
       value: values.dependencyDelay,
     },
   ]
+}
+
+export function toTaskMetaPropertyForSave(
+  values: TaskPropertyValues,
+  taskBlock?: Block | null,
+): BlockProperty {
+  const reviewType = values.reviewType === "cycle" ? "cycle" : "single"
+  const reviewEnabled = values.reviewEnabled === true
+  const existingProperty = taskBlock?.properties?.find((item) => {
+    return item.name === TASK_META_PROPERTY_NAME
+  })
+
+  return toTaskMetaProperty({
+    schema: TASK_META_SCHEMA_VERSION,
+    priority: {
+      importance: toFiniteNumber(values.importance),
+      urgency: toFiniteNumber(values.urgency),
+      effort: toFiniteNumber(values.effort),
+    },
+    review: {
+      enabled: reviewEnabled,
+      type: reviewEnabled ? reviewType : "single",
+      nextReviewAt:
+        reviewEnabled && reviewType === "single"
+          ? toTimestamp(values.nextReview)
+          : null,
+      reviewEvery:
+        reviewEnabled && reviewType === "cycle"
+          ? values.reviewEvery.trim()
+          : "",
+      lastReviewedAt: reviewEnabled ? toTimestamp(values.lastReviewed) : null,
+    },
+    recurrence: {
+      repeatRule: values.repeatRule.trim(),
+    },
+  }, existingProperty)
 }
 
 export function parseTaskLabels(rawValue: string): string[] {
@@ -290,47 +287,12 @@ export function validateNumericField(
   return { value: parsed, error: null }
 }
 
-function readLegacyReviewState(
-  refData: BlockProperty[] | undefined,
-) {
-  const nextReview = getDateByNames(refData, LEGACY_NEXT_REVIEW_NAMES)
-  const reviewEvery = getStringByNames(refData, LEGACY_REVIEW_EVERY_NAMES) ?? ""
-  const lastReviewed = getDateByNames(refData, LEGACY_LAST_REVIEWED_NAMES)
-
-  return buildTaskReviewStateFromLegacyFields(
-    nextReview,
-    reviewEvery,
-    lastReviewed,
-  )
-}
-
-function hasProperty(
-  refData: BlockProperty[] | undefined,
-  name: string,
-): boolean {
-  return refData?.some((item) => item.name === name) === true
-}
-
 function getString(
   refData: BlockProperty[] | undefined,
   name: string,
 ): string | null {
   const property = refData?.find((item) => item.name === name)
   return typeof property?.value === "string" ? property.value : null
-}
-
-function getStringByNames(
-  refData: BlockProperty[] | undefined,
-  names: string[],
-): string | null {
-  for (const name of names) {
-    const value = getString(refData, name)
-    if (value != null) {
-      return value
-    }
-  }
-
-  return null
 }
 
 function getStringArray(
@@ -370,20 +332,6 @@ function getDate(
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-function getDateByNames(
-  refData: BlockProperty[] | undefined,
-  names: string[],
-): Date | null {
-  for (const name of names) {
-    const value = getDate(refData, name)
-    if (value != null) {
-      return value
-    }
-  }
-
-  return null
-}
-
 function getBoolean(
   refData: BlockProperty[] | undefined,
   name: string,
@@ -404,6 +352,31 @@ function getDbIdArray(
   return property.value
     .map((item) => Number(item))
     .filter((item) => !Number.isNaN(item))
+}
+
+function toDate(value: number | null): Date | null {
+  if (value == null || Number.isNaN(value) || !Number.isFinite(value)) {
+    return null
+  }
+
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function toTimestamp(value: Date | null): number | null {
+  if (value == null || Number.isNaN(value.getTime())) {
+    return null
+  }
+
+  return value.getTime()
+}
+
+function toFiniteNumber(value: number | null): number | null {
+  if (value == null || Number.isNaN(value) || !Number.isFinite(value)) {
+    return null
+  }
+
+  return value
 }
 
 function normalizeTaskLabels(labels: string[]): string[] {

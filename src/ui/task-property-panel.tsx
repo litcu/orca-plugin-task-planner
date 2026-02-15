@@ -10,6 +10,7 @@ import {
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
   toRefDataForSave,
+  toTaskMetaPropertyForSave,
   validateNumericField,
 } from "../core/task-properties"
 import { invalidateNextActionEvaluationCache } from "../core/dependency-engine"
@@ -148,7 +149,7 @@ function TaskPropertyPopupView(props: {
     (ref) => ref.type === TAG_REF_TYPE && ref.alias === props.schema.tagAlias,
   )
   const initialValues = React.useMemo(() => {
-    return getTaskPropertiesFromRef(taskRef?.data, props.schema)
+    return getTaskPropertiesFromRef(taskRef?.data, props.schema, block)
   }, [block, taskRef, props.schema])
   const editorInitialValues = React.useMemo(() => {
     if (!isCreateMode) {
@@ -729,6 +730,13 @@ function TaskPropertyPopupView(props: {
             props.schema.tagAlias,
             payload,
           )
+          const insertedTaskBlock = orca.state.blocks[insertedTaskId] ?? null
+          await orca.commands.invokeEditorCommand(
+            "core.editor.setProperties",
+            null,
+            [insertedTaskId],
+            [toTaskMetaPropertyForSave(valuesToSave, insertedTaskBlock)],
+          )
         })
 
         if (createdTaskId == null) {
@@ -771,7 +779,12 @@ function TaskPropertyPopupView(props: {
         sourceBlockId,
         dependsOnValues,
       )
-      const previousValues = getTaskPropertiesFromRef(taskRef.data, props.schema)
+      const sourceTaskBlock = orca.state.blocks[sourceBlockId] ?? block ?? null
+      const previousValuesWithMeta = getTaskPropertiesFromRef(
+        taskRef.data,
+        props.schema,
+        sourceTaskBlock,
+      )
       const valuesToSave = normalizeTaskValuesForStatus({
         status: statusValue,
         startTime: startTimeValue,
@@ -808,8 +821,14 @@ function TaskPropertyPopupView(props: {
         props.schema.tagAlias,
         payload,
       )
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setProperties",
+        null,
+        [sourceBlockId],
+        [toTaskMetaPropertyForSave(valuesToSave, sourceTaskBlock)],
+      )
       await createRecurringTaskInTodayJournal(
-        previousValues.status,
+        previousValuesWithMeta.status,
         valuesToSave,
         sourceBlockId,
         props.schema,

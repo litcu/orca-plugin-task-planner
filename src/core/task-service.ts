@@ -1,10 +1,11 @@
 import type { Block, BlockProperty, CursorData, DbId } from "../orca.d.ts"
-import type { TaskSchemaDefinition } from "./task-schema"
+import { DEFAULT_TASK_SCORE, type TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
+  toTaskMetaPropertyForSave,
 } from "./task-properties"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
 
@@ -76,7 +77,7 @@ function registerCycleTaskStatusCommand(
         return null
       }
 
-      await cycleTaskTagStatus(blockId, cursor, taskTagRef, schema)
+      await cycleTaskTagStatus(blockId, cursor, block, taskTagRef, schema)
       return null
     },
     () => {},
@@ -133,19 +134,46 @@ async function initializeTaskTag(
       },
     ],
   )
+
+  await orca.commands.invokeEditorCommand(
+    "core.editor.setProperties",
+    null,
+    [blockId],
+    [toTaskMetaPropertyForSave({
+      status: todoStatus,
+      startTime: null,
+      endTime: null,
+      reviewEnabled: false,
+      reviewType: "single",
+      nextReview: null,
+      reviewEvery: "",
+      lastReviewed: null,
+      importance: DEFAULT_TASK_SCORE,
+      urgency: DEFAULT_TASK_SCORE,
+      effort: DEFAULT_TASK_SCORE,
+      star: false,
+      repeatRule: "",
+      labels: [],
+      remark: "",
+      dependsOn: [],
+      dependsMode: defaultDependsMode,
+      dependencyDelay: null,
+    })],
+  )
 }
 
 async function cycleTaskTagStatus(
   blockId: DbId,
   cursor: CursorData | null,
+  block: Block,
   taskTagRef: { data?: BlockProperty[] },
   schema: TaskSchemaDefinition,
 ) {
   const propertyNames = schema.propertyNames
-  const currentValues = getTaskPropertiesFromRef(taskTagRef.data, schema)
+  const currentValues = getTaskPropertiesFromRef(taskTagRef.data, schema, block)
   const nextStatus = getNextStatus(currentValues.status, schema)
   const dependsModeValue = getDependencyModeValue(taskTagRef.data, schema)
-  const [, doingStatus, doneStatus] = schema.statusChoices
+  const [, doingStatus] = schema.statusChoices
   const nextValues = normalizeTaskValuesForStatus({
     ...currentValues,
     status: nextStatus,
@@ -173,12 +201,6 @@ async function cycleTaskTagStatus(
       value: dependsModeValue,
     },
   ]
-  if (nextStatus === doneStatus) {
-    payload.push({
-      name: propertyNames.review,
-      value: null,
-    })
-  }
 
   await orca.commands.invokeEditorCommand(
     "core.editor.insertTag",
@@ -186,6 +208,13 @@ async function cycleTaskTagStatus(
     blockId,
     schema.tagAlias,
     payload,
+  )
+
+  await orca.commands.invokeEditorCommand(
+    "core.editor.setProperties",
+    null,
+    [blockId],
+    [toTaskMetaPropertyForSave(nextValues, block)],
   )
 
   await createRecurringTaskInTodayJournal(
