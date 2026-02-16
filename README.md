@@ -1,9 +1,9 @@
-# mylifeorganized
+# orca-task-planner
 
 [![English](https://img.shields.io/badge/README-English-1f6feb)](README.md)
 [![简体中文](https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-2ea44f)](README_zh.md)
 
-`mylifeorganized` is a task management plugin for Orca Note.
+`orca-task-planner` is a task management plugin for Orca Note.
 
 ## Plugin Overview
 
@@ -149,7 +149,7 @@ Use it to quickly assess task-system health and rebalance your planning rhythm.
 ### Install from source
 
 1. Place this project under Orca plugin directory, for example:  
-   `C:\Users\<your-name>\Documents\orca\plugins\mylifeorganized`
+   `C:\Users\<your-name>\Documents\orca\plugins\orca-task-planner`
 2. Build:
 
 ```bash
@@ -158,7 +158,7 @@ npm run build
 ```
 
 3. Start/restart Orca Note.
-4. Enable `mylifeorganized` in plugin settings.
+4. Enable `orca-task-planner` in plugin settings.
 
 Build output: `dist/index.js`.
 

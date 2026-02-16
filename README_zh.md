@@ -1,9 +1,9 @@
-# mylifeorganized
+# orca-task-planner
 
 [![English](https://img.shields.io/badge/README-English-1f6feb)](README.md)
 [![简体中文](https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-2ea44f)](README_zh.md)
 
-`mylifeorganized` 是一个 Orca Note 的任务管理插件。
+`orca-task-planner` 是一个 Orca Note 的任务管理插件。
 
 ## 插件简介
 
@@ -149,7 +149,7 @@ Score = 0.40*Importance + 0.25*Urgency + 0.20*DueFactor + 0.10*StartFactor + 0.0
 ### 从源码安装
 
 1. 将项目放到 Orca 插件目录，例如：  
-   `C:\Users\<你的用户名>\Documents\orca\plugins\mylifeorganized`
+   `C:\Users\<你的用户名>\Documents\orca\plugins\orca-task-planner`
 2. 构建：
 
 ```bash
@@ -158,7 +158,7 @@ npm run build
 ```
 
 3. 启动/重启 Orca Note。
-4. 在插件设置中启用 `mylifeorganized`。
+4. 在插件设置中启用 `orca-task-planner`。
 
 构建产物：`dist/index.js`。
 

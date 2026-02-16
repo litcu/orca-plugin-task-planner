@@ -17,15 +17,13 @@ export function setupNextActionsEntry(
   const panelType = `${pluginName}.taskViewsPanel`
   const legacyPanelTypes = [`${pluginName}.nextActionsPanel`, `${pluginName}.allTasksPanel`]
   const dynamicOpenTaskViewsCommandId = `${pluginName}.openTaskViewsPanel`
-  const fixedOpenTaskViewsCommandId = "mylifeorganized.openTaskViewsPanel"
+  const fixedOpenTaskViewsCommandId = "orca-task-planner.openTaskViewsPanel"
   const dynamicToggleTaskViewsCommandId = `${pluginName}.toggleTaskViewsPanel`
-  const fixedToggleTaskViewsCommandId = "mylifeorganized.toggleTaskViewsPanel"
+  const fixedToggleTaskViewsCommandId = "orca-task-planner.toggleTaskViewsPanel"
   const headbarButtonId = `${pluginName}.toggleTaskViewsPanel`
   const legacyOpenCommandIds = [
     `${pluginName}.openNextActionsPanel`,
     `${pluginName}.openAllTasksPanel`,
-    "mylifeorganized.openNextActionsPanel",
-    "mylifeorganized.openAllTasksPanel",
   ]
   const openCommandIds = [
     dynamicOpenTaskViewsCommandId,

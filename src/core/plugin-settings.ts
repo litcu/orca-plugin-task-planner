@@ -1,7 +1,7 @@
 import { t } from "../libs/l10n"
 import { TASK_TAG_ALIAS } from "./task-schema"
 
-export interface MyLifeOrganizedSettings {
+export interface TaskPlannerSettings {
   taskTagName: string
   dueSoonDays: number
   dueSoonIncludeOverdue: boolean
@@ -35,7 +35,7 @@ export async function ensurePluginSettingsSchema(pluginName: string): Promise<vo
   })
 }
 
-export function getPluginSettings(pluginName: string): MyLifeOrganizedSettings {
+export function getPluginSettings(pluginName: string): TaskPlannerSettings {
   const pluginSettings = orca.state.plugins[pluginName]?.settings
   const taskTagName = normalizeTaskTagName(
     pluginSettings?.[TASK_TAG_NAME_SETTING],

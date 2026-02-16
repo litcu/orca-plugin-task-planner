@@ -35,7 +35,7 @@ import {
 } from "../core/all-tasks-engine"
 import {
   getPluginSettings,
-  type MyLifeOrganizedSettings,
+  type TaskPlannerSettings,
 } from "../core/plugin-settings"
 import {
   cloneCustomTaskViewFilterGroup,
@@ -213,7 +213,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     null,
   )
   const [dashboardGeneratedAt, setDashboardGeneratedAt] = React.useState<Date>(() => new Date())
-  const [panelSettings, setPanelSettings] = React.useState<MyLifeOrganizedSettings>(() =>
+  const [panelSettings, setPanelSettings] = React.useState<TaskPlannerSettings>(() =>
     getPluginSettings(props.pluginName)
   )
   const activeCustomViewId = React.useMemo(() => {
