@@ -127,6 +127,7 @@ const PROP_TYPE_DATE_TIME = 5
 const PROP_TYPE_TEXT_CHOICES = 6
 const FILTER_TASK_NAME_FIELD_KEY = "__task_name__"
 const FILTER_GROUP_ROOT_ID = "__root__"
+const TASK_FILTER_SELECT_MENU_CLASS_NAME = "mlo-task-filter-select-menu"
 const DAY_MS = 24 * 60 * 60 * 1000
 const DASHBOARD_DUE_DAYS = 7
 
@@ -205,6 +206,28 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
     return customViews.find((view: CustomTaskView) => view.id === activeCustomViewId) ?? null
   }, [activeCustomViewId, customViews])
+
+  React.useEffect(() => {
+    const styleRole = getTaskFilterSelectMenuStyleRole(props.pluginName)
+    const existing = document.querySelector(`style[data-role="${styleRole}"]`)
+    if (existing != null) {
+      return
+    }
+
+    const styleEl = document.createElement("style")
+    styleEl.dataset.role = styleRole
+    styleEl.innerHTML = `
+      .${TASK_FILTER_SELECT_MENU_CLASS_NAME} {
+        max-height: min(320px, calc(100vh - 28px));
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+    `
+    document.head.appendChild(styleEl)
+    return () => {
+      styleEl.remove()
+    }
+  }, [props.pluginName])
 
   React.useEffect(() => {
     const container = viewSwitcherContainerRef.current
@@ -1564,61 +1587,51 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     return React.createElement(
       "div",
       {
+        ref: anchorRef,
         style: {
-          display: "flex",
-          alignItems: "center",
-          gap: "4px",
           minWidth: 0,
+          width: "100%",
         },
       },
-      React.createElement(
-        "div",
-        {
-          ref: anchorRef,
-          style: {
-            flex: "1 1 auto",
-            minWidth: 0,
+      React.createElement(Input, {
+        value: displayText,
+        placeholder: editorProps.placeholder,
+        readOnly: true,
+        onClick: () => setPickerVisible(true),
+        post: React.createElement(
+          Button,
+          {
+            variant: "plain",
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation()
+              if (hasValue) {
+                editorProps.onChange("")
+                return
+              }
+              setPickerVisible(true)
+            },
+            title: hasValue ? t("Clear") : t("Pick"),
+            style: {
+              borderRadius: "6px",
+              width: "24px",
+              minWidth: "24px",
+              height: "24px",
+              padding: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            },
           },
-        },
-        React.createElement(Input, {
-          value: displayText,
-          placeholder: editorProps.placeholder,
-          readOnly: true,
-          onClick: () => setPickerVisible(true),
-          width: "100%",
-        }),
-      ),
-      React.createElement(
-        Button,
-        {
-          variant: "outline",
-          onClick: () => {
-            if (hasValue) {
-              editorProps.onChange("")
-              return
-            }
-            setPickerVisible(true)
-          },
-          title: hasValue ? t("Clear") : t("Pick"),
-          style: {
-            borderRadius: "8px",
-            width: "30px",
-            minWidth: "30px",
-            height: "30px",
-            padding: 0,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-          },
-        },
-        React.createElement("i", {
-          className: hasValue ? "ti ti-x" : "ti ti-calendar-event",
-          style: {
-            fontSize: "13px",
-            lineHeight: 1,
-          },
-        }),
-      ),
+          React.createElement("i", {
+            className: hasValue ? "ti ti-x" : "ti ti-calendar-event",
+            style: {
+              fontSize: "13px",
+              lineHeight: 1,
+            },
+          }),
+        ),
+        width: "100%",
+      }),
       pickerVisible
         ? React.createElement(DatePicker, {
             mode: "datetime",
@@ -1686,6 +1699,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 bindings.updateRuleValue(rule.id, multiValueEnabled ? selected : (selected[0] ?? "")),
               width: "100%",
               menuContainer: bindings.menuContainerRef,
+              menuClassName: TASK_FILTER_SELECT_MENU_CLASS_NAME,
             })
           : React.createElement(Input, {
               value: multiValueEnabled ? ruleValueList.join(", ") : selectedSingleValue,
@@ -1714,6 +1728,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           onChange: (selected: string[]) => bindings.updateRuleValue(rule.id, selected[0] ?? ""),
           width: "100%",
           menuContainer: bindings.menuContainerRef,
+          menuClassName: TASK_FILTER_SELECT_MENU_CLASS_NAME,
         })
       } else if (field.type === "review-rule") {
         const parsed = parseTaskFilterReviewRuleEditorValue(selectedSingleValue)
@@ -1740,6 +1755,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             },
             width: "100%",
             menuContainer: bindings.menuContainerRef,
+            menuClassName: TASK_FILTER_SELECT_MENU_CLASS_NAME,
           }),
           React.createElement(Input, {
             value: parsed.intervalText,
@@ -1872,6 +1888,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           },
           width: "100%",
           menuContainer: bindings.menuContainerRef,
+          menuClassName: TASK_FILTER_SELECT_MENU_CLASS_NAME,
         }),
       ),
       showOperatorSelector
@@ -1894,6 +1911,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               },
               width: "100%",
               menuContainer: bindings.menuContainerRef,
+              menuClassName: TASK_FILTER_SELECT_MENU_CLASS_NAME,
             }),
           )
         : null,
@@ -3955,6 +3973,12 @@ function buildTaskFilterFieldFromProperty(
       toTaskFilterOption("true", t("Starred")),
       toTaskFilterOption("false", t("Not starred")),
     ]
+  } else if (propertyName === schema.propertyNames.dependsMode) {
+    fieldType = "single-select"
+    const rawModeValues = options.length > 0
+      ? options.map((item) => item.value)
+      : []
+    options = mapTaskFilterDependencyModeOptions(rawModeValues)
   }
 
   if (
@@ -4097,6 +4121,31 @@ function toTaskFilterOption(value: string, label?: string): TaskFilterFieldOptio
     value,
     label: label ?? value,
   }
+}
+
+function mapTaskFilterDependencyModeOptions(rawValues: string[]): TaskFilterFieldOption[] {
+  const normalizedValues = normalizeTaskFilterTextValues(rawValues)
+  if (normalizedValues.length === 0) {
+    return [
+      toTaskFilterOption("ALL", t("All dependency tasks completed")),
+      toTaskFilterOption("ANY", t("Any dependency task completed")),
+    ]
+  }
+
+  return normalizedValues.map((value) => {
+    const normalized = value.replace(/\s+/g, "").toUpperCase()
+    if (normalized === "ALL") {
+      return toTaskFilterOption(value, t("All dependency tasks completed"))
+    }
+    if (normalized === "ANY") {
+      return toTaskFilterOption(value, t("Any dependency task completed"))
+    }
+    return toTaskFilterOption(value)
+  })
+}
+
+function getTaskFilterSelectMenuStyleRole(pluginName: string): string {
+  return `${pluginName}-task-filter-select-menu`
 }
 
 function doesTaskFilterOperatorNeedValue(operator: TaskFilterOperator): boolean {
