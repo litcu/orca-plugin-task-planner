@@ -1,0 +1,66 @@
+name: Release Plugin Package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Validate tag version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [ "${TAG_VERSION}" != "${PACKAGE_VERSION}" ]; then
+            echo "Tag version (${TAG_VERSION}) does not match package.json version (${PACKAGE_VERSION})."
+            exit 1
+          fi
+
+      - name: Package release zip
+        run: |
+          PLUGIN_DIR="orca-task-planner"
+          ARCHIVE_NAME="${PLUGIN_DIR}-${GITHUB_REF_NAME}.zip"
+
+          mkdir -p "release/${PLUGIN_DIR}/dist"
+          cp "dist/index.js" "release/${PLUGIN_DIR}/dist/index.js"
+          cp "package.json" "release/${PLUGIN_DIR}/package.json"
+          cp "README.md" "release/${PLUGIN_DIR}/README.md"
+
+          if [ -f "README_zh.md" ]; then
+            cp "README_zh.md" "release/${PLUGIN_DIR}/README_zh.md"
+          fi
+
+          if [ -f "icon.png" ]; then
+            cp "icon.png" "release/${PLUGIN_DIR}/icon.png"
+          else
+            echo "Warning: icon.png not found at repository root. Packaging without icon."
+          fi
+
+          cd "release"
+          zip -r "../${ARCHIVE_NAME}" "${PLUGIN_DIR}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: orca-task-planner-${{ github.ref_name }}.zip
+          generate_release_notes: true

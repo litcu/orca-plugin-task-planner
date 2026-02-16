@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Type patch",
+    "release:dry-run": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -DryRun",
+    "release:patch": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Type patch",
+    "release:minor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Type minor",
+    "release:major": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Type major"
   },
   "peerDependencies": {
     "react": "^18.2.0",

@@ -161,6 +161,16 @@ npm run build
 
 Build output: `dist/index.js`.
 
+### Install from GitHub Release
+
+1. Download `orca-task-planner-vX.Y.Z.zip` from GitHub `Releases` assets.
+2. Extract it to your Orca plugins folder:  
+   `C:\Users\<your-name>\Documents\orca\plugins\`
+3. Ensure the final structure is:  
+   `...\plugins\orca-task-planner\dist\index.js`
+4. Start/restart Orca Note and enable `orca-task-planner`.
+
+
 ## Quick Start
 
 1. Open Command Palette and run `Open Task Views Panel`.
@@ -235,3 +245,37 @@ npm install
 npm run dev
 npm run build
 ```
+
+## Release
+
+One-click release commands:
+
+```bash
+npm run release
+```
+
+Version level options:
+
+```bash
+npm run release:dry-run
+npm run release:patch
+npm run release:minor
+npm run release:major
+```
+
+`release:dry-run` will only build and package locally (no version bump, no commit/tag, no push).  
+Local artifact path:
+
+```text
+release/orca-task-planner-vX.Y.Z.zip
+```
+
+`release` / `release:patch` / `release:minor` / `release:major` will:
+
+1. ensure git working tree is clean
+2. ensure current branch is `main`
+3. run `npm run build`
+4. run `npm version <patch|minor|major>` (creates commit + tag)
+5. run `git push origin main --follow-tags`
+
+After push, GitHub Actions will auto-create Release and upload `orca-task-planner-vX.Y.Z.zip`.
