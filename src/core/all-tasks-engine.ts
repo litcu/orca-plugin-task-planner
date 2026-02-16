@@ -5,8 +5,13 @@ import {
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
   toTaskMetaPropertyForSave,
+  type TaskPropertyValues,
 } from "./task-properties"
-import type { TaskSchemaDefinition } from "./task-schema"
+import { TASK_META_PROPERTY_NAME } from "./task-meta"
+import {
+  DEFAULT_TASK_SCORE,
+  type TaskSchemaDefinition,
+} from "./task-schema"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
 import {
   resolveEffectiveNextReview,
@@ -520,6 +525,96 @@ export async function markTaskReviewedInView(
   }
 }
 
+export async function addSubtaskInView(
+  parentBlockId: DbId,
+  schema: TaskSchemaDefinition,
+  options?: {
+    parentSourceBlockId?: DbId | null
+    initialText?: string
+  },
+): Promise<DbId> {
+  const parentCandidateIds = collectCandidateIds(
+    getMirrorId(parentBlockId),
+    parentBlockId,
+    options?.parentSourceBlockId ?? null,
+  )
+
+  if (parentCandidateIds.length === 0) {
+    throw new Error("No parent block id available for subtask")
+  }
+
+  const contentText = typeof options?.initialText === "string"
+    ? options.initialText
+    : ""
+  let lastError: unknown = null
+
+  for (const parentId of parentCandidateIds) {
+    try {
+      const createdTaskId = await createTaskBlockAsLastChild(
+        parentId,
+        schema,
+        contentText,
+      )
+      invalidateNextActionEvaluationCache()
+      return resolveUsableBlockId(createdTaskId)
+    } catch (error) {
+      lastError = error
+      console.error(error)
+    }
+  }
+
+  if (lastError != null) {
+    throw lastError
+  }
+
+  throw new Error("Failed to add subtask")
+}
+
+export async function removeTaskTagInView(
+  blockId: DbId,
+  schema: TaskSchemaDefinition,
+  sourceBlockId?: DbId | null,
+): Promise<void> {
+  const targetIds = collectCandidateIds(
+    sourceBlockId ?? null,
+    getMirrorId(blockId),
+    blockId,
+  )
+
+  let lastError: unknown = null
+  for (const targetId of targetIds) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.removeTag",
+        null,
+        targetId,
+        schema.tagAlias,
+      )
+
+      try {
+        await orca.commands.invokeEditorCommand(
+          "core.editor.deleteProperties",
+          null,
+          [targetId],
+          [TASK_META_PROPERTY_NAME],
+        )
+      } catch (error) {
+        console.error(error)
+      }
+
+      invalidateNextActionEvaluationCache()
+      return
+    } catch (error) {
+      lastError = error
+      console.error(error)
+    }
+  }
+
+  if (lastError != null) {
+    throw lastError
+  }
+}
+
 type MoveTaskPosition = "before" | "after" | "child"
 
 export async function moveTaskInView(
@@ -609,6 +704,101 @@ export async function moveTaskInView(
   if (lastError != null) {
     throw lastError
   }
+}
+
+async function createTaskBlockAsLastChild(
+  parentBlockId: DbId,
+  schema: TaskSchemaDefinition,
+  contentText: string,
+): Promise<DbId> {
+  let insertedTaskId: DbId | null = null
+  const defaultTaskValues = createDefaultTaskValues(schema)
+
+  await orca.commands.invokeGroup(async () => {
+    const createdId = (await orca.commands.invokeEditorCommand(
+      "core.editor.insertBlock",
+      null,
+      parentBlockId,
+      "lastChild",
+      [{ t: "t", v: contentText }],
+    )) as DbId
+    insertedTaskId = createdId
+
+    await orca.commands.invokeEditorCommand(
+      "core.editor.insertTag",
+      null,
+      createdId,
+      schema.tagAlias,
+      [
+        {
+          name: schema.propertyNames.status,
+          value: defaultTaskValues.status,
+        },
+        {
+          name: schema.propertyNames.startTime,
+          value: defaultTaskValues.startTime,
+        },
+        {
+          name: schema.propertyNames.endTime,
+          value: defaultTaskValues.endTime,
+        },
+        {
+          name: schema.propertyNames.dependsMode,
+          value: defaultTaskValues.dependsMode,
+        },
+      ],
+    )
+
+    await orca.commands.invokeEditorCommand(
+      "core.editor.setProperties",
+      null,
+      [createdId],
+      [toTaskMetaPropertyForSave(defaultTaskValues)],
+    )
+  })
+
+  if (insertedTaskId == null) {
+    throw new Error("Failed to create subtask block")
+  }
+
+  return insertedTaskId
+}
+
+function createDefaultTaskValues(schema: TaskSchemaDefinition): TaskPropertyValues {
+  const [todoStatus] = schema.statusChoices
+  const [defaultDependsMode] = schema.dependencyModeChoices
+
+  return {
+    status: todoStatus,
+    startTime: null,
+    endTime: null,
+    reviewEnabled: false,
+    reviewType: "single",
+    nextReview: null,
+    reviewEvery: "",
+    lastReviewed: null,
+    importance: DEFAULT_TASK_SCORE,
+    urgency: DEFAULT_TASK_SCORE,
+    effort: DEFAULT_TASK_SCORE,
+    star: false,
+    repeatRule: "",
+    labels: [],
+    remark: "",
+    dependsOn: [],
+    dependsMode: defaultDependsMode,
+    dependencyDelay: null,
+  }
+}
+
+function resolveUsableBlockId(blockId: DbId): DbId {
+  const candidateIds = collectCandidateIds(blockId, getMirrorId(blockId))
+  for (const candidateId of candidateIds) {
+    if (orca.state.blocks[candidateId] != null) {
+      return candidateId
+    }
+  }
+
+  return candidateIds[0] ?? blockId
 }
 
 function getLiveTaskBlock(block: Block): Block {

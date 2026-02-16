@@ -49,6 +49,8 @@ interface PopupState {
 
 interface OpenTaskPropertyPopupOptions {
   blockId?: DbId
+  parentBlockId?: DbId
+  parentSourceBlockId?: DbId
   schema: TaskSchemaDefinition
   triggerSource: PopupTriggerSource
   mode?: "edit" | "create"
@@ -126,6 +128,8 @@ function renderCurrent() {
 
 function TaskPropertyPopupView(props: {
   blockId?: DbId
+  parentBlockId?: DbId
+  parentSourceBlockId?: DbId
   schema: TaskSchemaDefinition
   mode?: "edit" | "create"
   onTaskCreated?: (blockId: DbId) => void
@@ -684,11 +688,11 @@ function TaskPropertyPopupView(props: {
         : ""
 
       if (isCreateMode) {
-        const journalBlock = (await orca.invokeBackend(
-          "get-journal-block",
-          new Date(),
-        )) as Block | null
-        if (journalBlock == null) {
+        const insertParentBlockId = await resolveCreateTaskInsertParentId({
+          parentBlockId: props.parentBlockId,
+          parentSourceBlockId: props.parentSourceBlockId,
+        })
+        if (insertParentBlockId == null) {
           throw new Error(t("Failed to add task"))
         }
 
@@ -697,17 +701,41 @@ function TaskPropertyPopupView(props: {
           const insertedTaskId = (await orca.commands.invokeEditorCommand(
             "core.editor.insertBlock",
             null,
-            journalBlock,
-            "lastChild",
+            null,
+            null,
             [{ t: "t", v: contentText }],
           )) as DbId
           createdTaskId = insertedTaskId
+
+          try {
+            await orca.commands.invokeEditorCommand(
+              "core.editor.moveBlocks",
+              null,
+              [insertedTaskId],
+              insertParentBlockId,
+              "lastChild",
+            )
+          } catch (moveError) {
+            try {
+              await orca.commands.invokeEditorCommand(
+                "core.editor.deleteBlocks",
+                null,
+                [insertedTaskId],
+              )
+            } catch (cleanupError) {
+              console.error(cleanupError)
+            }
+            throw moveError
+          }
 
           const dependencyRefIds = await ensureDependencyRefIds(
             insertedTaskId,
             dependsOnValues,
           )
-          const insertedTaskBlock = orca.state.blocks[insertedTaskId] ?? null
+          const insertedTaskBlock =
+            orca.state.blocks[getMirrorId(insertedTaskId)] ??
+            orca.state.blocks[insertedTaskId] ??
+            null
           const normalizedTaskLabels = mergeTaskLabelValues(
             baseTaskLabels,
             collectTaskLabelValuesFromBlockTags(
@@ -867,7 +895,11 @@ function TaskPropertyPopupView(props: {
         props.onClose()
       }
     } catch (error) {
-      const defaultMessage = isCreateMode ? t("Failed to add task") : t("Save failed")
+      const defaultMessage = isCreateMode
+        ? props.parentBlockId != null
+          ? t("Failed to add subtask")
+          : t("Failed to add task")
+        : t("Save failed")
       const message = error instanceof Error ? error.message : defaultMessage
       setErrorText(message)
       orca.notify("error", message)
@@ -1140,19 +1172,57 @@ function TaskPropertyPopupView(props: {
           ? "rgba(56, 161, 105, 0.12)"
           : "rgba(183, 121, 31, 0.12)",
   }
+  const overlayStyle = isCreateMode
+    ? {
+      background: "rgba(2, 6, 23, 0.32)",
+      backdropFilter: "none",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: "16px",
+      overflow: "auto",
+    }
+    : {
+      background: "rgba(2, 6, 23, 0.32)",
+      backdropFilter: "none",
+      display: "flex",
+      justifyContent: "flex-end",
+      alignItems: "stretch",
+      padding: 0,
+    }
+  const panelStyle = isCreateMode
+    ? {
+      width: "min(760px, calc(100vw - 20px))",
+      minWidth: 0,
+      maxWidth: "100%",
+      maxHeight: "min(88vh, 980px)",
+      overflow: "auto",
+      padding: "18px 16px",
+      boxSizing: "border-box",
+      background: "var(--orca-color-bg-1)",
+      border: "1px solid var(--orca-color-border-1)",
+      borderRadius: "12px",
+      boxShadow: "0 16px 36px rgba(10, 18, 30, 0.28)",
+    }
+    : {
+      width: "min(560px, calc(100vw - 20px))",
+      minWidth: 0,
+      height: "100vh",
+      maxHeight: "100vh",
+      overflow: "auto",
+      padding: "18px 16px",
+      boxSizing: "border-box",
+      background: "var(--orca-color-bg-1)",
+      borderLeft: "1px solid var(--orca-color-border-1)",
+      borderRadius: "12px 0 0 12px",
+      boxShadow: "-12px 0 32px rgba(10, 18, 30, 0.24)",
+    }
   return React.createElement(
     ModalOverlay,
     {
       visible: props.visible,
       blurred: false,
-      style: {
-        background: "rgba(2, 6, 23, 0.32)",
-        backdropFilter: "none",
-        display: "flex",
-        justifyContent: "flex-end",
-        alignItems: "stretch",
-        padding: 0,
-      },
+      style: overlayStyle,
       canClose: true,
       onClose: () => {
         if (editingDateField != null) {
@@ -1170,19 +1240,7 @@ function TaskPropertyPopupView(props: {
       React.createElement(
         "div",
         {
-          style: {
-            width: "min(560px, calc(100vw - 20px))",
-            minWidth: 0,
-            height: "100vh",
-            maxHeight: "100vh",
-            overflow: "auto",
-            padding: "18px 16px",
-            boxSizing: "border-box",
-            background: "var(--orca-color-bg-1)",
-            borderLeft: "1px solid var(--orca-color-border-1)",
-            borderRadius: "12px 0 0 12px",
-            boxShadow: "-12px 0 32px rgba(10, 18, 30, 0.24)",
-          },
+          style: panelStyle,
           onClick: (event: MouseEvent) => event.stopPropagation(),
         },
         React.createElement(
@@ -1191,8 +1249,9 @@ function TaskPropertyPopupView(props: {
             style: {
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
+              justifyContent: "flex-start",
               gap: "8px",
+              flexWrap: "wrap",
               marginBottom: "12px",
               paddingBottom: "10px",
               borderBottom: "1px solid var(--orca-color-border-1)",
@@ -1204,6 +1263,7 @@ function TaskPropertyPopupView(props: {
               style: {
                 display: "flex",
                 alignItems: "center",
+                flexWrap: "wrap",
                 gap: "8px",
               },
             },
@@ -1216,35 +1276,39 @@ function TaskPropertyPopupView(props: {
                   lineHeight: 1.2,
                 },
               },
-              isCreateMode ? t("Add task") : labels.title,
+              isCreateMode
+                ? props.parentBlockId != null
+                  ? t("Add subtask")
+                  : t("Add task")
+                : labels.title,
             ),
             !isCreateMode
               ? React.createElement("span", { style: activationBadgeStyle }, activationBadgeText)
               : null,
-          ),
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              onClick: () => setStarValue((prev: boolean) => !prev),
-              title: starValue ? t("Starred") : t("Not starred"),
-              style: {
-                width: "26px",
-                height: "26px",
-                padding: 0,
-                border: "1px solid var(--orca-color-border-1)",
-                borderRadius: "7px",
-                background: "var(--orca-color-bg-2)",
-                color: starValue
-                  ? "var(--orca-color-text-yellow, #d69e2e)"
-                  : "var(--orca-color-text-2)",
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                onClick: () => setStarValue((prev: boolean) => !prev),
+                title: starValue ? t("Starred") : t("Not starred"),
+                style: {
+                  width: "26px",
+                  height: "26px",
+                  padding: 0,
+                  border: "1px solid var(--orca-color-border-1)",
+                  borderRadius: "7px",
+                  background: "var(--orca-color-bg-2)",
+                  color: starValue
+                    ? "var(--orca-color-text-yellow, #d69e2e)"
+                    : "var(--orca-color-text-2)",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                },
               },
-            },
-            React.createElement(StarIcon, { filled: starValue }),
+              React.createElement(StarIcon, { filled: starValue }),
+            ),
           ),
         ),
         renderSection(
@@ -1753,6 +1817,70 @@ interface TaskEditorSnapshotInput {
   dependsMode: string
   dependencyDelayText: string
   hasDependencies: boolean
+}
+
+async function resolveCreateTaskInsertParentId(options: {
+  parentBlockId?: DbId
+  parentSourceBlockId?: DbId
+}): Promise<DbId | null> {
+  const parentCandidates = dedupeBlockIds([
+    options.parentSourceBlockId,
+    options.parentSourceBlockId == null ? null : getMirrorId(options.parentSourceBlockId),
+    options.parentBlockId,
+    options.parentBlockId == null ? null : getMirrorId(options.parentBlockId),
+  ])
+
+  if (parentCandidates.length > 0) {
+    return await resolveExistingBlockId(parentCandidates)
+  }
+
+  const journalBlock = (await orca.invokeBackend(
+    "get-journal-block",
+    new Date(),
+  )) as Block | null
+  if (journalBlock == null) {
+    return null
+  }
+
+  const journalCandidates = dedupeBlockIds([
+    journalBlock.id,
+    getMirrorId(journalBlock.id),
+  ])
+  return await resolveExistingBlockId(journalCandidates, journalBlock.id)
+}
+
+async function resolveExistingBlockId(
+  ids: DbId[],
+  fallback: DbId | null = null,
+): Promise<DbId | null> {
+  for (const id of ids) {
+    if (id == null || Number.isNaN(id)) {
+      continue
+    }
+
+    if (orca.state.blocks[id] != null) {
+      return id
+    }
+
+    try {
+      const backendBlock = (await orca.invokeBackend("get-block", id)) as Block | null
+      if (backendBlock != null) {
+        return id
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  return fallback
+}
+
+function dedupeBlockIds(
+  ids: Array<DbId | null | undefined>,
+): DbId[] {
+  return ids
+    .filter((id): id is DbId => id != null && !Number.isNaN(id))
+    .filter((id, index, all) => all.indexOf(id) === index)
 }
 
 function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {

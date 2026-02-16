@@ -41,14 +41,26 @@ interface TaskListRowProps {
   onNavigate: () => void
   onToggleStar: () => void | Promise<void>
   onMarkReviewed: () => void | Promise<void>
+  onAddSubtask: () => void | Promise<void>
+  onRemoveTask: () => void | Promise<void>
   onOpen: () => void
 }
 
 export function TaskListRow(props: TaskListRowProps) {
   const React = window.React
+  const Popup = orca.components.Popup
+  const Menu = orca.components.Menu
+  const MenuSeparator = orca.components.MenuSeparator
+  const MenuText = orca.components.MenuText
   const rowIndex = props.rowIndex ?? 0
   const [hovered, setHovered] = React.useState(false)
   const [focused, setFocused] = React.useState(false)
+  const [contextMenuVisible, setContextMenuVisible] = React.useState(false)
+  const [contextMenuRect, setContextMenuRect] = React.useState<DOMRect | null>(null)
+  const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
+  if (contextMenuContainerRef.current == null) {
+    contextMenuContainerRef.current = document.body
+  }
   const statusColor = resolveStatusColor(props.item.status, props.schema)
   const statusVisualState = resolveStatusVisualState(props.item.status, props.schema)
   const isCompleted = props.item.status === props.schema.statusChoices[2]
@@ -65,12 +77,14 @@ export function TaskListRow(props: TaskListRowProps) {
   const visibleLabels = taskLabels.slice(0, hasParentContext ? 2 : 3)
   const hiddenLabelCount = Math.max(0, taskLabels.length - visibleLabels.length)
   const hasMetaLine = visibleLabels.length > 0 || hiddenLabelCount > 0 || hasParentContext
+  const mutationDisabled =
+    props.loading || props.updating || props.starUpdating || props.reviewUpdating
 
   React.useEffect(() => {
     ensureTaskRowStyles()
   }, [])
 
-  return React.createElement(
+  const rowContent = React.createElement(
     "div",
     {
       key: props.item.blockId,
@@ -536,6 +550,128 @@ export function TaskListRow(props: TaskListRowProps) {
       React.createElement(StarIcon, { filled: props.item.star }),
     ),
   )
+
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(
+      "div",
+      {
+        style: {
+          width: "100%",
+          minWidth: 0,
+        },
+        onContextMenu: (event: MouseEvent) => {
+          event.preventDefault()
+          event.stopPropagation()
+          const nativeEvent =
+            (event as unknown as { nativeEvent?: MouseEvent }).nativeEvent ?? event
+          setContextMenuRect(
+            new DOMRect(
+              nativeEvent.clientX,
+              nativeEvent.clientY,
+              0,
+              0,
+            ),
+          )
+          setContextMenuVisible(true)
+        },
+      },
+      rowContent,
+    ),
+    contextMenuRect == null
+      ? null
+      : React.createElement(
+          Popup,
+          {
+            container: contextMenuContainerRef,
+            rect: contextMenuRect,
+            visible: contextMenuVisible,
+            onClose: () => setContextMenuVisible(false),
+            onClosed: () => setContextMenuRect(null),
+            defaultPlacement: "bottom",
+            alignment: "left",
+            offset: 6,
+            allowBeyondContainer: true,
+            noPointerLogic: true,
+            escapeToClose: true,
+          },
+          React.createElement(
+            Menu,
+            {
+              keyboardNav: true,
+              className: "mlo-task-row-context-menu-content",
+            },
+            React.createElement(MenuText, {
+              title: t("Add subtask"),
+              preIcon: "ti ti-list-tree",
+              disabled: mutationDisabled,
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation()
+                setContextMenuVisible(false)
+                if (mutationDisabled) {
+                  return
+                }
+                void props.onAddSubtask()
+              },
+            }),
+            React.createElement(MenuText, {
+              title: props.item.star ? t("Unstar task") : t("Star task"),
+              preIcon: props.item.star ? "ti ti-star-off" : "ti ti-star",
+              disabled: mutationDisabled,
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation()
+                setContextMenuVisible(false)
+                if (mutationDisabled) {
+                  return
+                }
+                void props.onToggleStar()
+              },
+            }),
+            React.createElement(MenuText, {
+              title: t("Open task properties"),
+              preIcon: "ti ti-edit",
+              disabled: props.loading,
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation()
+                setContextMenuVisible(false)
+                if (props.loading) {
+                  return
+                }
+                props.onOpen()
+              },
+            }),
+            React.createElement(MenuText, {
+              title: t("Jump to task location"),
+              preIcon: "ti ti-arrow-up-right",
+              disabled: props.loading,
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation()
+                setContextMenuVisible(false)
+                if (props.loading) {
+                  return
+                }
+                props.onNavigate()
+              },
+            }),
+            React.createElement(MenuSeparator, {}),
+            React.createElement(MenuText, {
+              title: t("Delete task"),
+              preIcon: "ti ti-tag-off",
+              dangerous: true,
+              disabled: mutationDisabled,
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation()
+                setContextMenuVisible(false)
+                if (mutationDisabled) {
+                  return
+                }
+                void props.onRemoveTask()
+              },
+            }),
+          ),
+        ),
+  )
 }
 
 function ensureTaskRowStyles() {
@@ -556,6 +692,13 @@ function ensureTaskRowStyles() {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+.mlo-task-row-context-menu-content {
+  min-width: 186px;
+  border-radius: 10px;
+  border: 1px solid var(--orca-color-border);
+  background: var(--orca-color-bg-1);
 }
 `
 

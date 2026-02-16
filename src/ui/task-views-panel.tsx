@@ -28,6 +28,7 @@ import {
   cycleTaskStatusInView,
   markTaskReviewedInView,
   moveTaskInView,
+  removeTaskTagInView,
   toggleTaskStarInView,
   type AllTaskItem,
 } from "../core/all-tasks-engine"
@@ -614,6 +615,23 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     [props.schema],
   )
 
+  const addSubtask = React.useCallback(
+    (item: TaskListRowItem) => {
+      openTaskPropertyPopup({
+        schema: props.schema,
+        triggerSource: "panel-view",
+        mode: "create",
+        parentBlockId: item.blockId,
+        parentSourceBlockId: item.sourceBlockId,
+        onTaskCreated: () => {
+          setErrorText("")
+          void loadByTab(tab, { silent: true })
+        },
+      })
+    },
+    [loadByTab, props.schema, tab],
+  )
+
   const toggleTaskStar = React.useCallback(
     async (item: TaskListRowItem) => {
       setStarringIds((prev: Set<DbId>) => {
@@ -637,6 +655,43 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         setErrorText(t("Failed to toggle task star"))
       } finally {
         setStarringIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(item.blockId)
+          return next
+        })
+      }
+    },
+    [loadByTab, props.schema, tab],
+  )
+
+  const removeTaskTag = React.useCallback(
+    async (item: TaskListRowItem) => {
+      const confirmed = window.confirm(
+        t("Remove task tag from this block?"),
+      )
+      if (!confirmed) {
+        return
+      }
+
+      setUpdatingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(item.blockId)
+        return next
+      })
+
+      try {
+        await removeTaskTagInView(
+          item.blockId,
+          props.schema,
+          item.sourceBlockId,
+        )
+        setErrorText("")
+        await loadByTab(tab, { silent: true })
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to remove task tag"))
+      } finally {
+        setUpdatingIds((prev: Set<DbId>) => {
           const next = new Set(prev)
           next.delete(item.blockId)
           return next
@@ -3040,6 +3095,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                           onNavigate: () => navigateToTask(row.node.item),
                           onToggleStar: () => toggleTaskStar(row.node.item),
                           onMarkReviewed: () => markTaskReviewed(row.node.item),
+                          onAddSubtask: () => addSubtask(row.node.item),
+                          onRemoveTask: () => removeTaskTag(row.node.item),
                           onOpen: () => openTaskProperty(row.node.item.blockId),
                         }),
                       )
@@ -3072,6 +3129,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       onNavigate: () => navigateToTask(item),
                       onToggleStar: () => toggleTaskStar(item),
                       onMarkReviewed: () => markTaskReviewed(item),
+                      onAddSubtask: () => addSubtask(item),
+                      onRemoveTask: () => removeTaskTag(item),
                       onOpen: () => openTaskProperty(item.blockId),
                     })
                   }),
