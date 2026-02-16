@@ -31,6 +31,7 @@ export interface AllTaskItem {
   children: DbId[]
   text: string
   status: string
+  completedAt: Date | null
   endTime: Date | null
   reviewEnabled: boolean
   reviewType: TaskReviewType
@@ -78,6 +79,7 @@ export async function collectAllTasks(
       children: [],
       text: resolveTaskText(liveBlock, schema.tagAlias),
       status: values.status,
+      completedAt: resolveTaskCompletionTime(values.status, schema, liveBlock.modified),
       endTime: values.endTime,
       reviewEnabled: values.reviewEnabled,
       reviewType: values.reviewType,
@@ -116,6 +118,30 @@ export async function collectAllTasks(
   return Array.from(taskMap.values()).sort((left, right) => {
     return left.blockId - right.blockId
   })
+}
+
+function resolveTaskCompletionTime(
+  status: string,
+  schema: TaskSchemaDefinition,
+  modifiedAt: unknown,
+): Date | null {
+  if (status !== schema.statusChoices[2]) {
+    return null
+  }
+
+  if (modifiedAt instanceof Date && !Number.isNaN(modifiedAt.getTime())) {
+    return modifiedAt
+  }
+
+  const normalized = typeof modifiedAt === "string" || typeof modifiedAt === "number"
+    ? modifiedAt
+    : null
+  if (normalized == null) {
+    return null
+  }
+
+  const parsed = new Date(normalized)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
 async function resolveNearestTaskAncestorId(

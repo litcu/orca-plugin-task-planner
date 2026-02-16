@@ -1,13 +1,6 @@
 import type { DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 
-export interface TaskDashboardStatusSlice {
-  key: string
-  label: string
-  count: number
-  color: string
-}
-
 export interface TaskDashboardDueBucket {
   key: string
   label: string
@@ -28,17 +21,16 @@ export interface TaskDashboardActionItem {
   endTime: Date | null
 }
 
+export type TaskDashboardQuickFilter = "overdue" | "due-today" | "blocked"
+
 export interface TaskDashboardData {
-  totalTasks: number
   actionableTasks: number
-  doneTasks: number
-  completionRate: number
-  starredTasks: number
-  dueSoonTasks: number
+  dueTodayTasks: number
+  mustDoTodayTasks: number
   overdueTasks: number
-  reviewDueTasks: number
-  averageActionScore: number | null
-  statusSlices: TaskDashboardStatusSlice[]
+  actionableDue48hTasks: number
+  doneTodayTasks: number
+  blockedTasks: number
   dueBuckets: TaskDashboardDueBucket[]
   blockerItems: TaskDashboardBlockerItem[]
   topActions: TaskDashboardActionItem[]
@@ -48,6 +40,7 @@ interface TaskDashboardProps {
   data: TaskDashboardData
   generatedAt: Date
   onOpenTask?: (blockId: DbId) => void
+  onApplyQuickFilter?: (filter: TaskDashboardQuickFilter) => void
 }
 
 interface DashboardMetricCard {
@@ -66,7 +59,6 @@ export function TaskDashboard(props: TaskDashboardProps) {
     ensureTaskDashboardStyles()
   }, [])
 
-  const completionValue = formatPercent(props.data.completionRate)
   const generatedAtText = props.generatedAt.toLocaleTimeString(isChinese ? "zh-CN" : undefined, {
     hour: "2-digit",
     minute: "2-digit",
@@ -74,38 +66,10 @@ export function TaskDashboard(props: TaskDashboardProps) {
 
   const metricCards: DashboardMetricCard[] = [
     {
-      key: "total",
-      label: t("Total tasks"),
-      value: String(props.data.totalTasks),
-      hint: t("All Tasks"),
-      tone: "cool",
-    },
-    {
       key: "actionable",
       label: t("Actionable now"),
       value: String(props.data.actionableTasks),
       hint: t("Active Tasks"),
-      tone: "warm",
-    },
-    {
-      key: "dueSoon",
-      label: t("Due Soon"),
-      value: String(props.data.dueSoonTasks),
-      hint: t("Tasks due within horizon"),
-      tone: "neutral",
-    },
-    {
-      key: "review",
-      label: t("Review due"),
-      value: String(props.data.reviewDueTasks),
-      hint: t("Review"),
-      tone: "cool",
-    },
-    {
-      key: "starred",
-      label: t("Starred Tasks"),
-      value: String(props.data.starredTasks),
-      hint: t("Starred"),
       tone: "warm",
     },
     {
@@ -115,17 +79,56 @@ export function TaskDashboard(props: TaskDashboardProps) {
       hint: t("Needs immediate attention"),
       tone: "danger",
     },
+    {
+      key: "dueToday",
+      label: t("Due today"),
+      value: String(props.data.dueTodayTasks),
+      hint: t("Due before end of day"),
+      tone: "neutral",
+    },
+    {
+      key: "actionableDue48h",
+      label: t("Actionable in 48h"),
+      value: String(props.data.actionableDue48hTasks),
+      hint: t("Actionable tasks due soon"),
+      tone: "cool",
+    },
+    {
+      key: "doneToday",
+      label: t("Completed today"),
+      value: String(props.data.doneTodayTasks),
+      hint: t("Approx by modified time"),
+      tone: "warm",
+    },
   ]
 
-  const maxStatusCount = Math.max(
-    1,
-    ...props.data.statusSlices.map((slice) => slice.count),
-  )
   const maxDueCount = Math.max(1, ...props.data.dueBuckets.map((bucket) => bucket.count))
   const maxBlockerCount = Math.max(1, ...props.data.blockerItems.map((item) => item.count))
-  const actionScoreText = props.data.averageActionScore == null
-    ? "--"
-    : props.data.averageActionScore.toFixed(1)
+  const quickFilterCards: Array<{
+    key: TaskDashboardQuickFilter
+    label: string
+    count: number
+    hint: string
+  }> = [
+    {
+      key: "overdue",
+      label: t("Only overdue"),
+      count: props.data.overdueTasks,
+      hint: t("Focus immediate issues"),
+    },
+    {
+      key: "due-today",
+      label: t("Only due today"),
+      count: props.data.dueTodayTasks,
+      hint: t("Focus today's deadlines"),
+    },
+    {
+      key: "blocked",
+      label: t("Only blocked"),
+      count: props.data.blockedTasks,
+      hint: t("Find blocked tasks quickly"),
+    },
+  ]
 
   return React.createElement(
     "div",
@@ -179,26 +182,21 @@ export function TaskDashboard(props: TaskDashboardProps) {
             {
               className: "mlo-dashboard-hero-label",
             },
-            t("Completion rate"),
+            t("Must handle today"),
           ),
           React.createElement(
             "strong",
             {
               className: "mlo-dashboard-hero-value",
             },
-            completionValue,
+            String(props.data.mustDoTodayTasks),
           ),
           React.createElement(
-            "div",
+            "span",
             {
-              className: "mlo-dashboard-progress-track",
+              className: "mlo-dashboard-hero-helper",
             },
-            React.createElement("div", {
-              className: "mlo-dashboard-progress-fill",
-              style: {
-                width: `${Math.max(0, Math.min(100, props.data.completionRate))}%`,
-              },
-            }),
+            t("Overdue + due today"),
           ),
         ),
         React.createElement(
@@ -211,21 +209,21 @@ export function TaskDashboard(props: TaskDashboardProps) {
             {
               className: "mlo-dashboard-hero-label",
             },
-            t("Avg action score"),
+            t("Blocked tasks"),
           ),
           React.createElement(
             "strong",
             {
               className: "mlo-dashboard-hero-value",
             },
-            actionScoreText,
+            String(props.data.blockedTasks),
           ),
           React.createElement(
             "span",
             {
               className: "mlo-dashboard-hero-helper",
             },
-            t("Based on active tasks"),
+            t("Need unblocking"),
           ),
         ),
       ),
@@ -283,58 +281,51 @@ export function TaskDashboard(props: TaskDashboardProps) {
           {
             className: "mlo-dashboard-card-title",
           },
-          t("Status distribution"),
+          t("Focus tasks"),
         ),
         React.createElement(
           "div",
           {
-            className: "mlo-dashboard-list",
+            className: "mlo-dashboard-shortcuts",
           },
-          ...props.data.statusSlices.map((slice) => {
-            const percentage = props.data.totalTasks === 0
-              ? 0
-              : (slice.count / props.data.totalTasks) * 100
-            return React.createElement(
-              "div",
+          ...quickFilterCards.map((shortcut) =>
+            React.createElement(
+              "button",
               {
-                key: slice.key,
-                className: "mlo-dashboard-list-row",
+                key: shortcut.key,
+                type: "button",
+                className: "mlo-dashboard-shortcut-btn",
+                disabled: shortcut.count === 0,
+                onClick: () => props.onApplyQuickFilter?.(shortcut.key),
               },
               React.createElement(
                 "div",
                 {
-                  className: "mlo-dashboard-list-header",
+                  className: "mlo-dashboard-shortcut-title",
                 },
                 React.createElement(
                   "span",
                   {
-                    className: "mlo-dashboard-list-label",
+                    className: "mlo-dashboard-shortcut-label",
                   },
-                  slice.label,
+                  shortcut.label,
                 ),
                 React.createElement(
                   "span",
                   {
-                    className: "mlo-dashboard-list-value",
+                    className: "mlo-dashboard-shortcut-value",
                   },
-                  `${slice.count} / ${formatPercent(percentage)}`,
+                  String(shortcut.count),
                 ),
               ),
               React.createElement(
-                "div",
+                "span",
                 {
-                  className: "mlo-dashboard-track",
+                  className: "mlo-dashboard-shortcut-hint",
                 },
-                React.createElement("div", {
-                  className: "mlo-dashboard-fill",
-                  style: {
-                    width: `${(slice.count / maxStatusCount) * 100}%`,
-                    background: slice.color,
-                  },
-                }),
+                shortcut.hint,
               ),
-            )
-          }),
+            )),
         ),
       ),
       React.createElement(
@@ -518,10 +509,6 @@ export function TaskDashboard(props: TaskDashboardProps) {
       ),
     ),
   )
-}
-
-function formatPercent(value: number): string {
-  return `${Math.round(value)}%`
 }
 
 function formatDueHint(endTime: Date | null, isChinese: boolean): string {
@@ -855,6 +842,60 @@ function ensureTaskDashboardStyles() {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.mlo-dashboard-shortcuts {
+  display: grid;
+  gap: 6px;
+}
+
+.mlo-dashboard-shortcut-btn {
+  border: 1px solid rgba(19, 35, 47, 0.14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mlo-dashboard-shortcut-btn:hover:not(:disabled) {
+  border-color: rgba(15, 118, 110, 0.42);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.mlo-dashboard-shortcut-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.mlo-dashboard-shortcut-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.mlo-dashboard-shortcut-label {
+  font-size: 12px;
+  color: var(--orca-color-text);
+}
+
+.mlo-dashboard-shortcut-value {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+  font-weight: 650;
+}
+
+.mlo-dashboard-shortcut-hint {
+  font-size: 10px;
+  color: var(--orca-color-text-2);
 }
 
 .mlo-dashboard-top-item {

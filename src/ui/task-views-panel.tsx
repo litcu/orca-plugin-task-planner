@@ -21,6 +21,7 @@ import {
   collectNextActions,
   selectNextActionsFromEvaluations,
   type NextActionBlockedReason,
+  type NextActionEvaluation,
   type NextActionItem,
 } from "../core/dependency-engine"
 import {
@@ -55,7 +56,11 @@ import {
 import { getMirrorId } from "../core/block-utils"
 import { parseReviewRule, type ReviewUnit } from "../core/task-review"
 import { t } from "../libs/l10n"
-import { TaskDashboard, type TaskDashboardData } from "./task-dashboard"
+import {
+  TaskDashboard,
+  type TaskDashboardData,
+  type TaskDashboardQuickFilter,
+} from "./task-dashboard"
 import { TaskListRow, type TaskListRowItem } from "./task-list-row"
 import { openTaskPropertyPopup } from "./task-property-panel"
 
@@ -112,6 +117,7 @@ interface FilterableTaskItem {
   sourceBlockId?: DbId
   status: string
   text: string
+  endTime?: Date | null
   reviewEnabled?: boolean
   reviewType?: string
   reviewEvery?: string
@@ -132,6 +138,15 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const DASHBOARD_DUE_DAYS = 7
 
 type BlockedReasonCountMap = Partial<Record<NextActionBlockedReason, number>>
+type DashboardListQuickFilter = TaskDashboardQuickFilter | null
+
+const DASHBOARD_ACTIONABLE_BLOCKED_REASON_SET = new Set<NextActionBlockedReason>([
+  "dependency-unmet",
+  "has-open-children",
+  "not-started",
+  "dependency-delayed",
+  "ancestor-dependency-unmet",
+])
 
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
@@ -190,6 +205,12 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
   const [dashboardBlockedCounts, setDashboardBlockedCounts] = React.useState<BlockedReasonCountMap>(
     {},
+  )
+  const [dashboardBlockedTaskIds, setDashboardBlockedTaskIds] = React.useState<Set<DbId>>(
+    () => new Set(),
+  )
+  const [dashboardQuickFilter, setDashboardQuickFilter] = React.useState<DashboardListQuickFilter>(
+    null,
   )
   const [dashboardGeneratedAt, setDashboardGeneratedAt] = React.useState<Date>(() => new Date())
   const [panelSettings, setPanelSettings] = React.useState<MyLifeOrganizedSettings>(() =>
@@ -281,6 +302,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           setAllTaskItems(allTasks)
           setNextActionItems(selectNextActionsFromEvaluations(evaluations))
           setDashboardBlockedCounts(countBlockedReasons(evaluations))
+          setDashboardBlockedTaskIds(collectDashboardBlockedTaskIds(evaluations))
           setDashboardGeneratedAt(new Date())
         } else if (targetTab === "next-actions") {
           const nextActions = await collectNextActions(props.schema)
@@ -407,6 +429,14 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     setFilterPanelVisible(false)
     setCustomViewsPanelVisible(false)
   }, [tab])
+
+  React.useEffect(() => {
+    if (tab === "all-tasks" || dashboardQuickFilter == null) {
+      return
+    }
+
+    setDashboardQuickFilter(null)
+  }, [dashboardQuickFilter, tab])
 
   React.useEffect(() => {
     // Listen for block changes and do lightweight refresh.
@@ -769,6 +799,15 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     orca.nav.openInLastPanel("block", { blockId: item.blockId })
   }, [])
 
+  const applyDashboardQuickFilter = React.useCallback((filter: TaskDashboardQuickFilter) => {
+    setDashboardQuickFilter(filter)
+    setPreferredTaskViewsTab("all-tasks")
+  }, [])
+
+  const clearDashboardQuickFilter = React.useCallback(() => {
+    setDashboardQuickFilter(null)
+  }, [])
+
   const toggleCollapsed = React.useCallback((blockId: DbId) => {
     setCollapsedIds((prev: Set<DbId>) => {
       const next = new Set(prev)
@@ -1044,6 +1083,24 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     })
   }, [filterFieldByKey, filterFields])
 
+  const doneStatus = props.schema.statusChoices[2]
+  const dashboardQuickFilterContext = React.useMemo(() => {
+    if (dashboardQuickFilter == null || tab !== "all-tasks") {
+      return null
+    }
+
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return {
+      filter: dashboardQuickFilter,
+      nowMs: now.getTime(),
+      startOfTodayMs: startOfToday.getTime(),
+      endOfTodayMs: startOfToday.getTime() + DAY_MS,
+      doneStatus,
+      blockedTaskIds: dashboardBlockedTaskIds,
+    }
+  }, [dashboardBlockedTaskIds, dashboardQuickFilter, doneStatus, tab])
+
   const matchesItem = React.useCallback(
     (item: FilterableTaskItem) => {
       if (normalizedQuickSearch !== "" && !item.text.toLowerCase().includes(normalizedQuickSearch)) {
@@ -1051,12 +1108,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       }
 
       if (!hasActiveFilters) {
-        return true
+        if (dashboardQuickFilterContext == null) {
+          return true
+        }
+      } else if (!evaluateTaskFilterGroup(filterRoot, item, filterFieldByKey)) {
+        return false
       }
 
-      return evaluateTaskFilterGroup(filterRoot, item, filterFieldByKey)
+      return matchesDashboardQuickFilter(item, dashboardQuickFilterContext)
     },
-    [filterFieldByKey, filterRoot, hasActiveFilters, normalizedQuickSearch],
+    [dashboardQuickFilterContext, filterFieldByKey, filterRoot, hasActiveFilters, normalizedQuickSearch],
   )
 
   const filteredNextActionItems = React.useMemo(() => {
@@ -1084,11 +1145,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const filteredReviewDueTaskItems = React.useMemo(() => {
     const nowMs = Date.now()
     return allTaskItems
-      .filter((item: AllTaskItem) => item.status !== props.schema.statusChoices[2])
+      .filter((item: AllTaskItem) => item.status !== doneStatus)
       .filter((item: AllTaskItem) => isTaskDueForReview(item, nowMs))
       .filter(matchesItem)
       .sort(compareReviewDueItems)
-  }, [allTaskItems, matchesItem, props.schema.statusChoices])
+  }, [allTaskItems, doneStatus, matchesItem])
   const filteredCustomViewTaskItems = React.useMemo(() => {
     if (!isCustomTaskViewsTab(tab) || activeCustomView == null) {
       return []
@@ -1228,7 +1289,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     }
   }, [markTaskItemsReviewed, selectedReviewItems])
 
-  const doneStatus = props.schema.statusChoices[2]
   const allTaskItemsForTree = React.useMemo(() => {
     if (showCompletedInAllTasks) {
       return allTaskItems
@@ -1469,16 +1529,14 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       allTaskItems,
       nextActionItems,
       blockedCounts: dashboardBlockedCounts,
+      blockedTaskIds: dashboardBlockedTaskIds,
       schema: props.schema,
-      dueSoonDays: panelSettings.dueSoonDays,
-      dueSoonIncludeOverdue: panelSettings.dueSoonIncludeOverdue,
     })
   }, [
     allTaskItems,
     dashboardBlockedCounts,
+    dashboardBlockedTaskIds,
     nextActionItems,
-    panelSettings.dueSoonDays,
-    panelSettings.dueSoonIncludeOverdue,
     props.schema,
   ])
   const taskViewSegmentedOptions = React.useMemo(() => {
@@ -2686,6 +2744,43 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             minWidth: "160px",
           },
         }),
+        isAllTasksTab && dashboardQuickFilter != null
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "2px 8px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(13, 148, 136, 0.36)",
+                  background: "rgba(13, 148, 136, 0.1)",
+                  color: "var(--orca-color-text-teal, #0f766e)",
+                  fontSize: "11px",
+                },
+              },
+              t("Quick filter: ${name}", {
+                name: resolveDashboardQuickFilterLabel(dashboardQuickFilter),
+              }),
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => clearDashboardQuickFilter(),
+                  style: {
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    color: "inherit",
+                    fontSize: "11px",
+                    padding: 0,
+                  },
+                },
+                t("Clear quick filter"),
+              ),
+            )
+          : null,
         isAllTasksTab
           ? React.createElement(
               "label",
@@ -3008,6 +3103,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 generatedAt: dashboardGeneratedAt,
                 onOpenTask: (blockId: DbId) => {
                   openTaskProperty(blockId)
+                },
+                onApplyQuickFilter: (filter: TaskDashboardQuickFilter) => {
+                  applyDashboardQuickFilter(filter)
                 },
               }),
             )
@@ -3380,9 +3478,17 @@ interface BuildTaskDashboardDataParams {
   allTaskItems: AllTaskItem[]
   nextActionItems: NextActionItem[]
   blockedCounts: BlockedReasonCountMap
+  blockedTaskIds: Set<DbId>
   schema: TaskSchemaDefinition
-  dueSoonDays: number
-  dueSoonIncludeOverdue: boolean
+}
+
+interface DashboardQuickFilterContext {
+  filter: TaskDashboardQuickFilter
+  nowMs: number
+  startOfTodayMs: number
+  endOfTodayMs: number
+  doneStatus: string
+  blockedTaskIds: Set<DbId>
 }
 
 function countBlockedReasons(
@@ -3399,6 +3505,68 @@ function countBlockedReasons(
   return counts
 }
 
+function collectDashboardBlockedTaskIds(
+  evaluations: NextActionEvaluation[],
+): Set<DbId> {
+  const blockedTaskIds = new Set<DbId>()
+
+  for (const evaluation of evaluations) {
+    if (evaluation.isNextAction) {
+      continue
+    }
+
+    const blocked = evaluation.blockedReason.some((reason) =>
+      DASHBOARD_ACTIONABLE_BLOCKED_REASON_SET.has(reason)
+    )
+    if (!blocked) {
+      continue
+    }
+
+    blockedTaskIds.add(evaluation.item.blockId)
+  }
+
+  return blockedTaskIds
+}
+
+function matchesDashboardQuickFilter(
+  item: FilterableTaskItem,
+  context: DashboardQuickFilterContext | null,
+): boolean {
+  if (context == null) {
+    return true
+  }
+
+  if (item.status === context.doneStatus) {
+    return false
+  }
+
+  const dueMs = item.endTime?.getTime()
+  if (context.filter === "overdue") {
+    return typeof dueMs === "number" && !Number.isNaN(dueMs) && dueMs < context.nowMs
+  }
+
+  if (context.filter === "due-today") {
+    return typeof dueMs === "number" &&
+      !Number.isNaN(dueMs) &&
+      dueMs >= context.startOfTodayMs &&
+      dueMs < context.endOfTodayMs
+  }
+
+  return item.blockId != null && context.blockedTaskIds.has(item.blockId)
+}
+
+function resolveDashboardQuickFilterLabel(
+  filter: TaskDashboardQuickFilter,
+): string {
+  if (filter === "overdue") {
+    return t("Only overdue")
+  }
+  if (filter === "due-today") {
+    return t("Only due today")
+  }
+  return t("Only blocked")
+}
+
 function buildTaskDashboardData(
   params: BuildTaskDashboardDataParams,
 ): TaskDashboardData {
@@ -3406,68 +3574,50 @@ function buildTaskDashboardData(
     allTaskItems,
     nextActionItems,
     blockedCounts,
+    blockedTaskIds,
     schema,
-    dueSoonDays,
-    dueSoonIncludeOverdue,
   } = params
   const now = new Date()
   const nowMs = now.getTime()
-  const [todoStatus, doingStatus, doneStatus] = schema.statusChoices
-
-  const doneTasks = allTaskItems.filter((item: AllTaskItem) => item.status === doneStatus).length
-  const statusCounts = {
-    todo: allTaskItems.filter((item: AllTaskItem) => item.status === todoStatus).length,
-    doing: allTaskItems.filter((item: AllTaskItem) => item.status === doingStatus).length,
-    done: doneTasks,
-  }
+  const doneStatus = schema.statusChoices[2]
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfTodayMs = startOfToday.getTime()
+  const endOfTodayMs = startOfTodayMs + DAY_MS
+  const endOf48HoursMs = nowMs + 2 * DAY_MS
   const openItems = allTaskItems.filter((item: AllTaskItem) => item.status !== doneStatus)
-  const dueSoonEndMs = nowMs + Math.max(1, dueSoonDays) * DAY_MS
-  const dueSoonTasks = openItems.filter((item: AllTaskItem) => {
-    return isDueSoon(item.endTime, nowMs, dueSoonEndMs, dueSoonIncludeOverdue)
-  }).length
   const overdueTasks = openItems.filter((item: AllTaskItem) => {
-    const endMs = item.endTime?.getTime()
-    return typeof endMs === "number" && !Number.isNaN(endMs) && endMs < nowMs
+    const dueMs = resolveTaskDueTimeMs(item)
+    return dueMs != null && dueMs < nowMs
   }).length
-  const reviewDueTasks = openItems.filter((item: AllTaskItem) => {
-    return isTaskDueForReview(item, nowMs)
+  const dueTodayTasks = openItems.filter((item: AllTaskItem) => {
+    const dueMs = resolveTaskDueTimeMs(item)
+    return dueMs != null && dueMs >= startOfTodayMs && dueMs < endOfTodayMs
   }).length
-  const starredTasks = allTaskItems.filter((item: AllTaskItem) => item.star).length
-  const completionRate = allTaskItems.length === 0 ? 0 : (doneTasks / allTaskItems.length) * 100
-  const averageActionScore = nextActionItems.length === 0
-    ? null
-    : nextActionItems.reduce((total, item) => total + item.score, 0) / nextActionItems.length
+  const mustDoTodayTasks = openItems.filter((item: AllTaskItem) => {
+    const dueMs = resolveTaskDueTimeMs(item)
+    return dueMs != null && dueMs < endOfTodayMs
+  }).length
+  const actionableDue48hTasks = nextActionItems.filter((item: NextActionItem) => {
+    const dueMs = resolveTaskDueTimeMs(item)
+    return dueMs != null && dueMs >= nowMs && dueMs < endOf48HoursMs
+  }).length
+  const doneTodayTasks = allTaskItems.filter((item: AllTaskItem) => {
+    if (item.status !== doneStatus || item.completedAt == null) {
+      return false
+    }
+
+    const completedMs = item.completedAt.getTime()
+    return !Number.isNaN(completedMs) && completedMs >= startOfTodayMs && completedMs < endOfTodayMs
+  }).length
 
   return {
-    totalTasks: allTaskItems.length,
     actionableTasks: nextActionItems.length,
-    doneTasks,
-    completionRate,
-    starredTasks,
-    dueSoonTasks,
+    dueTodayTasks,
+    mustDoTodayTasks,
     overdueTasks,
-    reviewDueTasks,
-    averageActionScore,
-    statusSlices: [
-      {
-        key: "todo",
-        label: todoStatus,
-        count: statusCounts.todo,
-        color: "linear-gradient(90deg, rgba(15, 23, 42, 0.42), rgba(15, 23, 42, 0.7))",
-      },
-      {
-        key: "doing",
-        label: doingStatus,
-        count: statusCounts.doing,
-        color: "linear-gradient(90deg, rgba(217, 119, 6, 0.55), rgba(217, 119, 6, 0.84))",
-      },
-      {
-        key: "done",
-        label: doneStatus,
-        count: statusCounts.done,
-        color: "linear-gradient(90deg, rgba(15, 118, 110, 0.6), rgba(15, 118, 110, 0.88))",
-      },
-    ],
+    actionableDue48hTasks,
+    doneTodayTasks,
+    blockedTasks: blockedTaskIds.size,
     dueBuckets: buildDashboardDueBuckets(openItems, now),
     blockerItems: buildDashboardBlockerItems(blockedCounts),
     topActions: nextActionItems.slice(0, 6).map((item: NextActionItem) => ({
@@ -5030,6 +5180,17 @@ function filterTreeWithContext(
   return nodes
     .map(filterNode)
     .filter((item): item is TaskTreeNode => item != null)
+}
+
+function resolveTaskDueTimeMs(
+  item: { endTime?: Date | null },
+): number | null {
+  const dueMs = item.endTime?.getTime()
+  if (typeof dueMs !== "number" || Number.isNaN(dueMs)) {
+    return null
+  }
+
+  return dueMs
 }
 
 function isDueSoon(
