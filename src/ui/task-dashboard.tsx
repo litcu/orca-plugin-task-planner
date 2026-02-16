@@ -559,6 +559,7 @@ function ensureTaskDashboardStyles() {
   flex-direction: column;
   gap: 12px;
   min-height: 100%;
+  min-width: 0;
   color: var(--orca-color-text, #17212b);
 }
 
@@ -799,7 +800,7 @@ function ensureTaskDashboardStyles() {
 
 .mlo-dashboard-due-grid {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 6px;
   align-items: end;
 }
@@ -917,9 +918,46 @@ function ensureTaskDashboardStyles() {
   }
 }
 
-@media (max-width: 760px) {
-  .mlo-dashboard-due-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+@media (max-width: 920px) {
+  .mlo-dashboard-hero-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 680px) {
+  .mlo-dashboard-title {
+    font-size: 22px;
+  }
+
+  .mlo-dashboard-top-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .mlo-dashboard-top-due {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-height: 780px) {
+  .mlo-dashboard-root {
+    gap: 10px;
+  }
+
+  .mlo-dashboard-hero {
+    padding: 12px;
+  }
+
+  .mlo-dashboard-metric-card,
+  .mlo-dashboard-card {
+    padding: 9px;
+  }
+
+  .mlo-dashboard-due-cell {
+    min-height: 98px;
+  }
+
+  .mlo-dashboard-due-bar-track {
+    min-height: 48px;
   }
 }
 
