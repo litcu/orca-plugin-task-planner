@@ -641,6 +641,37 @@ export async function removeTaskTagInView(
   }
 }
 
+export async function deleteTaskBlockInView(
+  blockId: DbId,
+  sourceBlockId?: DbId | null,
+): Promise<void> {
+  const targetIds = collectCandidateIds(
+    sourceBlockId ?? null,
+    getMirrorId(blockId),
+    blockId,
+  )
+
+  let lastError: unknown = null
+  for (const targetId of targetIds) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.deleteBlocks",
+        null,
+        [targetId],
+      )
+      invalidateNextActionEvaluationCache()
+      return
+    } catch (error) {
+      lastError = error
+      console.error(error)
+    }
+  }
+
+  if (lastError != null) {
+    throw lastError
+  }
+}
+
 type MoveTaskPosition = "before" | "after" | "child"
 
 export async function moveTaskInView(

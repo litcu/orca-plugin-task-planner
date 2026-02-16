@@ -42,12 +42,14 @@ interface TaskListRowProps {
   onToggleStar: () => void | Promise<void>
   onMarkReviewed: () => void | Promise<void>
   onAddSubtask: () => void | Promise<void>
-  onRemoveTask: () => void | Promise<void>
+  onDeleteTaskTag: () => void | Promise<void>
+  onDeleteTaskBlock: () => void | Promise<void>
   onOpen: () => void
 }
 
 export function TaskListRow(props: TaskListRowProps) {
   const React = window.React
+  const ConfirmBox = orca.components.ConfirmBox
   const Popup = orca.components.Popup
   const Menu = orca.components.Menu
   const MenuSeparator = orca.components.MenuSeparator
@@ -655,20 +657,62 @@ export function TaskListRow(props: TaskListRowProps) {
               },
             }),
             React.createElement(MenuSeparator, {}),
-            React.createElement(MenuText, {
-              title: t("Delete task"),
-              preIcon: "ti ti-tag-off",
-              dangerous: true,
-              disabled: mutationDisabled,
-              onClick: (event: MouseEvent) => {
-                event.stopPropagation()
-                setContextMenuVisible(false)
-                if (mutationDisabled) {
-                  return
-                }
-                void props.onRemoveTask()
+            React.createElement(
+              ConfirmBox,
+              {
+                text: t("Remove task tag from this block?"),
+                onConfirm: async (_event: unknown, close: () => void) => {
+                  close()
+                  setContextMenuVisible(false)
+                  if (mutationDisabled) {
+                    return
+                  }
+                  await props.onDeleteTaskTag()
+                },
               },
-            }),
+              (openConfirm: (event: MouseEvent) => void) =>
+                React.createElement(MenuText, {
+                  title: t("Delete task tag"),
+                  preIcon: "ti ti-tag-off",
+                  dangerous: true,
+                  disabled: mutationDisabled,
+                  onClick: (event: MouseEvent) => {
+                    event.stopPropagation()
+                    if (mutationDisabled) {
+                      return
+                    }
+                    openConfirm(event)
+                  },
+                }),
+            ),
+            React.createElement(
+              ConfirmBox,
+              {
+                text: t("Delete task block and its subtasks?"),
+                onConfirm: async (_event: unknown, close: () => void) => {
+                  close()
+                  setContextMenuVisible(false)
+                  if (mutationDisabled) {
+                    return
+                  }
+                  await props.onDeleteTaskBlock()
+                },
+              },
+              (openConfirm: (event: MouseEvent) => void) =>
+                React.createElement(MenuText, {
+                  title: t("Delete task block"),
+                  preIcon: "ti ti-trash",
+                  dangerous: true,
+                  disabled: mutationDisabled,
+                  onClick: (event: MouseEvent) => {
+                    event.stopPropagation()
+                    if (mutationDisabled) {
+                      return
+                    }
+                    openConfirm(event)
+                  },
+                }),
+            ),
           ),
         ),
   )

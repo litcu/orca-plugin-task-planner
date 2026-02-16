@@ -27,6 +27,7 @@ import {
 import {
   collectAllTasks,
   cycleTaskStatusInView,
+  deleteTaskBlockInView,
   markTaskReviewedInView,
   moveTaskInView,
   removeTaskTagInView,
@@ -151,6 +152,7 @@ const DASHBOARD_ACTIONABLE_BLOCKED_REASON_SET = new Set<NextActionBlockedReason>
 export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const React = window.React
   const Button = orca.components.Button
+  const ConfirmBox = orca.components.ConfirmBox
   const DatePicker = orca.components.DatePicker
   const Input = orca.components.Input
   const ModalOverlay = orca.components.ModalOverlay
@@ -572,15 +574,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
   const deleteCustomView = React.useCallback(
     async (view: CustomTaskView) => {
-      const confirmed = window.confirm(
-        t("Delete custom view: ${name}?", {
-          name: view.name,
-        }),
-      )
-      if (!confirmed) {
-        return
-      }
-
       const nextViews = customViews.filter((item: CustomTaskView) => item.id !== view.id)
       try {
         await saveCustomTaskViews(props.pluginName, nextViews)
@@ -696,13 +689,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
   const removeTaskTag = React.useCallback(
     async (item: TaskListRowItem) => {
-      const confirmed = window.confirm(
-        t("Remove task tag from this block?"),
-      )
-      if (!confirmed) {
-        return
-      }
-
       setUpdatingIds((prev: Set<DbId>) => {
         const next = new Set(prev)
         next.add(item.blockId)
@@ -729,6 +715,35 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       }
     },
     [loadByTab, props.schema, tab],
+  )
+
+  const deleteTaskBlock = React.useCallback(
+    async (item: TaskListRowItem) => {
+      setUpdatingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(item.blockId)
+        return next
+      })
+
+      try {
+        await deleteTaskBlockInView(
+          item.blockId,
+          item.sourceBlockId,
+        )
+        setErrorText("")
+        await loadByTab(tab, { silent: true })
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to delete task block"))
+      } finally {
+        setUpdatingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(item.blockId)
+          return next
+        })
+      }
+    },
+    [loadByTab, tab],
   )
 
   const markTaskItemsReviewed = React.useCallback(
@@ -2551,34 +2566,47 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                           }),
                         ),
                         React.createElement(
-                          Button,
+                          ConfirmBox,
                           {
-                            variant: "outline",
-                            onClick: () => {
-                              void deleteCustomView(view)
-                            },
-                            title: t("Delete custom view"),
-                            style: {
-                              borderRadius: "8px",
-                              width: "30px",
-                              minWidth: "30px",
-                              height: "30px",
-                              padding: 0,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              color: "var(--orca-color-text-red, #c53030)",
-                              borderColor: "rgba(197, 48, 48, 0.35)",
-                              background: "rgba(197, 48, 48, 0.08)",
+                            text: t("Delete custom view: ${name}?", {
+                              name: view.name,
+                            }),
+                            onConfirm: async (_event: unknown, close: () => void) => {
+                              close()
+                              await deleteCustomView(view)
                             },
                           },
-                          React.createElement("i", {
-                            className: "ti ti-trash",
-                            style: {
-                              fontSize: "13px",
-                              lineHeight: 1,
-                            },
-                          }),
+                          (openConfirm: (event: MouseEvent) => void) =>
+                            React.createElement(
+                              Button,
+                              {
+                                variant: "outline",
+                                onClick: (event: MouseEvent) => {
+                                  openConfirm(event)
+                                },
+                                title: t("Delete custom view"),
+                                style: {
+                                  borderRadius: "8px",
+                                  width: "30px",
+                                  minWidth: "30px",
+                                  height: "30px",
+                                  padding: 0,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  color: "var(--orca-color-text-red, #c53030)",
+                                  borderColor: "rgba(197, 48, 48, 0.35)",
+                                  background: "rgba(197, 48, 48, 0.08)",
+                                },
+                              },
+                              React.createElement("i", {
+                                className: "ti ti-trash",
+                                style: {
+                                  fontSize: "13px",
+                                  lineHeight: 1,
+                                },
+                              }),
+                            ),
                         ),
                       )
                     }),
@@ -3194,7 +3222,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                           onToggleStar: () => toggleTaskStar(row.node.item),
                           onMarkReviewed: () => markTaskReviewed(row.node.item),
                           onAddSubtask: () => addSubtask(row.node.item),
-                          onRemoveTask: () => removeTaskTag(row.node.item),
+                          onDeleteTaskTag: () => removeTaskTag(row.node.item),
+                          onDeleteTaskBlock: () => deleteTaskBlock(row.node.item),
                           onOpen: () => openTaskProperty(row.node.item.blockId),
                         }),
                       )
@@ -3228,7 +3257,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       onToggleStar: () => toggleTaskStar(item),
                       onMarkReviewed: () => markTaskReviewed(item),
                       onAddSubtask: () => addSubtask(item),
-                      onRemoveTask: () => removeTaskTag(item),
+                      onDeleteTaskTag: () => removeTaskTag(item),
+                      onDeleteTaskBlock: () => deleteTaskBlock(item),
                       onOpen: () => openTaskProperty(item.blockId),
                     })
                   }),
