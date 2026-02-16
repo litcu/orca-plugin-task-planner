@@ -7,11 +7,10 @@
 
 ## Plugin Overview
 
-This plugin is designed for notes with many tasks where execution order matters.
-
-It helps you:
+A task management plugin of Orca Note. It helps you: 
 
 - capture tasks quickly from normal blocks
+- handle both simple task lists and structured task systems in one place
 - plan tasks with time, dependencies, review, and recurrence
 - focus on executable work in **Active Tasks**
 - prioritize work using score-based ranking

@@ -1,5 +1,5 @@
 {
-  "name": "orca-plugin-orca-task-planner",
+  "name": "orca-plugin-task-planner",
   "version": "0.2.0",
   "private": true,
   "type": "module",
