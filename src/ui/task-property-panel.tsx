@@ -53,6 +53,7 @@ interface OpenTaskPropertyPopupOptions {
   triggerSource: PopupTriggerSource
   mode?: "edit" | "create"
   onTaskCreated?: (blockId: DbId) => void
+  onTaskSaved?: (blockId: DbId) => void
 }
 
 const popupState: PopupState = {
@@ -128,12 +129,14 @@ function TaskPropertyPopupView(props: {
   schema: TaskSchemaDefinition
   mode?: "edit" | "create"
   onTaskCreated?: (blockId: DbId) => void
+  onTaskSaved?: (blockId: DbId) => void
   visible: boolean
   onClose: () => void
   onDispose: () => void
 }) {
   const React = window.React
   const Button = orca.components.Button
+  const Checkbox = orca.components.Checkbox
   const Input = orca.components.Input
   const Select = orca.components.Select
   const DatePicker = orca.components.DatePicker
@@ -173,6 +176,9 @@ function TaskPropertyPopupView(props: {
       props.schema.propertyNames.dependsOn,
     )
   }, [block, initialValues.dependsOn, props.schema.propertyNames.dependsOn])
+  const blockTagLabels = React.useMemo(() => {
+    return collectTaskLabelValuesFromBlockTags(block, props.schema.tagAlias)
+  }, [block, props.schema.tagAlias])
   const taskName = React.useMemo(() => {
     if (isCreateMode) {
       return ""
@@ -228,10 +234,10 @@ function TaskPropertyPopupView(props: {
   const [starValue, setStarValue] = React.useState(editorInitialValues.star)
   const [repeatRuleText, setRepeatRuleText] = React.useState(editorInitialValues.repeatRule)
   const [taskLabelsValue, setTaskLabelsValue] = React.useState<string[]>(
-    editorInitialValues.labels,
+    mergeTaskLabelValues(editorInitialValues.labels, blockTagLabels),
   )
   const [taskLabelOptions, setTaskLabelOptions] = React.useState<string[]>(
-    editorInitialValues.labels,
+    mergeTaskLabelValues(editorInitialValues.labels, blockTagLabels),
   )
   const [remarkText, setRemarkText] = React.useState(editorInitialValues.remark)
   const [repeatModeValue, setRepeatModeValue] = React.useState<RepeatMode>(
@@ -287,7 +293,7 @@ function TaskPropertyPopupView(props: {
   )
   const [activationLoading, setActivationLoading] = React.useState(true)
 
-  const dateAnchorRef = React.useRef<HTMLButtonElement | null>(null)
+  const dateAnchorRef = React.useRef<HTMLElement | null>(null)
   // Mount dropdown and date picker overlays to body to avoid clipping by modal scroll.
   const popupMenuContainerRef = React.useRef<HTMLElement | null>(null)
   if (popupMenuContainerRef.current == null) {
@@ -425,8 +431,9 @@ function TaskPropertyPopupView(props: {
     setEffortValue(clampScore(editorInitialValues.effort))
     setStarValue(editorInitialValues.star)
     setRepeatRuleText(editorInitialValues.repeatRule)
-    setTaskLabelsValue(editorInitialValues.labels)
-    setTaskLabelOptions(editorInitialValues.labels)
+    const mergedLabels = mergeTaskLabelValues(editorInitialValues.labels, blockTagLabels)
+    setTaskLabelsValue(mergedLabels)
+    setTaskLabelOptions(mergedLabels)
     setRemarkText(editorInitialValues.remark)
     setRepeatModeValue(initialRepeatEditor.mode)
     setRepeatIntervalText(initialRepeatEditor.intervalText)
@@ -464,6 +471,7 @@ function TaskPropertyPopupView(props: {
     initialReviewEditor.mode,
     initialSnapshot,
     taskName,
+    blockTagLabels,
     editorInitialValues,
   ])
 
@@ -589,7 +597,7 @@ function TaskPropertyPopupView(props: {
       }
 
       setTaskLabelOptions((prev: string[]) =>
-        mergeTaskLabelValues(prev, choices, editorInitialValues.labels))
+        mergeTaskLabelValues(prev, choices, editorInitialValues.labels, blockTagLabels))
     }
 
     void loadTaskLabelOptions()
@@ -598,6 +606,7 @@ function TaskPropertyPopupView(props: {
     }
   }, [
     editorInitialValues.labels,
+    blockTagLabels,
     props.blockId,
     props.schema,
   ])
@@ -666,14 +675,13 @@ function TaskPropertyPopupView(props: {
     try {
       const normalizedTaskName = normalizeTaskName(taskNameText)
       const contentText = normalizedTaskName === "" ? untitledTaskName : normalizedTaskName
-      const normalizedTaskLabels = normalizeTaskLabelValues(taskLabelsValue)
+      const baseTaskLabels = normalizeTaskLabelValues(taskLabelsValue)
       const reviewEvery = reviewEnabledValue && reviewTypeValue === "cycle"
         ? buildReviewRuleFromEditorState({
             mode: reviewModeValue,
             intervalText: reviewIntervalText,
           })
         : ""
-      await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
 
       if (isCreateMode) {
         const journalBlock = (await orca.invokeBackend(
@@ -699,6 +707,15 @@ function TaskPropertyPopupView(props: {
             insertedTaskId,
             dependsOnValues,
           )
+          const insertedTaskBlock = orca.state.blocks[insertedTaskId] ?? null
+          const normalizedTaskLabels = mergeTaskLabelValues(
+            baseTaskLabels,
+            collectTaskLabelValuesFromBlockTags(
+              insertedTaskBlock,
+              props.schema.tagAlias,
+            ),
+          )
+          await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
           const valuesToSave = normalizeTaskValuesForStatus({
             status: statusValue,
             startTime: startTimeValue,
@@ -730,7 +747,6 @@ function TaskPropertyPopupView(props: {
             props.schema.tagAlias,
             payload,
           )
-          const insertedTaskBlock = orca.state.blocks[insertedTaskId] ?? null
           await orca.commands.invokeEditorCommand(
             "core.editor.setProperties",
             null,
@@ -746,6 +762,7 @@ function TaskPropertyPopupView(props: {
         invalidateNextActionEvaluationCache()
         setLastSavedSnapshot(snapshot)
         setLastFailedSnapshot(null)
+        props.onTaskSaved?.(getMirrorId(createdTaskId))
         props.onTaskCreated?.(createdTaskId)
         if (closeOnSuccess) {
           props.onClose()
@@ -780,6 +797,14 @@ function TaskPropertyPopupView(props: {
         dependsOnValues,
       )
       const sourceTaskBlock = orca.state.blocks[sourceBlockId] ?? block ?? null
+      const normalizedTaskLabels = mergeTaskLabelValues(
+        baseTaskLabels,
+        collectTaskLabelValuesFromBlockTags(sourceTaskBlock, props.schema.tagAlias),
+      )
+      setTaskLabelsValue(normalizedTaskLabels)
+      setTaskLabelOptions((prev: string[]) =>
+        mergeTaskLabelValues(prev, normalizedTaskLabels))
+      await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
       const previousValuesWithMeta = getTaskPropertiesFromRef(
         taskRef.data,
         props.schema,
@@ -836,6 +861,7 @@ function TaskPropertyPopupView(props: {
       invalidateNextActionEvaluationCache()
       setLastSavedSnapshot(snapshot)
       setLastFailedSnapshot(null)
+      props.onTaskSaved?.(getMirrorId(sourceBlockId))
       void refreshActivationInfo()
       if (closeOnSuccess) {
         props.onClose()
@@ -928,11 +954,9 @@ function TaskPropertyPopupView(props: {
     border: "1px solid var(--orca-color-border-1)",
     background: "var(--orca-color-bg-2)",
   }
-  const inlineTimeFieldLayoutStyle = {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto auto",
-    gap: "6px",
-    alignItems: "center",
+  const timeFieldAnchorStyle = {
+    width: "100%",
+    minWidth: 0,
   }
   const inlineDualControlLayoutStyle = {
     display: "grid",
@@ -959,44 +983,68 @@ function TaskPropertyPopupView(props: {
     value: Date | null,
     setValue: (next: Date | null) => void,
   ) => {
+    const hasValue = value != null
+    const displayValue = hasValue ? value.toLocaleString() : ""
     return renderFormRow(
       label,
       React.createElement(
         "div",
         {
-          style: inlineTimeFieldLayoutStyle,
+          style: timeFieldAnchorStyle,
+          onClick: (event: MouseEvent) => {
+            dateAnchorRef.current = event.currentTarget as HTMLElement
+            setEditingDateField(key)
+          },
         },
-        React.createElement(
-          "div",
-          {
-            style: {
-              ...readOnlyFieldStyle,
-              fontVariantNumeric: "tabular-nums",
+        React.createElement(Input, {
+          value: displayValue,
+          placeholder: t("Not set"),
+          readOnly: true,
+          onClick: (event: Event) => {
+            dateAnchorRef.current = event.currentTarget as HTMLElement
+            setEditingDateField(key)
+          },
+          post: React.createElement(
+            Button,
+            {
+              variant: "plain",
+              title: hasValue ? t("Clear") : t("Pick"),
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation()
+                if (hasValue) {
+                  setValue(null)
+                  return
+                }
+
+                const anchor = (event.currentTarget as HTMLElement)
+                  .closest("[data-role='mlo-time-field-anchor']")
+                dateAnchorRef.current = anchor instanceof HTMLElement
+                  ? anchor
+                  : event.currentTarget as HTMLElement
+                setEditingDateField(key)
+              },
+              style: {
+                borderRadius: "6px",
+                width: "24px",
+                minWidth: "24px",
+                height: "24px",
+                padding: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+              },
             },
-          },
-          value == null ? (t("Not set")) : value.toLocaleString(),
-        ),
-        React.createElement(
-          Button,
-          {
-            variant: "outline",
-            style: { minWidth: "62px", height: "30px" },
-            onClick: (event: MouseEvent) => {
-              dateAnchorRef.current = event.currentTarget as HTMLButtonElement
-              setEditingDateField(key)
-            },
-          },
-          t("Pick"),
-        ),
-        React.createElement(
-          Button,
-          {
-            variant: "plain",
-            style: { minWidth: "62px", height: "30px" },
-            onClick: () => setValue(null),
-          },
-          t("Clear"),
-        ),
+            React.createElement("i", {
+              className: hasValue ? "ti ti-x" : "ti ti-calendar-event",
+              style: {
+                fontSize: "13px",
+                lineHeight: 1,
+              },
+            }),
+          ),
+          "data-role": "mlo-time-field-anchor",
+          width: "100%",
+        }),
       ),
     )
   }
@@ -1098,8 +1146,12 @@ function TaskPropertyPopupView(props: {
       visible: props.visible,
       blurred: false,
       style: {
-        background: "rgba(0, 0, 0, 0.38)",
+        background: "rgba(2, 6, 23, 0.32)",
         backdropFilter: "none",
+        display: "flex",
+        justifyContent: "flex-end",
+        alignItems: "stretch",
+        padding: 0,
       },
       canClose: true,
       onClose: () => {
@@ -1119,17 +1171,17 @@ function TaskPropertyPopupView(props: {
         "div",
         {
           style: {
-            width: "calc(100vw - 40px)",
-            maxWidth: "560px",
+            width: "min(560px, calc(100vw - 20px))",
             minWidth: 0,
-            maxHeight: "calc(100vh - 48px)",
+            height: "100vh",
+            maxHeight: "100vh",
             overflow: "auto",
-            padding: "18px",
+            padding: "18px 16px",
             boxSizing: "border-box",
             background: "var(--orca-color-bg-1)",
-            border: "1px solid var(--orca-color-border-1)",
-            borderRadius: "14px",
-            boxShadow: "0 18px 42px rgba(10, 18, 30, 0.26)",
+            borderLeft: "1px solid var(--orca-color-border-1)",
+            borderRadius: "12px 0 0 12px",
+            boxShadow: "-12px 0 32px rgba(10, 18, 30, 0.24)",
           },
           onClick: (event: MouseEvent) => event.stopPropagation(),
         },
@@ -1409,11 +1461,9 @@ function TaskPropertyPopupView(props: {
                   color: "var(--orca-color-text-1, var(--orca-color-text))",
                 },
               },
-              React.createElement("input", {
-                type: "checkbox",
+              React.createElement(Checkbox, {
                 checked: reviewEnabledValue,
-                onChange: (event: Event) => {
-                  const checked = (event.target as HTMLInputElement).checked
+                onChange: ({ checked }: { checked: boolean }) => {
                   setReviewEnabledValue(checked)
                 },
               }),
@@ -1902,6 +1952,24 @@ function normalizeTaskLabelValues(labels: string[]): string[] {
   }
 
   return normalizedLabels
+}
+
+function collectTaskLabelValuesFromBlockTags(
+  block: Block | null | undefined,
+  taskTagAlias: string,
+): string[] {
+  if (block == null) {
+    return []
+  }
+
+  const taskTagAliasLower = taskTagAlias.toLowerCase()
+  const labels = block.refs
+    .filter((ref) => ref.type === TAG_REF_TYPE)
+    .map((ref) => (typeof ref.alias === "string" ? ref.alias : ""))
+    .filter((alias) => alias.trim() !== "")
+    .filter((alias) => alias.toLowerCase() !== taskTagAliasLower)
+
+  return normalizeTaskLabelValues(labels)
 }
 
 function buildTaskLabelSelectOptions(

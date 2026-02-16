@@ -55,7 +55,6 @@ import { getMirrorId } from "../core/block-utils"
 import { parseReviewRule, type ReviewUnit } from "../core/task-review"
 import { t } from "../libs/l10n"
 import { TaskDashboard, type TaskDashboardData } from "./task-dashboard"
-import { TaskPropertyPanelCard } from "./task-property-card"
 import { TaskListRow, type TaskListRowItem } from "./task-list-row"
 import { openTaskPropertyPopup } from "./task-property-panel"
 
@@ -192,7 +191,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     {},
   )
   const [dashboardGeneratedAt, setDashboardGeneratedAt] = React.useState<Date>(() => new Date())
-  const [selectedTaskId, setSelectedTaskId] = React.useState<DbId | null>(null)
   const [panelSettings, setPanelSettings] = React.useState<MyLifeOrganizedSettings>(() =>
     getPluginSettings(props.pluginName)
   )
@@ -414,10 +412,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     const { subscribe } = window.Valtio
     let refreshTimer: number | null = null
     const unsubscribe = subscribe(orca.state.blocks, () => {
-      if (selectedTaskId != null) {
-        return
-      }
-
       if (refreshTimer != null) {
         window.clearTimeout(refreshTimer)
       }
@@ -433,7 +427,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       }
       unsubscribe()
     }
-  }, [loadByTab, selectedTaskId, tab])
+  }, [loadByTab, tab])
 
   const openCustomViewTab = React.useCallback((viewId: string) => {
     setPreferredTaskViewsTab(toCustomTaskViewsTab(viewId))
@@ -611,9 +605,13 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
   const openTaskProperty = React.useCallback(
     (blockId: DbId) => {
-      setSelectedTaskId(blockId)
+      openTaskPropertyPopup({
+        blockId,
+        schema: props.schema,
+        triggerSource: "panel-view",
+      })
     },
-    [],
+    [props.schema],
   )
 
   const toggleTaskStar = React.useCallback(
@@ -699,11 +697,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     },
     [markTaskItemsReviewed],
   )
-
-  const closeTaskProperty = React.useCallback(() => {
-    setSelectedTaskId(null)
-    void loadByTab(tab, { silent: true })
-  }, [loadByTab, tab])
 
   const addTask = React.useCallback(() => {
     openTaskPropertyPopup({
@@ -2787,10 +2780,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           flex: 1,
           minHeight: 0,
           display: "grid",
-          gridTemplateColumns:
-            selectedTaskId == null
-              ? "minmax(0, 1fr)"
-              : "minmax(0, 1fr) minmax(360px, 460px)",
+          gridTemplateColumns: "minmax(0, 1fr)",
           gap: "10px",
           alignItems: "stretch",
         },
@@ -3088,13 +3078,6 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             )
           : null,
       ),
-      selectedTaskId != null
-        ? React.createElement(TaskPropertyPanelCard, {
-            blockId: selectedTaskId,
-            schema: props.schema,
-            onClose: closeTaskProperty,
-          })
-        : null,
     ),
     React.createElement(
       ModalOverlay,
