@@ -54,6 +54,9 @@ interface DashboardMetricCard {
 export function TaskDashboard(props: TaskDashboardProps) {
   const React = window.React
   const isChinese = orca.state.locale === "zh-CN"
+  const themeClassName = orca.state.themeMode === "dark"
+    ? "mlo-dashboard-theme-dark"
+    : "mlo-dashboard-theme-light"
 
   React.useEffect(() => {
     ensureTaskDashboardStyles()
@@ -133,7 +136,7 @@ export function TaskDashboard(props: TaskDashboardProps) {
   return React.createElement(
     "div",
     {
-      className: "mlo-dashboard-root",
+      className: `mlo-dashboard-root ${themeClassName}`,
     },
     React.createElement(
       "section",
@@ -537,17 +540,55 @@ function ensureTaskDashboardStyles() {
   styleEl.id = styleId
   styleEl.textContent = `
 .mlo-dashboard-root {
-  --mlo-dash-ink: #13232f;
-  --mlo-dash-line: rgba(19, 35, 47, 0.12);
-  --mlo-dash-warm: #d97706;
-  --mlo-dash-cool: #0f766e;
-  --mlo-dash-alert: #c2410c;
+  --mlo-dash-ink: var(--orca-color-text-1, var(--orca-color-text, #17212b));
+  --mlo-dash-muted: var(--orca-color-text-2, #526173);
+  --mlo-dash-line: var(--orca-color-border-1, var(--orca-color-border, rgba(19, 35, 47, 0.18)));
+  --mlo-dash-hero-bg:
+    linear-gradient(132deg, rgba(217, 119, 6, 0.16), rgba(15, 118, 110, 0.13) 52%, rgba(15, 23, 42, 0.06)),
+    repeating-linear-gradient(36deg, rgba(19, 35, 47, 0.04), rgba(19, 35, 47, 0.04) 8px, rgba(19, 35, 47, 0) 8px, rgba(19, 35, 47, 0) 16px),
+    linear-gradient(158deg, var(--orca-color-bg-1), var(--orca-color-bg-2));
+  --mlo-dash-card-bg: linear-gradient(158deg, rgba(255, 255, 255, 0.74), var(--orca-color-bg-1));
+  --mlo-dash-soft-bg: linear-gradient(160deg, rgba(255, 255, 255, 0.7), var(--orca-color-bg-1));
+  --mlo-dash-stat-bg: rgba(255, 255, 255, 0.74);
+  --mlo-dash-track-bg: rgba(19, 35, 47, 0.12);
+  --mlo-dash-button-bg: rgba(255, 255, 255, 0.72);
+  --mlo-dash-button-hover-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+  --mlo-dash-chip-bg: rgba(15, 118, 110, 0.12);
+  --mlo-dash-chip-text: var(--orca-color-text-teal, #0f766e);
+  --mlo-dash-empty-bg: rgba(19, 35, 47, 0.03);
+  --mlo-dash-shadow: 0 16px 26px rgba(15, 23, 42, 0.12);
+  --mlo-dash-glow: radial-gradient(circle, rgba(217, 119, 6, 0.2), transparent 70%);
+  --mlo-dash-kicker-bg: rgba(15, 118, 110, 0.16);
+  --mlo-dash-kicker-text: var(--orca-color-text-teal, #0f766e);
+  --mlo-dash-card-hover-border: rgba(15, 118, 110, 0.42);
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 100%;
   min-width: 0;
-  color: var(--orca-color-text, #17212b);
+  color: var(--mlo-dash-ink);
+}
+
+.mlo-dashboard-root.mlo-dashboard-theme-dark {
+  --mlo-dash-line: rgba(148, 163, 184, 0.34);
+  --mlo-dash-hero-bg:
+    linear-gradient(132deg, rgba(217, 119, 6, 0.24), rgba(15, 118, 110, 0.2) 52%, rgba(15, 23, 42, 0.56)),
+    repeating-linear-gradient(36deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.08) 8px, rgba(148, 163, 184, 0) 8px, rgba(148, 163, 184, 0) 16px),
+    linear-gradient(160deg, var(--orca-color-bg-1), var(--orca-color-bg-2));
+  --mlo-dash-card-bg: linear-gradient(156deg, rgba(148, 163, 184, 0.18), var(--orca-color-bg-1));
+  --mlo-dash-soft-bg: linear-gradient(162deg, rgba(148, 163, 184, 0.2), var(--orca-color-bg-1));
+  --mlo-dash-stat-bg: rgba(15, 23, 42, 0.5);
+  --mlo-dash-track-bg: rgba(148, 163, 184, 0.24);
+  --mlo-dash-button-bg: rgba(15, 23, 42, 0.46);
+  --mlo-dash-button-hover-shadow: 0 8px 18px rgba(2, 6, 23, 0.45);
+  --mlo-dash-chip-bg: rgba(45, 212, 191, 0.22);
+  --mlo-dash-chip-text: #8df0e2;
+  --mlo-dash-empty-bg: rgba(148, 163, 184, 0.12);
+  --mlo-dash-shadow: 0 18px 30px rgba(2, 6, 23, 0.45);
+  --mlo-dash-glow: radial-gradient(circle, rgba(245, 158, 11, 0.3), rgba(245, 158, 11, 0) 72%);
+  --mlo-dash-kicker-bg: rgba(45, 212, 191, 0.24);
+  --mlo-dash-kicker-text: #8df0e2;
+  --mlo-dash-card-hover-border: rgba(45, 212, 191, 0.55);
 }
 
 .mlo-dashboard-hero {
@@ -559,11 +600,8 @@ function ensureTaskDashboardStyles() {
   padding: 14px;
   border-radius: 14px;
   border: 1px solid var(--mlo-dash-line);
-  background:
-    linear-gradient(132deg, rgba(217, 119, 6, 0.14), rgba(15, 118, 110, 0.12) 52%, rgba(15, 23, 42, 0.06)),
-    repeating-linear-gradient(36deg, rgba(19, 35, 47, 0.03), rgba(19, 35, 47, 0.03) 8px, rgba(19, 35, 47, 0) 8px, rgba(19, 35, 47, 0) 16px),
-    var(--orca-color-bg-1);
-  box-shadow: 0 16px 26px rgba(15, 23, 42, 0.12);
+  background: var(--mlo-dash-hero-bg);
+  box-shadow: var(--mlo-dash-shadow);
 }
 
 .mlo-dashboard-hero::after {
@@ -574,7 +612,7 @@ function ensureTaskDashboardStyles() {
   right: -90px;
   top: -90px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(217, 119, 6, 0.2), transparent 70%);
+  background: var(--mlo-dash-glow);
   pointer-events: none;
 }
 
@@ -592,8 +630,8 @@ function ensureTaskDashboardStyles() {
   align-self: flex-start;
   border-radius: 999px;
   padding: 2px 8px;
-  background: rgba(15, 118, 110, 0.14);
-  color: #0f766e;
+  background: var(--mlo-dash-kicker-bg);
+  color: var(--mlo-dash-kicker-text);
   font-size: 10px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -612,7 +650,7 @@ function ensureTaskDashboardStyles() {
 
 .mlo-dashboard-subtitle {
   font-size: 12px;
-  color: var(--orca-color-text-2);
+  color: var(--mlo-dash-muted);
 }
 
 .mlo-dashboard-hero-stats {
@@ -624,10 +662,9 @@ function ensureTaskDashboardStyles() {
 }
 
 .mlo-dashboard-hero-stat {
-  border: 1px solid rgba(19, 35, 47, 0.16);
+  border: 1px solid var(--mlo-dash-line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.62);
-  backdrop-filter: blur(1px);
+  background: var(--mlo-dash-stat-bg);
   padding: 9px;
   display: flex;
   flex-direction: column;
@@ -637,7 +674,7 @@ function ensureTaskDashboardStyles() {
 .mlo-dashboard-hero-label {
   font-size: 11px;
   letter-spacing: 0.02em;
-  color: var(--orca-color-text-2);
+  color: var(--mlo-dash-muted);
 }
 
 .mlo-dashboard-hero-value {
@@ -650,13 +687,13 @@ function ensureTaskDashboardStyles() {
 
 .mlo-dashboard-hero-helper {
   font-size: 10px;
-  color: var(--orca-color-text-2);
+  color: var(--mlo-dash-muted);
 }
 
 .mlo-dashboard-progress-track {
   height: 6px;
   border-radius: 999px;
-  background: rgba(19, 35, 47, 0.12);
+  background: var(--mlo-dash-track-bg);
   overflow: hidden;
 }
 
@@ -680,7 +717,7 @@ function ensureTaskDashboardStyles() {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  background: linear-gradient(148deg, rgba(255, 255, 255, 0.66), var(--orca-color-bg-1));
+  background: var(--mlo-dash-card-bg);
   animation: mloDashboardLiftIn 320ms cubic-bezier(.2,.8,.2,1) backwards;
 }
 
@@ -697,12 +734,12 @@ function ensureTaskDashboardStyles() {
 }
 
 .mlo-dashboard-metric-neutral {
-  border-color: rgba(19, 35, 47, 0.18);
+  border-color: var(--mlo-dash-line);
 }
 
 .mlo-dashboard-metric-label {
   font-size: 11px;
-  color: var(--orca-color-text-2);
+  color: var(--mlo-dash-muted);
 }
 
 .mlo-dashboard-metric-value {
@@ -715,7 +752,7 @@ function ensureTaskDashboardStyles() {
 
 .mlo-dashboard-metric-hint {
   font-size: 10px;
-  color: var(--orca-color-text-2);
+  color: var(--mlo-dash-muted);
 }
 
 .mlo-dashboard-grid {
@@ -728,7 +765,7 @@ function ensureTaskDashboardStyles() {
   border: 1px solid var(--mlo-dash-line);
   border-radius: 12px;
   padding: 10px;
-  background: linear-gradient(162deg, rgba(255, 255, 255, 0.68), var(--orca-color-bg-1));
+  background: var(--mlo-dash-soft-bg);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -768,13 +805,13 @@ function ensureTaskDashboardStyles() {
 
 .mlo-dashboard-list-value {
   font-size: 11px;
-  color: var(--orca-color-text-2);
+  color: var(--mlo-dash-muted);
 }
 
 .mlo-dashboard-track {
   height: 7px;
   border-radius: 999px;
-  background: rgba(19, 35, 47, 0.1);
+  background: var(--mlo-dash-track-bg);
   overflow: hidden;
 }
 
@@ -793,7 +830,7 @@ function ensureTaskDashboardStyles() {
 }
 
 .mlo-dashboard-due-cell {
-  border: 1px solid rgba(19, 35, 47, 0.12);
+  border: 1px solid var(--mlo-dash-line);
   border-radius: 8px;
   min-height: 112px;
   padding: 6px 4px;
@@ -817,7 +854,7 @@ function ensureTaskDashboardStyles() {
 .mlo-dashboard-due-bar-track {
   position: relative;
   border-radius: 6px;
-  background: rgba(19, 35, 47, 0.08);
+  background: var(--mlo-dash-track-bg);
   overflow: hidden;
   min-height: 58px;
   display: flex;
@@ -835,7 +872,7 @@ function ensureTaskDashboardStyles() {
 .mlo-dashboard-due-label {
   text-align: center;
   font-size: 10px;
-  color: var(--orca-color-text-2);
+  color: var(--mlo-dash-muted);
 }
 
 .mlo-dashboard-top-list {
@@ -850,20 +887,21 @@ function ensureTaskDashboardStyles() {
 }
 
 .mlo-dashboard-shortcut-btn {
-  border: 1px solid rgba(19, 35, 47, 0.14);
+  border: 1px solid var(--mlo-dash-line);
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--mlo-dash-button-bg);
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 5px;
   text-align: left;
   cursor: pointer;
+  transition: border-color 170ms ease, box-shadow 170ms ease, transform 170ms ease;
 }
 
 .mlo-dashboard-shortcut-btn:hover:not(:disabled) {
-  border-color: rgba(15, 118, 110, 0.42);
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+  border-color: var(--mlo-dash-card-hover-border);
+  box-shadow: var(--mlo-dash-button-hover-shadow);
   transform: translateY(-1px);
 }
 
@@ -888,20 +926,20 @@ function ensureTaskDashboardStyles() {
   font-size: 11px;
   border-radius: 999px;
   padding: 2px 7px;
-  background: rgba(15, 118, 110, 0.12);
-  color: #0f766e;
+  background: var(--mlo-dash-chip-bg);
+  color: var(--mlo-dash-chip-text);
   font-weight: 650;
 }
 
 .mlo-dashboard-shortcut-hint {
   font-size: 10px;
-  color: var(--orca-color-text-2);
+  color: var(--mlo-dash-muted);
 }
 
 .mlo-dashboard-top-item {
-  border: 1px solid rgba(19, 35, 47, 0.14);
+  border: 1px solid var(--mlo-dash-line);
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--mlo-dash-button-bg);
   padding: 7px 8px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -909,11 +947,12 @@ function ensureTaskDashboardStyles() {
   align-items: center;
   cursor: pointer;
   text-align: left;
+  transition: border-color 170ms ease, box-shadow 170ms ease, transform 170ms ease;
 }
 
 .mlo-dashboard-top-item:hover {
-  border-color: rgba(15, 118, 110, 0.42);
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+  border-color: var(--mlo-dash-card-hover-border);
+  box-shadow: var(--mlo-dash-button-hover-shadow);
   transform: translateY(-1px);
 }
 
@@ -929,24 +968,30 @@ function ensureTaskDashboardStyles() {
   font-size: 11px;
   border-radius: 999px;
   padding: 2px 7px;
-  background: rgba(15, 118, 110, 0.12);
-  color: #0f766e;
+  background: var(--mlo-dash-chip-bg);
+  color: var(--mlo-dash-chip-text);
   font-weight: 650;
 }
 
 .mlo-dashboard-top-due {
   font-size: 10px;
-  color: var(--orca-color-text-2);
+  color: var(--mlo-dash-muted);
   white-space: nowrap;
 }
 
 .mlo-dashboard-empty {
   border-radius: 9px;
-  border: 1px dashed rgba(19, 35, 47, 0.2);
+  border: 1px dashed var(--mlo-dash-line);
   padding: 10px;
   font-size: 12px;
-  color: var(--orca-color-text-2);
-  background: rgba(19, 35, 47, 0.03);
+  color: var(--mlo-dash-muted);
+  background: var(--mlo-dash-empty-bg);
+}
+
+.mlo-dashboard-shortcut-btn:focus-visible,
+.mlo-dashboard-top-item:focus-visible {
+  outline: 2px solid var(--orca-color-text-blue, #2563eb);
+  outline-offset: 1px;
 }
 
 @media (max-width: 1100px) {

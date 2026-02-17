@@ -146,6 +146,7 @@ function TaskPropertyPopupView(props: {
   const DatePicker = orca.components.DatePicker
   const BlockSelect = orca.components.BlockSelect
   const ModalOverlay = orca.components.ModalOverlay
+  const Tooltip = orca.components.Tooltip
 
   const labels = buildTaskFieldLabels(orca.state.locale)
   const isChinese = orca.state.locale === "zh-CN"
@@ -946,6 +947,22 @@ function TaskPropertyPopupView(props: {
     lineHeight: "30px",
     letterSpacing: "0.01em",
   }
+  const rowLabelContentStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "4px",
+  }
+  const rowHelpIconStyle = {
+    width: "16px",
+    height: "16px",
+    borderRadius: "999px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "var(--orca-color-text-2)",
+    cursor: "help",
+    background: "var(--orca-color-bg-2)",
+  }
   const readOnlyFieldStyle = {
     minHeight: "30px",
     display: "flex",
@@ -996,15 +1013,63 @@ function TaskPropertyPopupView(props: {
     gap: "8px",
     alignItems: "center",
   }
+  const fieldHelpTexts = {
+    status: t("Current stage of this task (e.g. TODO or DONE)."),
+    startTime: t("When this task becomes active; before this time it may be blocked."),
+    endTime: t("Expected deadline or finish time for this task."),
+    repeatRule: t("Automatically create or schedule repeated occurrences of this task."),
+    reviewEnabled: t("Turn on review tracking for this task."),
+    reviewType: t("Single review = one reminder; cyclic review = recurring reminders."),
+    nextReview: t("The next date/time when this task should be reviewed."),
+    reviewEvery: t("How often to review this task in cyclic mode."),
+    lastReviewed: t("The most recent time this task was marked as reviewed."),
+    dependsOn: t("Tasks that must be finished first before this one can proceed."),
+    dependsMode: t("ALL means all dependencies must finish; ANY means one is enough."),
+    dependencyDelay: t("Extra wait time in hours after dependencies are satisfied."),
+  }
   const renderSection = (...children: unknown[]) => {
     return React.createElement("div", { style: sectionStyle }, ...children)
   }
 
-  const renderFormRow = (label: string, control: unknown) => {
+  const renderFormLabel = (label: string, helpText?: string) => {
+    if (helpText == null || helpText.trim() === "") {
+      return label
+    }
+
+    return React.createElement(
+      "div",
+      { style: rowLabelContentStyle },
+      React.createElement("span", null, label),
+      React.createElement(
+        Tooltip,
+        {
+          text: helpText,
+          defaultPlacement: "top",
+          delay: 140,
+        },
+        React.createElement(
+          "span",
+          {
+            style: rowHelpIconStyle,
+            title: helpText,
+          },
+          React.createElement("i", {
+            className: "ti ti-info-circle",
+            style: {
+              fontSize: "12px",
+              lineHeight: 1,
+            },
+          }),
+        ),
+      ),
+    )
+  }
+
+  const renderFormRow = (label: string, control: unknown, helpText?: string) => {
     return React.createElement(
       "div",
       { style: rowStyle },
-      React.createElement("div", { style: rowLabelStyle }, label),
+      React.createElement("div", { style: rowLabelStyle }, renderFormLabel(label, helpText)),
       React.createElement("div", { style: { minWidth: 0 } }, control),
     )
   }
@@ -1014,6 +1079,7 @@ function TaskPropertyPopupView(props: {
     label: string,
     value: Date | null,
     setValue: (next: Date | null) => void,
+    helpText?: string,
   ) => {
     const hasValue = value != null
     const displayValue = hasValue ? value.toLocaleString() : ""
@@ -1078,6 +1144,7 @@ function TaskPropertyPopupView(props: {
           width: "100%",
         }),
       ),
+      helpText,
     )
   }
 
@@ -1334,6 +1401,7 @@ function TaskPropertyPopupView(props: {
               menuContainer: popupMenuContainerRef,
               width: "100%",
             }),
+            fieldHelpTexts.status,
           ),
           renderFormRow(
             labels.labels,
@@ -1374,8 +1442,20 @@ function TaskPropertyPopupView(props: {
           ),
         ),
         renderSection(
-          renderTimeField("start", labels.startTime, startTimeValue, setStartTimeValue),
-          renderTimeField("end", labels.endTime, endTimeValue, setEndTimeValue),
+          renderTimeField(
+            "start",
+            labels.startTime,
+            startTimeValue,
+            setStartTimeValue,
+            fieldHelpTexts.startTime,
+          ),
+          renderTimeField(
+            "end",
+            labels.endTime,
+            endTimeValue,
+            setEndTimeValue,
+            fieldHelpTexts.endTime,
+          ),
           renderScoreField(
             labels.importance,
             importanceValue,
@@ -1412,6 +1492,7 @@ function TaskPropertyPopupView(props: {
               menuContainer: popupMenuContainerRef,
               width: "100%",
             }),
+            fieldHelpTexts.repeatRule,
           ),
           repeatModeValue !== "none"
             ? renderFormRow(
@@ -1533,6 +1614,7 @@ function TaskPropertyPopupView(props: {
               }),
               t("Enable review"),
             ),
+            fieldHelpTexts.reviewEnabled,
           ),
           reviewEnabledValue
             ? renderFormRow(
@@ -1547,6 +1629,7 @@ function TaskPropertyPopupView(props: {
                   menuContainer: popupMenuContainerRef,
                   width: "100%",
                 }),
+                fieldHelpTexts.reviewType,
               )
             : null,
           reviewEnabledValue && reviewTypeValue === "single"
@@ -1555,6 +1638,7 @@ function TaskPropertyPopupView(props: {
                 labels.nextReview,
                 nextReviewValue,
                 setNextReviewValue,
+                fieldHelpTexts.nextReview,
               )
             : null,
           reviewEnabledValue && reviewTypeValue === "cycle"
@@ -1635,6 +1719,7 @@ function TaskPropertyPopupView(props: {
                     t("Enter a positive integer, e.g. 1"),
                   ),
                 ),
+                fieldHelpTexts.reviewEvery,
               )
             : null,
           reviewEnabledValue
@@ -1652,6 +1737,7 @@ function TaskPropertyPopupView(props: {
                     ? labels.neverReviewed
                     : lastReviewedValue.toLocaleString(),
                 ),
+                fieldHelpTexts.lastReviewed,
               )
             : null,
         ),
@@ -1679,6 +1765,7 @@ function TaskPropertyPopupView(props: {
                 }
               },
             }),
+            fieldHelpTexts.dependsOn,
           ),
           hasDependencies
             ? renderFormRow(
@@ -1692,6 +1779,7 @@ function TaskPropertyPopupView(props: {
                   menuContainer: popupMenuContainerRef,
                   width: "100%",
                 }),
+                fieldHelpTexts.dependsMode,
               )
             : null,
           hasDependencies
@@ -1717,6 +1805,7 @@ function TaskPropertyPopupView(props: {
                     t("Hours"),
                   ),
                 ),
+                fieldHelpTexts.dependencyDelay,
               )
             : null,
         ),
