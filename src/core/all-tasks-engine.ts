@@ -1,4 +1,4 @@
-import type { Block, BlockProperty, BlockRef, DbId } from "../orca.d.ts"
+import type { Block, BlockRef, DbId } from "../orca.d.ts"
 import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
@@ -472,9 +472,11 @@ export async function toggleTaskStarInView(
     }
   }
 
-  const targetIds = [sourceBlockId ?? null, getMirrorId(blockId), blockId]
-    .filter((id): id is DbId => id != null && !Number.isNaN(id))
-    .filter((id, index, all) => all.indexOf(id) === index)
+  const targetIds = collectCandidateIds(
+    sourceBlockId ?? null,
+    getMirrorId(blockId),
+    blockId,
+  )
 
   let lastError: unknown = null
   for (const targetId of targetIds) {

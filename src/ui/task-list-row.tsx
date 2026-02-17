@@ -57,6 +57,7 @@ export function TaskListRow(props: TaskListRowProps) {
   const rowIndex = props.rowIndex ?? 0
   const [hovered, setHovered] = React.useState(false)
   const [focused, setFocused] = React.useState(false)
+  const pointerInteractingRef = React.useRef(false)
   const [contextMenuVisible, setContextMenuVisible] = React.useState(false)
   const [contextMenuRect, setContextMenuRect] = React.useState<DOMRect | null>(null)
   const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
@@ -90,10 +91,39 @@ export function TaskListRow(props: TaskListRowProps) {
     "div",
     {
       key: props.item.blockId,
+      onPointerDownCapture: () => {
+        pointerInteractingRef.current = true
+      },
+      onPointerUpCapture: () => {
+        pointerInteractingRef.current = false
+      },
+      onPointerCancelCapture: () => {
+        pointerInteractingRef.current = false
+      },
       onMouseEnter: () => setHovered(true),
-      onMouseLeave: () => setHovered(false),
-      onFocusCapture: () => setFocused(true),
-      onBlurCapture: () => setFocused(false),
+      onMouseLeave: () => {
+        pointerInteractingRef.current = false
+        setHovered(false)
+      },
+      onFocusCapture: () => {
+        setFocused(!pointerInteractingRef.current)
+      },
+      onBlurCapture: (event: FocusEvent) => {
+        const currentTarget =
+          (event as unknown as { currentTarget?: EventTarget | null }).currentTarget ?? null
+        const relatedTarget =
+          (event as unknown as { relatedTarget?: EventTarget | null }).relatedTarget ?? null
+
+        if (
+          currentTarget instanceof HTMLElement &&
+          relatedTarget instanceof Node &&
+          currentTarget.contains(relatedTarget)
+        ) {
+          return
+        }
+
+        setFocused(false)
+      },
       style: {
         position: "relative",
         width: "100%",

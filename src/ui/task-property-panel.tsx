@@ -148,8 +148,9 @@ function TaskPropertyPopupView(props: {
   const ModalOverlay = orca.components.ModalOverlay
   const Tooltip = orca.components.Tooltip
 
-  const labels = buildTaskFieldLabels(orca.state.locale)
-  const isChinese = orca.state.locale === "zh-CN"
+  const locale = orca.state.locale
+  const labels = buildTaskFieldLabels(locale)
+  const isChinese = locale === "zh-CN"
   const isCreateMode = props.mode === "create"
   const untitledTaskName = t("(Untitled task)")
   const block = props.blockId == null ? undefined : orca.state.blocks[props.blockId]
@@ -188,8 +189,8 @@ function TaskPropertyPopupView(props: {
     if (isCreateMode) {
       return ""
     }
-    return resolveTaskName(block, props.schema.tagAlias, isChinese)
-  }, [block, isChinese, isCreateMode, props.schema.tagAlias])
+    return resolveTaskName(block, props.schema.tagAlias)
+  }, [block, isCreateMode, locale, props.schema.tagAlias])
   const initialRepeatEditor = React.useMemo(() => {
     return parseRepeatRuleToEditorState(editorInitialValues.repeatRule)
   }, [editorInitialValues.repeatRule])
@@ -306,9 +307,6 @@ function TaskPropertyPopupView(props: {
   }
 
   const hasDependencies = dependsOnValues.length > 0
-  const displayTaskName = taskNameText.trim() === ""
-    ? untitledTaskName
-    : taskNameText.trim()
   const selectedDateValue =
     editingDateField === "start"
       ? startTimeValue
@@ -2013,7 +2011,6 @@ function normalizeTaskName(value: string): string {
 function resolveTaskName(
   block: Block | undefined,
   tagAlias: string,
-  isChinese: boolean,
 ): string {
   const emptyText = t("(Untitled task)")
   if (block == null) {
