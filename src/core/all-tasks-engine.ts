@@ -1,4 +1,4 @@
-import type { Block, BlockRef, DbId } from "../orca.d.ts"
+import type { Block, BlockProperty, BlockRef, DbId } from "../orca.d.ts"
 import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
@@ -41,6 +41,7 @@ export interface AllTaskItem {
   labels: string[]
   star: boolean
   taskTagRef: BlockRef
+  blockProperties: BlockProperty[]
 }
 
 export async function collectAllTasks(
@@ -95,6 +96,7 @@ export async function collectAllTasks(
       labels: values.labels,
       star: values.star,
       taskTagRef: taskRef,
+      blockProperties: collectTaskBlockProperties(liveBlock, sourceBlock),
     })
     liveBlockByTaskId.set(blockId, liveBlock)
     registerTaskAliasIds(taskIdByAliasId, blockId, sourceBlock, liveBlock)
@@ -862,6 +864,39 @@ function resolveUsableBlockId(blockId: DbId): DbId {
 
 function getLiveTaskBlock(block: Block): Block {
   return orca.state.blocks[getMirrorId(block.id)] ?? block
+}
+
+function collectTaskBlockProperties(...blocks: Block[]): BlockProperty[] {
+  const merged: BlockProperty[] = []
+  const seen = new Set<string>()
+
+  for (const block of blocks) {
+    if (!Array.isArray(block.properties)) {
+      continue
+    }
+
+    for (const property of block.properties) {
+      const name = typeof property.name === "string"
+        ? property.name.replace(/\s+/g, " ").trim()
+        : ""
+      if (name === "") {
+        continue
+      }
+
+      const dedupKey = `${name.toLowerCase()}::${property.type}`
+      if (seen.has(dedupKey)) {
+        continue
+      }
+
+      seen.add(dedupKey)
+      merged.push({
+        ...property,
+        name,
+      })
+    }
+  }
+
+  return merged
 }
 
 function resolveTaskBlockFromCandidates(candidateIds: DbId[]): Block | null {

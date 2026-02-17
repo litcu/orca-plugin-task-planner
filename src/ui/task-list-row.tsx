@@ -137,7 +137,7 @@ export function TaskListRow(props: TaskListRowProps) {
         border: "1px solid var(--orca-color-border)",
         borderRadius: "9px",
         background: props.contextOnly
-          ? "linear-gradient(120deg, rgba(148, 163, 184, 0.08), var(--orca-color-bg-2))"
+          ? "linear-gradient(120deg, rgba(148, 163, 184, 0.04), rgba(148, 163, 184, 0.01))"
           : isCompleted
             ? hovered || focused
               ? "linear-gradient(120deg, rgba(148, 163, 184, 0.2), var(--orca-color-bg-1) 58%, rgba(148, 163, 184, 0.1))"
@@ -145,22 +145,27 @@ export function TaskListRow(props: TaskListRowProps) {
           : hovered || focused
             ? "linear-gradient(120deg, rgba(37, 99, 235, 0.12), var(--orca-color-bg-1) 58%, rgba(37, 99, 235, 0.04))"
             : "linear-gradient(120deg, var(--orca-color-bg-2), var(--orca-color-bg-1) 58%, rgba(148, 163, 184, 0.06))",
-        borderColor: isCompleted
+        borderColor: props.contextOnly
+          ? "rgba(148, 163, 184, 0.24)"
+          : isCompleted
           ? hovered || focused
             ? "rgba(148, 163, 184, 0.65)"
             : "rgba(148, 163, 184, 0.4)"
           : hovered || focused
             ? "var(--orca-color-text-blue, #2563eb)"
             : "var(--orca-color-border)",
-        boxShadow: isCompleted
+        boxShadow: props.contextOnly
+          ? "none"
+          : isCompleted
           ? "0 1px 3px rgba(15, 23, 42, 0.06)"
           : hovered || focused
             ? "0 6px 14px rgba(15, 23, 42, 0.13)"
             : "0 1px 3px rgba(15, 23, 42, 0.08)",
-        transform: hovered ? "translateY(-1px)" : "translateY(0)",
+        transform: hovered && !props.contextOnly ? "translateY(-1px)" : "translateY(0)",
         transition:
-          "transform 170ms ease, box-shadow 170ms ease, background 170ms ease, border-color 170ms ease",
-        opacity: props.contextOnly ? 0.78 : isCompleted ? 0.86 : 1,
+          "transform 170ms ease, box-shadow 170ms ease, background 170ms ease, border-color 170ms ease, filter 170ms ease, opacity 170ms ease",
+        opacity: props.contextOnly ? (hovered || focused ? 0.68 : 0.58) : isCompleted ? 0.86 : 1,
+        filter: props.contextOnly ? "saturate(0.38) brightness(0.94)" : "none",
         animationName: "mloTaskRowEnter",
         animationDuration: "260ms",
         animationTimingFunction: "cubic-bezier(.2,.8,.2,1)",
@@ -249,7 +254,7 @@ export function TaskListRow(props: TaskListRowProps) {
         height: "24px",
         borderRadius: "99px",
         background: statusColor,
-        opacity: props.contextOnly ? 0.62 : 0.95,
+        opacity: props.contextOnly ? 0.38 : 0.95,
         flexShrink: 0,
       },
     }),
@@ -292,7 +297,11 @@ export function TaskListRow(props: TaskListRowProps) {
         style: {
           border: "none",
           background: "transparent",
-          color: isCompleted ? "var(--orca-color-text-2)" : "var(--orca-color-text)",
+          color: props.contextOnly
+            ? "var(--orca-color-text-2)"
+            : isCompleted
+              ? "var(--orca-color-text-2)"
+              : "var(--orca-color-text)",
           textAlign: "left",
           cursor: "pointer",
           padding: 0,
@@ -315,9 +324,13 @@ export function TaskListRow(props: TaskListRowProps) {
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
             lineHeight: 1.25,
-            fontWeight: props.contextOnly ? 500 : 560,
+            fontWeight: props.contextOnly ? 470 : 560,
             letterSpacing: "0.01em",
-            color: isCompleted ? "var(--orca-color-text-2)" : "var(--orca-color-text)",
+            color: props.contextOnly
+              ? "var(--orca-color-text-2)"
+              : isCompleted
+                ? "var(--orca-color-text-2)"
+                : "var(--orca-color-text)",
             textDecoration: isCompleted ? "line-through" : "none",
           },
         },

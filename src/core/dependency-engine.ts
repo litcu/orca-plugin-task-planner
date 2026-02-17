@@ -27,6 +27,7 @@ export interface NextActionItem {
   star: boolean
   parentTaskName: string | null
   taskTagRef: BlockRef | null
+  blockProperties: BlockProperty[]
 }
 
 export type NextActionBlockedReason =
@@ -225,6 +226,7 @@ export function evaluateNextAction(
       star: values.star,
       parentTaskName,
       taskTagRef: taskRef,
+      blockProperties: collectTaskBlockProperties(liveTaskBlock, block),
     },
     isNextAction: forceActiveByReview || blockedReason.length === 0,
     blockedReason,
@@ -862,6 +864,39 @@ function isDependencyInCycle(
 
 function getLiveTaskBlock(block: Block): Block {
   return orca.state.blocks[getMirrorId(block.id)] ?? block
+}
+
+function collectTaskBlockProperties(...blocks: Block[]): BlockProperty[] {
+  const merged: BlockProperty[] = []
+  const seen = new Set<string>()
+
+  for (const block of blocks) {
+    if (!Array.isArray(block.properties)) {
+      continue
+    }
+
+    for (const property of block.properties) {
+      const name = typeof property.name === "string"
+        ? property.name.replace(/\s+/g, " ").trim()
+        : ""
+      if (name === "") {
+        continue
+      }
+
+      const dedupKey = `${name.toLowerCase()}::${property.type}`
+      if (seen.has(dedupKey)) {
+        continue
+      }
+
+      seen.add(dedupKey)
+      merged.push({
+        ...property,
+        name,
+      })
+    }
+  }
+
+  return merged
 }
 
 function normalizeDependsMode(mode: string): DependencyMode {

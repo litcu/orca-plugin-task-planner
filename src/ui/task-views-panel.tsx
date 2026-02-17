@@ -55,6 +55,7 @@ import {
   type CustomTaskView,
 } from "../core/custom-task-views"
 import { getMirrorId } from "../core/block-utils"
+import { TASK_META_PROPERTY_NAME } from "../core/task-meta"
 import { parseReviewRule, type ReviewUnit } from "../core/task-review"
 import { t } from "../libs/l10n"
 import {
@@ -99,6 +100,7 @@ type TaskFilterNode = CustomTaskViewFilterNode
 
 interface TaskFilterField {
   key: string
+  aliasKeys?: string[]
   label: string
   type: TaskFilterFieldType
   options: TaskFilterFieldOption[]
@@ -124,6 +126,7 @@ interface FilterableTaskItem {
   reviewEvery?: string
   labels?: string[]
   taskTagRef?: BlockRef | null
+  blockProperties?: BlockProperty[]
 }
 
 const PROP_TYPE_TEXT = 1
@@ -135,6 +138,7 @@ const PROP_TYPE_TEXT_CHOICES = 6
 const FILTER_TASK_NAME_FIELD_KEY = "__task_name__"
 const FILTER_GROUP_ROOT_ID = "__root__"
 const TASK_FILTER_SELECT_MENU_CLASS_NAME = "mlo-task-filter-select-menu"
+const TASK_FILTER_PROPERTY_UNRESOLVED = Symbol("task-filter-property-unresolved")
 const DAY_MS = 24 * 60 * 60 * 1000
 const DASHBOARD_DUE_DAYS = 7
 
@@ -241,7 +245,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     styleEl.innerHTML = `
       .${TASK_FILTER_SELECT_MENU_CLASS_NAME} {
         max-height: min(320px, calc(100vh - 28px));
-        overflow-y: auto;
+        overflow: hidden;
         overscroll-behavior: contain;
       }
     `
@@ -418,14 +422,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       return
     }
     void loadTaskTagProperties()
-  }, [filterPanelVisible, loadTaskTagProperties])
+    void loadByTab("all-tasks", { silent: true })
+  }, [filterPanelVisible, loadByTab, loadTaskTagProperties])
 
   React.useEffect(() => {
     if (!customViewEditorVisible) {
       return
     }
     void loadTaskTagProperties()
-  }, [customViewEditorVisible, loadTaskTagProperties])
+    void loadByTab("all-tasks", { silent: true })
+  }, [customViewEditorVisible, loadByTab, loadTaskTagProperties])
 
   React.useEffect(() => {
     setFilterPanelVisible(false)
@@ -886,10 +892,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       knownBlockRefOptionLabels,
     )
   }, [allTaskItems, knownBlockRefOptionLabels, nextActionItems])
+  const taskFilterProperties = React.useMemo(() => {
+    return mergeTaskFilterProperties(
+      taskTagProperties,
+      collectKnownTaskFilterProperties([...allTaskItems, ...nextActionItems]),
+    )
+  }, [allTaskItems, nextActionItems, taskTagProperties])
   const filterFields = React.useMemo(() => {
     return buildTaskFilterFields(
       props.schema,
-      taskTagProperties,
+      taskFilterProperties,
       knownLabelValues,
       knownPropertyValueOptions,
       knownBlockRefOptionLabels,
@@ -899,12 +911,19 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     knownLabelValues,
     knownPropertyValueOptions,
     props.schema,
-    taskTagProperties,
+    taskFilterProperties,
   ])
   const filterFieldByKey = React.useMemo(() => {
     const map = new Map<string, TaskFilterField>()
     for (const field of filterFields) {
       map.set(field.key, field)
+      if (Array.isArray(field.aliasKeys)) {
+        for (const aliasKey of field.aliasKeys) {
+          if (!map.has(aliasKey)) {
+            map.set(aliasKey, field)
+          }
+        }
+      }
     }
     return map
   }, [filterFields])
@@ -3851,6 +3870,121 @@ function normalizeTaskFilterTextValues(values: string[]): string[] {
   return normalizedValues
 }
 
+function mergeTaskFilterProperties(
+  schemaProperties: BlockProperty[],
+  knownProperties: BlockProperty[],
+): BlockProperty[] {
+  const merged = new Map<string, BlockProperty>()
+  const appendProperty = (property: BlockProperty) => {
+    if (typeof property.name !== "string") {
+      return
+    }
+
+    const normalizedName = property.name.replace(/\s+/g, " ").trim()
+    if (normalizedName === "" || normalizedName.startsWith("_")) {
+      return
+    }
+
+    const key = toTaskFilterFieldKey(normalizedName)
+    if (merged.has(key)) {
+      return
+    }
+
+    merged.set(key, {
+      ...property,
+      name: normalizedName,
+    })
+  }
+
+  for (const property of schemaProperties) {
+    appendProperty(property)
+  }
+  for (const property of knownProperties) {
+    appendProperty(property)
+  }
+
+  return Array.from(merged.values())
+}
+
+function collectKnownTaskFilterProperties(
+  items: FilterableTaskItem[],
+): BlockProperty[] {
+  const propertiesByKey = new Map<string, BlockProperty>()
+  const appendProperty = (property: BlockProperty) => {
+    if (typeof property.name !== "string") {
+      return
+    }
+
+    const normalizedName = property.name.replace(/\s+/g, " ").trim()
+    if (normalizedName === "" || normalizedName.startsWith("_")) {
+      return
+    }
+
+    const key = toTaskFilterFieldKey(normalizedName)
+    if (propertiesByKey.has(key)) {
+      return
+    }
+
+    propertiesByKey.set(key, {
+      ...property,
+      name: normalizedName,
+    })
+  }
+
+  for (const item of items) {
+    const propertySources = [
+      item.taskTagRef?.data,
+      ...collectTaskFilterItemBlockPropertySources(item),
+    ]
+    for (const properties of propertySources) {
+      if (!Array.isArray(properties)) {
+        continue
+      }
+
+      for (const property of properties) {
+        appendProperty(property)
+      }
+    }
+  }
+
+  return Array.from(propertiesByKey.values())
+}
+
+function collectTaskFilterItemBlockPropertySources(
+  item: FilterableTaskItem,
+): BlockProperty[][] {
+  const sources: BlockProperty[][] = []
+  if (Array.isArray(item.blockProperties) && item.blockProperties.length > 0) {
+    sources.push(item.blockProperties)
+  }
+
+  const visited = new Set<DbId>()
+  const appendSource = (rawId: DbId | null | undefined) => {
+    if (rawId == null) {
+      return
+    }
+
+    const candidateIds = [rawId, getMirrorId(rawId)]
+    for (const candidateId of candidateIds) {
+      if (visited.has(candidateId)) {
+        continue
+      }
+      visited.add(candidateId)
+
+      const properties = orca.state.blocks[candidateId]?.properties
+      if (Array.isArray(properties) && properties.length > 0) {
+        sources.push(properties)
+      }
+    }
+  }
+
+  appendSource(item.sourceBlockId)
+  appendSource(item.blockId)
+  appendSource(item.taskTagRef?.from)
+
+  return sources
+}
+
 function collectKnownTaskFilterBlockRefOptionLabels(
   items: FilterableTaskItem[],
   taskNameById: Map<string, string>,
@@ -3936,27 +4070,32 @@ function collectKnownTaskFilterPropertyOptions(
   }
 
   for (const item of items) {
-    const refData = item.taskTagRef?.data
-    if (!Array.isArray(refData)) {
-      continue
-    }
-
-    for (const property of refData) {
-      if (typeof property.name !== "string" || property.name.trim() === "") {
-        continue
-      }
-      if (property.name.startsWith("_")) {
+    const propertySources = [
+      item.taskTagRef?.data,
+      ...collectTaskFilterItemBlockPropertySources(item),
+    ]
+    for (const properties of propertySources) {
+      if (!Array.isArray(properties)) {
         continue
       }
 
-      if (Array.isArray(property.value)) {
-        for (const rawValue of property.value) {
-          appendOption(property.name, rawValue, property.type)
+      for (const property of properties) {
+        if (typeof property.name !== "string" || property.name.trim() === "") {
+          continue
         }
-        continue
-      }
+        if (property.name.startsWith("_")) {
+          continue
+        }
 
-      appendOption(property.name, property.value, property.type)
+        if (Array.isArray(property.value)) {
+          for (const rawValue of property.value) {
+            appendOption(property.name, rawValue, property.type)
+          }
+          continue
+        }
+
+        appendOption(property.name, property.value, property.type)
+      }
     }
   }
 
@@ -4128,7 +4267,88 @@ function buildTaskFilterFields(
     })
   }
 
+  for (const field of createTaskFilterMetaFields()) {
+    if (seenKeys.has(field.key)) {
+      continue
+    }
+    fields.push(field)
+    seenKeys.add(field.key)
+  }
+
   return fields
+}
+
+function createTaskFilterMetaFields(): TaskFilterField[] {
+  const importanceLabel = t("Importance")
+  const urgencyLabel = t("Urgency")
+  const effortLabel = t("Effort")
+  const repeatRuleLabel = t("Repeat rule")
+  const reviewEveryLabel = t("Review every")
+  const reviewLegacyLabel = t("Review")
+
+  return [
+    {
+      key: toTaskFilterFieldKey(importanceLabel),
+      aliasKeys: [toTaskFilterFieldKey("Importance"), toTaskFilterFieldKey("重要性")],
+      label: importanceLabel,
+      type: "number",
+      options: [],
+      extractValue: (item: FilterableTaskItem) => {
+        return readTaskFilterVirtualMetaPropertyValue(item, importanceLabel)
+      },
+    },
+    {
+      key: toTaskFilterFieldKey(urgencyLabel),
+      aliasKeys: [toTaskFilterFieldKey("Urgency"), toTaskFilterFieldKey("紧急度")],
+      label: urgencyLabel,
+      type: "number",
+      options: [],
+      extractValue: (item: FilterableTaskItem) => {
+        return readTaskFilterVirtualMetaPropertyValue(item, urgencyLabel)
+      },
+    },
+    {
+      key: toTaskFilterFieldKey(effortLabel),
+      aliasKeys: [toTaskFilterFieldKey("Effort"), toTaskFilterFieldKey("工作量")],
+      label: effortLabel,
+      type: "number",
+      options: [],
+      extractValue: (item: FilterableTaskItem) => {
+        return readTaskFilterVirtualMetaPropertyValue(item, effortLabel)
+      },
+    },
+    {
+      key: toTaskFilterFieldKey(repeatRuleLabel),
+      aliasKeys: [toTaskFilterFieldKey("Repeat rule"), toTaskFilterFieldKey("重复规则")],
+      label: repeatRuleLabel,
+      type: "text",
+      options: [],
+      extractValue: (item: FilterableTaskItem) => {
+        return readTaskFilterVirtualMetaPropertyValue(item, repeatRuleLabel)
+      },
+    },
+    {
+      key: toTaskFilterFieldKey(reviewEveryLabel),
+      aliasKeys: [
+        toTaskFilterFieldKey("Review every"),
+        toTaskFilterFieldKey("回顾周期"),
+        toTaskFilterFieldKey("Review"),
+        toTaskFilterFieldKey("回顾"),
+        toTaskFilterFieldKey(reviewLegacyLabel),
+      ],
+      label: reviewEveryLabel,
+      type: "review-rule",
+      options: [],
+      operatorOptions: ["eq", "neq", "empty", "not-empty"],
+      defaultValue: "day:1",
+      extractValue: (item: FilterableTaskItem) => {
+        const rawValue = typeof item.reviewEvery === "string" && item.reviewEvery.trim() !== ""
+          ? item.reviewEvery
+          : readTaskFilterVirtualMetaPropertyValue(item, reviewEveryLabel)
+        return toTaskFilterReviewRuleValue(rawValue)
+      },
+    },
+  ]
 }
 
 function buildTaskFilterFieldFromProperty(
@@ -4225,15 +4445,147 @@ function buildTaskFilterFieldFromProperty(
       if (isReviewEveryProperty) {
         const rawValue = typeof item.reviewEvery === "string" && item.reviewEvery.trim() !== ""
           ? item.reviewEvery
-          : readTaskFilterPropertyValue(item.taskTagRef?.data, propertyName)
+          : readTaskFilterItemPropertyValue(item, propertyName)
         return toTaskFilterReviewRuleValue(rawValue)
       }
       if (propertyName === schema.propertyNames.labels) {
         return item.labels ?? []
       }
-      return readTaskFilterPropertyValue(item.taskTagRef?.data, propertyName)
+      return readTaskFilterItemPropertyValue(item, propertyName)
     },
   }
+}
+
+function readTaskFilterItemPropertyValue(
+  item: FilterableTaskItem,
+  propertyName: string,
+): unknown {
+  const refValue = readTaskFilterPropertyValue(item.taskTagRef?.data, propertyName)
+  if (refValue !== undefined) {
+    return refValue
+  }
+
+  const virtualValue = readTaskFilterVirtualMetaPropertyValue(item, propertyName)
+  if (virtualValue !== TASK_FILTER_PROPERTY_UNRESOLVED) {
+    return virtualValue
+  }
+
+  for (const properties of collectTaskFilterItemBlockPropertySources(item)) {
+    const blockValue = readTaskFilterPropertyValue(properties, propertyName)
+    if (blockValue !== undefined) {
+      return blockValue
+    }
+  }
+
+  return undefined
+}
+
+function readTaskFilterVirtualMetaPropertyValue(
+  item: FilterableTaskItem,
+  propertyName: string,
+): unknown | typeof TASK_FILTER_PROPERTY_UNRESOLVED {
+  const normalized = propertyName.replace(/\s+/g, " ").trim().toLowerCase()
+  const meta = readTaskFilterItemMetaData(item)
+
+  if (normalized === "importance" || normalized === "重要性") {
+    return readTaskFilterMetaPriorityValue(meta, "importance")
+  }
+  if (normalized === "urgency" || normalized === "紧急度") {
+    return readTaskFilterMetaPriorityValue(meta, "urgency")
+  }
+  if (normalized === "effort" || normalized === "工作量") {
+    return readTaskFilterMetaPriorityValue(meta, "effort")
+  }
+  if (normalized === "repeat rule" || normalized === "重复规则") {
+    return readTaskFilterMetaRepeatRuleValue(meta)
+  }
+  if (
+    normalized === "review every" ||
+    normalized === "回顾周期" ||
+    normalized === "review" ||
+    normalized === "回顾"
+  ) {
+    if (typeof item.reviewEvery === "string" && item.reviewEvery.trim() !== "") {
+      return item.reviewEvery
+    }
+    return readTaskFilterMetaReviewEveryValue(meta)
+  }
+
+  return TASK_FILTER_PROPERTY_UNRESOLVED
+}
+
+function readTaskFilterItemMetaData(
+  item: FilterableTaskItem,
+): Record<string, unknown> | null {
+  for (const properties of collectTaskFilterItemBlockPropertySources(item)) {
+    const rawValue = readTaskFilterPropertyValue(properties, TASK_META_PROPERTY_NAME)
+    if (isRecord(rawValue)) {
+      return rawValue
+    }
+
+    if (typeof rawValue === "string") {
+      try {
+        const parsed = JSON.parse(rawValue) as unknown
+        if (isRecord(parsed)) {
+          return parsed
+        }
+      } catch {
+        continue
+      }
+    }
+  }
+
+  return null
+}
+
+function readTaskFilterMetaPriorityValue(
+  meta: Record<string, unknown> | null,
+  key: "importance" | "urgency" | "effort",
+): number | null {
+  const priorityRaw = meta?.priority
+  if (!isRecord(priorityRaw)) {
+    return null
+  }
+
+  return toTaskFilterMetaNumber(priorityRaw[key])
+}
+
+function readTaskFilterMetaReviewEveryValue(
+  meta: Record<string, unknown> | null,
+): string {
+  const reviewRaw = meta?.review
+  if (!isRecord(reviewRaw)) {
+    return ""
+  }
+
+  return typeof reviewRaw.reviewEvery === "string"
+    ? reviewRaw.reviewEvery
+    : ""
+}
+
+function readTaskFilterMetaRepeatRuleValue(
+  meta: Record<string, unknown> | null,
+): string {
+  const recurrenceRaw = meta?.recurrence
+  if (!isRecord(recurrenceRaw)) {
+    return ""
+  }
+
+  if (typeof recurrenceRaw.repeatRule === "string") {
+    return recurrenceRaw.repeatRule
+  }
+  if (typeof recurrenceRaw.rule === "string") {
+    return recurrenceRaw.rule
+  }
+  return ""
+}
+
+function toTaskFilterMetaNumber(value: unknown): number | null {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return null
+  }
+
+  return Number.isFinite(value) ? value : null
 }
 
 function readTaskFilterPropertyValue(
