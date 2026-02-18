@@ -172,6 +172,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const customViewsButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
   const filterButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
   const viewSwitcherContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const panelRootRef = React.useRef<HTMLDivElement | null>(null)
   const filterPopupContainerRef = React.useRef<HTMLDivElement | null>(null)
   const customViewFilterPopupContainerRef = React.useRef<HTMLDivElement | null>(null)
   const filterMenuContainerRef = React.useRef<HTMLElement | null>(null)
@@ -639,6 +640,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         blockId,
         schema: props.schema,
         triggerSource: "panel-view",
+        mountContainer: panelRootRef.current,
       })
     },
     [props.schema],
@@ -649,6 +651,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       openTaskPropertyPopup({
         schema: props.schema,
         triggerSource: "panel-view",
+        mountContainer: panelRootRef.current,
         mode: "create",
         parentBlockId: item.blockId,
         parentSourceBlockId: item.sourceBlockId,
@@ -808,6 +811,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     openTaskPropertyPopup({
       schema: props.schema,
       triggerSource: "panel-view",
+      mountContainer: panelRootRef.current,
       mode: "create",
       onTaskCreated: () => {
         setErrorText("")
@@ -2216,10 +2220,12 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   return React.createElement(
     "div",
     {
+      ref: panelRootRef,
       style: {
         height: "100%",
         width: "100%",
         minWidth: 0,
+        position: "relative",
         display: "flex",
         flexDirection: "column",
         gap: "8px",

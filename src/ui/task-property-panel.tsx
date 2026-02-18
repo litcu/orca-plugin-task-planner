@@ -43,6 +43,7 @@ type ReactRootLike = {
 interface PopupState {
   root: ReactRootLike | null
   containerEl: HTMLDivElement | null
+  mountContainer: HTMLElement | null
   options: OpenTaskPropertyPopupOptions | null
   visible: boolean
 }
@@ -53,6 +54,7 @@ interface OpenTaskPropertyPopupOptions {
   parentSourceBlockId?: DbId
   schema: TaskSchemaDefinition
   triggerSource: PopupTriggerSource
+  mountContainer?: HTMLElement | null
   mode?: "edit" | "create"
   onTaskCreated?: (blockId: DbId) => void
   onTaskSaved?: (blockId: DbId) => void
@@ -61,6 +63,7 @@ interface OpenTaskPropertyPopupOptions {
 const popupState: PopupState = {
   root: null,
   containerEl: null,
+  mountContainer: null,
   options: null,
   visible: false,
 }
@@ -72,7 +75,7 @@ const TEXT_CHOICES_PROP_TYPE = 6
 export type { OpenTaskPropertyPopupOptions }
 
 export function openTaskPropertyPopup(options: OpenTaskPropertyPopupOptions) {
-  ensureRoot()
+  ensureRoot(options)
   popupState.options = options
   popupState.visible = true
   renderCurrent()
@@ -93,21 +96,46 @@ export function disposeTaskPropertyPopup() {
 
   popupState.root = null
   popupState.containerEl = null
+  popupState.mountContainer = null
   popupState.options = null
   popupState.visible = false
 }
 
-function ensureRoot() {
-  if (popupState.root != null) {
+function ensureRoot(options?: OpenTaskPropertyPopupOptions) {
+  const mountContainer = resolvePopupMountContainer(options)
+  if (popupState.root != null && popupState.mountContainer === mountContainer) {
     return
   }
+  popupState.root?.unmount()
+  popupState.containerEl?.remove()
+  popupState.root = null
+  popupState.containerEl = null
 
   const containerEl = document.createElement("div")
   containerEl.dataset.role = "mlo-task-property-popup-root"
-  document.body.appendChild(containerEl)
+  if (mountContainer !== document.body) {
+    containerEl.style.position = "absolute"
+    containerEl.style.inset = "0"
+    containerEl.style.zIndex = "36"
+  }
+  mountContainer.appendChild(containerEl)
 
   popupState.containerEl = containerEl
+  popupState.mountContainer = mountContainer
   popupState.root = window.createRoot(containerEl) as ReactRootLike
+}
+
+function resolvePopupMountContainer(
+  options?: OpenTaskPropertyPopupOptions,
+): HTMLElement {
+  if (
+    options?.triggerSource === "panel-view"
+    && options.mountContainer != null
+    && options.mountContainer.isConnected
+  ) {
+    return options.mountContainer
+  }
+  return document.body
 }
 
 function renderCurrent() {
@@ -131,6 +159,8 @@ function TaskPropertyPopupView(props: {
   parentBlockId?: DbId
   parentSourceBlockId?: DbId
   schema: TaskSchemaDefinition
+  triggerSource: PopupTriggerSource
+  mountContainer?: HTMLElement | null
   mode?: "edit" | "create"
   onTaskCreated?: (blockId: DbId) => void
   onTaskSaved?: (blockId: DbId) => void
@@ -152,6 +182,8 @@ function TaskPropertyPopupView(props: {
   const labels = buildTaskFieldLabels(locale)
   const isChinese = locale === "zh-CN"
   const isCreateMode = props.mode === "create"
+  const isPanelSidebarMode =
+    props.triggerSource === "panel-view" && props.mountContainer != null
   const untitledTaskName = t("(Untitled task)")
   const block = props.blockId == null ? undefined : orca.state.blocks[props.blockId]
   const taskRef = block?.refs.find(
@@ -300,11 +332,50 @@ function TaskPropertyPopupView(props: {
   const [activationLoading, setActivationLoading] = React.useState(true)
 
   const dateAnchorRef = React.useRef<HTMLElement | null>(null)
-  // Mount dropdown and date picker overlays to body to avoid clipping by modal scroll.
+  // Mount dropdown and date picker overlays inside the panel sidebar when possible.
   const popupMenuContainerRef = React.useRef<HTMLElement | null>(null)
-  if (popupMenuContainerRef.current == null) {
-    popupMenuContainerRef.current = document.body
-  }
+  popupMenuContainerRef.current = isPanelSidebarMode
+    ? props.mountContainer ?? null
+    : document.body
+  const [mountContainerWidth, setMountContainerWidth] = React.useState(() => {
+    if (isPanelSidebarMode && props.mountContainer != null) {
+      return props.mountContainer.clientWidth || window.innerWidth
+    }
+    return window.innerWidth
+  })
+
+  React.useEffect(() => {
+    if (!isPanelSidebarMode || props.mountContainer == null) {
+      setMountContainerWidth(window.innerWidth)
+      return
+    }
+
+    const mountContainer = props.mountContainer
+    const syncWidth = () => {
+      const nextWidth = mountContainer.clientWidth
+      if (nextWidth > 0) {
+        setMountContainerWidth(nextWidth)
+      }
+    }
+
+    syncWidth()
+    const resizeObserver = typeof ResizeObserver === "function"
+      ? new ResizeObserver(() => syncWidth())
+      : null
+    resizeObserver?.observe(mountContainer)
+    window.addEventListener("resize", syncWidth)
+
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener("resize", syncWidth)
+    }
+  }, [isPanelSidebarMode, props.mountContainer])
+  const estimatedPanelWidth = isPanelSidebarMode
+    ? Math.min(Math.max(mountContainerWidth * 0.46, 300), mountContainerWidth)
+    : isCreateMode
+      ? 760
+      : 560
+  const useCompactRowLayout = estimatedPanelWidth < 420
 
   const hasDependencies = dependsOnValues.length > 0
   const selectedDateValue =
@@ -929,20 +1000,29 @@ function TaskPropertyPopupView(props: {
     }
   }, [currentSnapshot, isCreateMode, lastFailedSnapshot, lastSavedSnapshot, saving, taskRef])
 
-  // Use a consistent 2-column row layout: label + control.
+  // Use responsive form rows for narrow sidebars.
   const rowLabelWidth = isChinese ? "92px" : "114px"
-  const rowStyle = {
-    display: "grid",
-    gridTemplateColumns: `${rowLabelWidth} minmax(0, 1fr)`,
-    columnGap: "12px",
-    alignItems: "center",
-    marginBottom: "10px",
-  }
+  const rowStyle = useCompactRowLayout
+    ? {
+      display: "flex",
+      flexDirection: "column" as const,
+      alignItems: "stretch",
+      gap: "6px",
+      marginBottom: "10px",
+    }
+    : {
+      display: "grid",
+      gridTemplateColumns: `${rowLabelWidth} minmax(0, 1fr)`,
+      columnGap: "12px",
+      alignItems: "center",
+      marginBottom: "10px",
+    }
   const rowLabelStyle = {
     fontSize: "12px",
     fontWeight: 500,
     color: "var(--orca-color-text-2)",
-    lineHeight: "30px",
+    lineHeight: useCompactRowLayout ? 1.25 : "30px",
+    paddingTop: useCompactRowLayout ? "2px" : 0,
     letterSpacing: "0.01em",
   }
   const rowLabelContentStyle = {
@@ -1237,51 +1317,78 @@ function TaskPropertyPopupView(props: {
           ? "rgba(56, 161, 105, 0.12)"
           : "rgba(183, 121, 31, 0.12)",
   }
-  const overlayStyle = isCreateMode
+  const overlayStyle = isPanelSidebarMode
     ? {
-      background: "rgba(2, 6, 23, 0.32)",
-      backdropFilter: "none",
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      padding: "16px",
-      overflow: "auto",
-    }
-    : {
-      background: "rgba(2, 6, 23, 0.32)",
+      position: "absolute" as const,
+      inset: 0,
+      background: "rgba(2, 6, 23, 0.14)",
       backdropFilter: "none",
       display: "flex",
       justifyContent: "flex-end",
       alignItems: "stretch",
       padding: 0,
+      overflow: "hidden",
     }
-  const panelStyle = isCreateMode
+    : isCreateMode
+      ? {
+        background: "rgba(2, 6, 23, 0.32)",
+        backdropFilter: "none",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: "16px",
+        overflow: "auto",
+      }
+      : {
+        background: "rgba(2, 6, 23, 0.32)",
+        backdropFilter: "none",
+        display: "flex",
+        justifyContent: "flex-end",
+        alignItems: "stretch",
+        padding: 0,
+      }
+  const panelStyle = isPanelSidebarMode
     ? {
-      width: "min(760px, calc(100vw - 20px))",
+      width: `${Math.round(estimatedPanelWidth)}px`,
       minWidth: 0,
       maxWidth: "100%",
-      maxHeight: "min(88vh, 980px)",
+      height: "100%",
+      maxHeight: "100%",
       overflow: "auto",
-      padding: "18px 16px",
-      boxSizing: "border-box",
-      background: "var(--orca-color-bg-1)",
-      border: "1px solid var(--orca-color-border-1)",
-      borderRadius: "12px",
-      boxShadow: "0 16px 36px rgba(10, 18, 30, 0.28)",
-    }
-    : {
-      width: "min(560px, calc(100vw - 20px))",
-      minWidth: 0,
-      height: "100vh",
-      maxHeight: "100vh",
-      overflow: "auto",
-      padding: "18px 16px",
+      padding: "16px 14px",
       boxSizing: "border-box",
       background: "var(--orca-color-bg-1)",
       borderLeft: "1px solid var(--orca-color-border-1)",
       borderRadius: "12px 0 0 12px",
-      boxShadow: "-12px 0 32px rgba(10, 18, 30, 0.24)",
+      boxShadow: "-12px 0 28px rgba(10, 18, 30, 0.2)",
     }
+    : isCreateMode
+      ? {
+        width: "min(760px, calc(100vw - 20px))",
+        minWidth: 0,
+        maxWidth: "100%",
+        maxHeight: "min(88vh, 980px)",
+        overflow: "auto",
+        padding: "18px 16px",
+        boxSizing: "border-box",
+        background: "var(--orca-color-bg-1)",
+        border: "1px solid var(--orca-color-border-1)",
+        borderRadius: "12px",
+        boxShadow: "0 16px 36px rgba(10, 18, 30, 0.28)",
+      }
+      : {
+        width: "min(560px, calc(100vw - 20px))",
+        minWidth: 0,
+        height: "100vh",
+        maxHeight: "100vh",
+        overflow: "auto",
+        padding: "18px 16px",
+        boxSizing: "border-box",
+        background: "var(--orca-color-bg-1)",
+        borderLeft: "1px solid var(--orca-color-border-1)",
+        borderRadius: "12px 0 0 12px",
+        boxShadow: "-12px 0 32px rgba(10, 18, 30, 0.24)",
+      }
   return React.createElement(
     ModalOverlay,
     {
