@@ -298,7 +298,8 @@ release/orca-task-planner-vX.Y.Z.zip
 1. ensure git working tree is clean
 2. ensure current branch is `main`
 3. run `npm run build`
-4. run `npm version <patch|minor|major>` (creates commit + tag)
-5. run `git push origin main --follow-tags`
+4. run `npm version <patch|minor|major> --tag-version-prefix v` (creates commit + tag)
+5. run `git push origin main`
+6. run `git push origin vX.Y.Z`
 
-After push, GitHub Actions will auto-create Release and upload `orca-task-planner-vX.Y.Z.zip`.
+After push, GitHub Actions will auto-create (or update) Release and upload `orca-task-planner-vX.Y.Z.zip`.

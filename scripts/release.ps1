@@ -100,16 +100,25 @@ if ($DryRun) {
 }
 
 Write-Step "Bumping version ($Type)"
-$tag = (npm version $Type).Trim()
+$tag = (npm version $Type --tag-version-prefix v).Trim()
 if ($LASTEXITCODE -ne 0) {
   throw "npm version failed."
 }
+if (-not $tag.StartsWith("v")) {
+  throw "Unexpected tag '$tag'. Expected a tag prefixed with 'v'."
+}
 
 if (-not $SkipPush) {
-  Write-Step "Pushing commit and tag to origin/$Branch"
-  git push origin $Branch --follow-tags
+  Write-Step "Pushing commit to origin/$Branch"
+  git push origin $Branch
   if ($LASTEXITCODE -ne 0) {
-    throw "Push failed."
+    throw "Push branch failed."
+  }
+
+  Write-Step "Pushing tag $tag"
+  git push origin $tag
+  if ($LASTEXITCODE -ne 0) {
+    throw "Push tag failed."
   }
 }
 
@@ -117,7 +126,8 @@ Write-Host ""
 Write-Host "Release prepared: $tag" -ForegroundColor Green
 if ($SkipPush) {
   Write-Host "Tag created locally. Push manually with:" -ForegroundColor Yellow
-  Write-Host "git push origin $Branch --follow-tags" -ForegroundColor Yellow
+  Write-Host "git push origin $Branch" -ForegroundColor Yellow
+  Write-Host "git push origin $tag" -ForegroundColor Yellow
 } else {
   Write-Host "GitHub Actions will now build and create the Release for $tag." -ForegroundColor Green
 }

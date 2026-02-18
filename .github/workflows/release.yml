@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.2.3)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,9 +17,13 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -27,9 +37,16 @@ jobs:
       - name: Build plugin
         run: npm run build
 
+      - name: Validate tag format
+        run: |
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-].+)?$ ]]; then
+            echo "Invalid tag format: ${RELEASE_TAG}. Expected v<semver>."
+            exit 1
+          fi
+
       - name: Validate tag version
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TAG_VERSION="${RELEASE_TAG#v}"
           PACKAGE_VERSION="$(node -p "require('./package.json').version")"
           if [ "${TAG_VERSION}" != "${PACKAGE_VERSION}" ]; then
             echo "Tag version (${TAG_VERSION}) does not match package.json version (${PACKAGE_VERSION})."
@@ -39,7 +56,7 @@ jobs:
       - name: Package release zip
         run: |
           PLUGIN_DIR="orca-task-planner"
-          ARCHIVE_NAME="${PLUGIN_DIR}-${GITHUB_REF_NAME}.zip"
+          ARCHIVE_NAME="${PLUGIN_DIR}-${RELEASE_TAG}.zip"
 
           mkdir -p "release/${PLUGIN_DIR}/dist"
           cp "dist/index.js" "release/${PLUGIN_DIR}/dist/index.js"
@@ -59,8 +76,14 @@ jobs:
           cd "release"
           zip -r "../${ARCHIVE_NAME}" "${PLUGIN_DIR}"
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: orca-task-planner-${{ github.ref_name }}.zip
-          generate_release_notes: true
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          ARCHIVE_NAME: orca-task-planner-${{ env.RELEASE_TAG }}.zip
+        run: |
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" "${ARCHIVE_NAME}" --clobber
+            gh release edit "${RELEASE_TAG}" --latest
+          else
+            gh release create "${RELEASE_TAG}" "${ARCHIVE_NAME}" --generate-notes --latest
+          fi
