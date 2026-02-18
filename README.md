@@ -86,14 +86,37 @@ A task enters `Active Tasks` only if all checks pass:
 Active tasks are scored and ranked with:
 
 ```text
-Score = 0.40*Importance + 0.25*Urgency + 0.20*DueFactor + 0.10*StartFactor + 0.05*100
+base = 0.40*I + 0.22*U + 0.20*D + 0.10*S + 0.08*C
+score = base * criticalBoost * deadlineBoost * startByBoost * agingBoost / timePenalty
 ```
+
+Where:
+
+- `timePenalty = 1 + 0.9*EffN`
+- `criticalBoost = 1 + 0.3*Criticality`
+- `deadlineBoost = 1 + 0.25*OverdueN`
+- `startByBoost = 1 + 0.22*StartBy`
+- `agingBoost = 1 + 0.12*AgingN`
+
+And key factors are:
+
+- `I/U`: non-linear mapping of importance/urgency (neutral at `50`)
+- `D`: due factor (`45` if no due date, `100` if overdue, otherwise exponential decay by due distance)
+- `S`: start factor (`100` when start is reached, quadratic decay for future tasks, floor at `10`)
+- `C`: context factor (`80` for starred tasks, otherwise `50`)
+- `EffN`: normalized effort (`effort/100`)
+- `Criticality`: dependency criticality from dependency graph (`0.6*descendants + 0.4*dependencyDemand`)
+- `OverdueN`: normalized overdue days (`daysOverdue/7`)
+- `StartBy`: latest-start pressure using effort and remaining days
+- `AgingN`: waiting-time factor (`waitingDays/14`)
+- `dependencyDemand`: downstream task demand intensity (higher when dependent tasks are high importance/urgency)
 
 Sort order:
 
-1. score descending
-2. due time ascending
-3. stable internal ID order
+1. overdue tasks first
+2. score descending
+3. due time ascending
+4. stable internal ID order
 
 #### Recommended usage
 

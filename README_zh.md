@@ -86,14 +86,33 @@
 激活任务按以下公式评分并排序：
 
 ```text
-Score = 0.40*Importance + 0.25*Urgency + 0.20*DueFactor + 0.10*StartFactor + 0.05*100
+base = 0.40*I + 0.22*U + 0.20*D + 0.10*S + 0.08*C
+score = base * criticalBoost * deadlineBoost * startByBoost * agingBoost / timePenalty
 ```
+
+- `timePenalty = 1 + 0.9*EffN`
+- `criticalBoost = 1 + 0.3*Criticality`
+- `deadlineBoost = 1 + 0.25*OverdueN`
+- `startByBoost = 1 + 0.22*StartBy`
+- `agingBoost = 1 + 0.12*AgingN`
+
+- `I/U`：Importance / Urgency 的非线性映射（`50` 为中性点）
+- `D`：到期因子（无截止日为 `45`，逾期为 `100`，其余按指数衰减）
+- `S`：开始时间因子（到达开始时间为 `100`，未来任务按二次曲线衰减，最低 `10`）
+- `C`：上下文因子（收藏任务 `80`，否则 `50`）
+- `EffN`：工作量归一化（`effort/100`）
+- `Criticality`：依赖关键性（`0.6*descendants + 0.4*dependencyDemand`）
+- `OverdueN`：逾期天数归一化（`daysOverdue/7`）
+- `StartBy`：最晚开工压力（由工作量与剩余天数共同决定）
+- `AgingN`：等待时长因子（`waitingDays/14`）
+- `dependencyDemand`：下游任务需求强度（下游任务越重要/紧急，值越高）
 
 排序规则：
 
-1. 分数降序；
-2. 到期时间升序；
-3. 内部稳定 ID 顺序。
+1. 已逾期任务优先；
+2. 分数降序；
+3. 到期时间升序；
+4. 内部稳定 ID 顺序。
 
 #### 建议使用方式
 

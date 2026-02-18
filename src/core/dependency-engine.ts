@@ -1,12 +1,19 @@
 import type { Block, BlockProperty, BlockRef, DbId } from "../orca.d.ts"
-import { getTaskPropertiesFromRef } from "./task-properties"
+import {
+  getTaskPropertiesFromRef,
+  type TaskPropertyValues,
+} from "./task-properties"
 import type { DependencyMode, TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
-import { calculateTaskScoreFromValues } from "./score-engine"
+import {
+  calculateTaskScoreFromValues,
+  type TaskScoreContext,
+} from "./score-engine"
 import { resolveEffectiveNextReview, type TaskReviewType } from "./task-review"
 
 const TAG_REF_TYPE = 2
 const ONE_HOUR_MS = 60 * 60 * 1000
+const ONE_DAY_MS = 24 * ONE_HOUR_MS
 const NEXT_ACTION_CACHE_TTL_MS = 1500
 
 // Next Actions 运行时数据，供视图层直接渲染。
@@ -61,6 +68,12 @@ interface SubtaskContext {
   parentTaskIdByTaskId: Map<DbId, DbId | null>
 }
 
+interface TaskScoringContext {
+  descendantsByTaskId: Map<DbId, number>
+  demandByTaskId: Map<DbId, number>
+  waitingDaysByTaskId: Map<DbId, number>
+}
+
 interface DependencyEvaluationResult {
   satisfied: boolean
   unmet: boolean
@@ -110,8 +123,22 @@ export async function collectNextActionEvaluations(
   const candidateBlocks = includeCompleted
     ? taskBlocks
     : taskBlocks.filter((block) => !isCompletedTaskBlock(block, schema))
+  const scoringContext = buildTaskScoringContext(
+    candidateBlocks,
+    taskMap,
+    schema,
+    now,
+  )
   const evaluations = candidateBlocks.map((block) => {
-    return evaluateNextAction(block, taskMap, schema, now, cycleContext, subtaskContext)
+    return evaluateNextAction(
+      block,
+      taskMap,
+      schema,
+      now,
+      cycleContext,
+      subtaskContext,
+      scoringContext,
+    )
   })
 
   const sortedEvaluations = evaluations
@@ -143,6 +170,7 @@ export function evaluateNextAction(
   now: Date = new Date(),
   cycleContext: DependencyCycleContext | null = null,
   subtaskContext: SubtaskContext | null = null,
+  scoringContext: TaskScoringContext | null = null,
 ): NextActionEvaluation {
   const sourceTaskRef = findTaskTagRef(block, schema.tagAlias)
   const liveTaskBlock = getLiveTaskBlock(block)
@@ -199,7 +227,11 @@ export function evaluateNextAction(
     blockedReason.push("dependency-delayed")
   }
 
-  const score = calculateTaskScoreFromValues(values, now)
+  const score = calculateTaskScoreFromValues(
+    values,
+    now,
+    resolveTaskScoreContext(taskId, scoringContext),
+  )
   const forceActiveByReview = values.reviewEnabled
 
   return {
@@ -268,6 +300,192 @@ function buildTaskMap(blocks: Block[]): Map<DbId, Block> {
   }
 
   return map
+}
+
+function buildTaskScoringContext(
+  taskBlocks: Block[],
+  taskMap: Map<DbId, Block>,
+  schema: TaskSchemaDefinition,
+  now: Date,
+): TaskScoringContext | null {
+  if (taskBlocks.length === 0) {
+    return null
+  }
+
+  const dependentsByTaskId = new Map<DbId, Set<DbId>>()
+  const waitingDaysByTaskId = new Map<DbId, number>()
+  const taskDemandByTaskId = new Map<DbId, number>()
+  const valuesByTaskId = new Map<DbId, TaskPropertyValues>()
+
+  for (const block of taskBlocks) {
+    const liveTaskBlock = getLiveTaskBlock(block)
+    const taskId = getMirrorId(liveTaskBlock.id)
+    const sourceTaskRef = findTaskTagRef(block, schema.tagAlias)
+    const taskRef = findTaskTagRef(liveTaskBlock, schema.tagAlias) ?? sourceTaskRef
+    const values = getTaskPropertiesFromRef(taskRef?.data, schema, liveTaskBlock)
+
+    dependentsByTaskId.set(taskId, new Set<DbId>())
+    waitingDaysByTaskId.set(taskId, resolveTaskWaitingDays(liveTaskBlock, now))
+    valuesByTaskId.set(taskId, values)
+    taskDemandByTaskId.set(taskId, resolveTaskDemand(values))
+  }
+
+  for (const block of taskBlocks) {
+    const sourceTaskBlock = getLiveTaskBlock(block)
+    const sourceTaskId = getMirrorId(sourceTaskBlock.id)
+    const values = valuesByTaskId.get(sourceTaskId)
+    if (values == null) {
+      continue
+    }
+
+    for (const dependencyId of values.dependsOn) {
+      const dependencyTask = resolveDependencyTask(
+        sourceTaskBlock,
+        dependencyId,
+        taskMap,
+      )
+      if (dependencyTask == null) {
+        continue
+      }
+
+      const dependencyTaskId = getMirrorId(dependencyTask.id)
+      if (dependencyTaskId === sourceTaskId) {
+        continue
+      }
+
+      const dependents = dependentsByTaskId.get(dependencyTaskId)
+      if (dependents == null) {
+        continue
+      }
+
+      dependents.add(sourceTaskId)
+    }
+  }
+
+  const descendantsByTaskId = new Map<DbId, number>()
+  const demandByTaskId = new Map<DbId, number>()
+  for (const [taskId, dependents] of dependentsByTaskId.entries()) {
+    const descendantCount = countReachableDependents(taskId, dependentsByTaskId)
+    const normalizedDescendants = normalizeDescendantCount(descendantCount)
+    const dependencyDemand = resolveDependencyDemandScore(
+      dependents,
+      taskDemandByTaskId,
+    )
+    descendantsByTaskId.set(taskId, normalizedDescendants)
+    demandByTaskId.set(taskId, dependencyDemand)
+  }
+
+  return {
+    descendantsByTaskId,
+    demandByTaskId,
+    waitingDaysByTaskId,
+  }
+}
+
+function countReachableDependents(
+  taskId: DbId,
+  dependentsByTaskId: Map<DbId, Set<DbId>>,
+): number {
+  const visited = new Set<DbId>()
+  const stack = [...(dependentsByTaskId.get(taskId) ?? [])]
+
+  while (stack.length > 0) {
+    const dependentTaskId = stack.pop() as DbId
+    if (dependentTaskId === taskId) {
+      continue
+    }
+    if (visited.has(dependentTaskId)) {
+      continue
+    }
+    visited.add(dependentTaskId)
+
+    const childDependents = dependentsByTaskId.get(dependentTaskId)
+    if (childDependents == null || childDependents.size === 0) {
+      continue
+    }
+
+    for (const childTaskId of childDependents) {
+      if (!visited.has(childTaskId)) {
+        stack.push(childTaskId)
+      }
+    }
+  }
+
+  return visited.size
+}
+
+function resolveTaskDemand(values: TaskPropertyValues): number {
+  const importance = normalizeDemandValue(values.importance)
+  const urgency = normalizeDemandValue(values.urgency)
+  const weightedDemand = importance * 0.6 + urgency * 0.4
+  return clampRatio((weightedDemand - 0.5) * 2)
+}
+
+function normalizeDemandValue(value: number | null): number {
+  if (value == null || Number.isNaN(value)) {
+    return 0.5
+  }
+
+  if (value <= 0) {
+    return 0
+  }
+  if (value >= 100) {
+    return 1
+  }
+
+  return value / 100
+}
+
+function resolveDependencyDemandScore(
+  dependents: Set<DbId>,
+  taskDemandByTaskId: Map<DbId, number>,
+): number {
+  let demandScore = 0
+
+  for (const dependentTaskId of dependents) {
+    demandScore = Math.max(demandScore, taskDemandByTaskId.get(dependentTaskId) ?? 0)
+  }
+
+  return clampRatio(demandScore)
+}
+
+function normalizeDescendantCount(descendantCount: number): number {
+  if (descendantCount <= 0) {
+    return 0
+  }
+
+  return clampRatio(1 - Math.exp(-descendantCount / 2))
+}
+
+function resolveTaskWaitingDays(taskBlock: Block, now: Date): number {
+  const modifiedAtMs = normalizeDateTimeToTimestamp(taskBlock.modified)
+  const createdAtMs = normalizeDateTimeToTimestamp(taskBlock.created)
+  const anchorMs = modifiedAtMs ?? createdAtMs
+  if (anchorMs == null) {
+    return 0
+  }
+
+  const ageMs = now.getTime() - anchorMs
+  if (ageMs <= 0) {
+    return 0
+  }
+
+  return ageMs / ONE_DAY_MS
+}
+
+function resolveTaskScoreContext(
+  taskId: DbId,
+  scoringContext: TaskScoringContext | null,
+): TaskScoreContext {
+  if (scoringContext == null) {
+    return {}
+  }
+
+  return {
+    dependencyDescendants: scoringContext.descendantsByTaskId.get(taskId) ?? 0,
+    dependencyDemand: scoringContext.demandByTaskId.get(taskId) ?? 0,
+    waitingDays: scoringContext.waitingDaysByTaskId.get(taskId) ?? 0,
+  }
 }
 
 async function buildSubtaskContext(
@@ -934,6 +1152,12 @@ function normalizeDateTimeToTimestamp(
 }
 
 function compareNextActionItems(left: NextActionItem, right: NextActionItem): number {
+  const leftOverdue = isOverdueTask(left.endTime)
+  const rightOverdue = isOverdueTask(right.endTime)
+  if (leftOverdue !== rightOverdue) {
+    return leftOverdue ? -1 : 1
+  }
+
   if (left.score !== right.score) {
     return right.score - left.score
   }
@@ -995,6 +1219,34 @@ function normalizeDueTime(endTime: Date | null): number {
 
   const timestamp = endTime.getTime()
   return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp
+}
+
+function isOverdueTask(endTime: Date | null): boolean {
+  if (endTime == null) {
+    return false
+  }
+
+  const dueTime = endTime.getTime()
+  if (Number.isNaN(dueTime)) {
+    return false
+  }
+
+  return dueTime < Date.now()
+}
+
+function clampRatio(value: number): number {
+  if (Number.isNaN(value) || !Number.isFinite(value)) {
+    return 0
+  }
+
+  if (value < 0) {
+    return 0
+  }
+  if (value > 1) {
+    return 1
+  }
+
+  return value
 }
 
 function findTaskTagRef(
