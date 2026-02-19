@@ -1,7 +1,7 @@
 import type { Block, DbId, TagMenuCommand } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import type { TaskSchemaDefinition } from "./task-schema"
-import { getMirrorId } from "./block-utils"
+import { getMirrorId, isValidDbId } from "./block-utils"
 import {
   closeTaskPropertyPopup,
   disposeTaskPropertyPopup,
@@ -40,7 +40,7 @@ export function setupTaskPopupEntry(
     }
 
     const blockId = Number(blockEl.dataset.id)
-    if (Number.isNaN(blockId)) {
+    if (!isValidDbId(blockId)) {
       return
     }
 
@@ -128,7 +128,8 @@ export function setupTaskPopupEntry(
 
 function resolveCommandTargetBlockId(explicitBlockId?: DbId): DbId | null {
   if (explicitBlockId != null) {
-    return getMirrorId(explicitBlockId)
+    const normalized = getMirrorId(explicitBlockId)
+    return isValidDbId(normalized) ? normalized : null
   }
 
   // If triggered from command panel without args, fallback to current cursor block.
@@ -137,7 +138,8 @@ function resolveCommandTargetBlockId(explicitBlockId?: DbId): DbId | null {
     return null
   }
 
-  return getMirrorId(cursor.anchor.blockId)
+  const normalized = getMirrorId(cursor.anchor.blockId)
+  return isValidDbId(normalized) ? normalized : null
 }
 
 function hasTaskTagRef(blockId: DbId, tagAlias: string): boolean {

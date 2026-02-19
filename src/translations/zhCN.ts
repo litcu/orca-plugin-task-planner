@@ -246,6 +246,7 @@
   "Delete task block": "删除任务块",
   "Remove task tag from this block?": "确定删除该任务吗？此操作会移除当前块上的任务标签。",
   "Delete task block and its subtasks?": "确定删除该任务块吗？其子任务也会一并删除。",
+  "This task is depended on by ${count} tasks. Delete anyway? Dependencies will be removed automatically.": "当前有 ${count} 个任务依赖此任务。仍要删除吗？删除后会自动移除这些依赖关系。",
   "No due": "未设置",
   "Overdue ${days}d": "超期${days}天",
   "Review overdue ${days}d": "回顾超期${days}天",

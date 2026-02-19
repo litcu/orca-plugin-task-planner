@@ -1,5 +1,5 @@
 import type { Block, BlockRef, DbId } from "../orca.d.ts"
-import { getMirrorId } from "./block-utils"
+import { getMirrorId, isValidDbId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
@@ -36,6 +36,10 @@ export async function createRecurringTaskInTodayJournal(
   }
 
   const sourceTaskId = getMirrorId(sourceBlockId)
+  if (!isValidDbId(sourceTaskId)) {
+    return false
+  }
+
   const blockCacheById = new Map<DbId, Block | null>()
 
   try {
@@ -130,7 +134,16 @@ async function collectDescendantTaskTargets(
   const queue = [...rootBlock.children]
 
   while (queue.length > 0) {
-    const currentId = getMirrorId(queue.shift() as DbId)
+    const rawId = queue.shift()
+    if (!isValidDbId(rawId)) {
+      continue
+    }
+
+    const currentId = getMirrorId(rawId)
+    if (!isValidDbId(currentId)) {
+      continue
+    }
+
     if (visitedBlockIds.has(currentId)) {
       continue
     }
@@ -153,7 +166,9 @@ async function collectDescendantTaskTargets(
     }
 
     for (const childId of block.children) {
-      queue.push(childId)
+      if (isValidDbId(childId)) {
+        queue.push(childId)
+      }
     }
   }
 
@@ -165,6 +180,10 @@ async function getBlockByIdWithCache(
   blockCacheById: Map<DbId, Block | null>,
 ): Promise<Block | null> {
   const normalizedId = getMirrorId(blockId)
+  if (!isValidDbId(normalizedId)) {
+    return null
+  }
+
   if (blockCacheById.has(normalizedId)) {
     return blockCacheById.get(normalizedId) ?? null
   }
@@ -202,7 +221,9 @@ function cacheBlockByKnownIds(
 ) {
   const aliasIds = [block.id, getMirrorId(block.id)]
   for (const aliasId of aliasIds) {
-    blockCacheById.set(aliasId, block)
+    if (isValidDbId(aliasId)) {
+      blockCacheById.set(aliasId, block)
+    }
   }
 }
 

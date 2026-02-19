@@ -29,3 +29,30 @@ export function getMirrorIdFromBlock(block: Pick<Block, "id" | "properties">): D
 
   return getMirrorId(block.id)
 }
+
+export function isValidDbId(id: unknown): id is DbId {
+  return (
+    typeof id === "number" &&
+    Number.isInteger(id) &&
+    Number.isFinite(id) &&
+    id > 0
+  )
+}
+
+export function dedupeDbIds(
+  ids: Array<DbId | null | undefined>,
+): DbId[] {
+  const seen = new Set<DbId>()
+  const normalized: DbId[] = []
+
+  for (const id of ids) {
+    if (!isValidDbId(id) || seen.has(id)) {
+      continue
+    }
+
+    seen.add(id)
+    normalized.push(id)
+  }
+
+  return normalized
+}

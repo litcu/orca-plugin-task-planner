@@ -1,6 +1,6 @@
 import type { Block, BlockProperty, CursorData, DbId } from "../orca.d.ts"
 import { DEFAULT_TASK_SCORE, type TaskSchemaDefinition } from "./task-schema"
-import { getMirrorId } from "./block-utils"
+import { getMirrorId, isValidDbId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
@@ -65,6 +65,10 @@ function registerCycleTaskStatusCommand(
       }
 
       const blockId = getMirrorId(rawBlockId)
+      if (!isValidDbId(blockId)) {
+        return null
+      }
+
       const block = orca.state.blocks[blockId]
       if (block == null) {
         return null
@@ -90,14 +94,14 @@ function resolveTargetBlockId(
   explicitBlockId?: DbId,
 ): DbId | null {
   if (explicitBlockId != null) {
-    return explicitBlockId
+    return isValidDbId(explicitBlockId) ? explicitBlockId : null
   }
 
   if (cursor == null || !isCollapsedCursor(cursor)) {
     return null
   }
 
-  return cursor.anchor.blockId
+  return isValidDbId(cursor.anchor.blockId) ? cursor.anchor.blockId : null
 }
 
 function isCollapsedCursor(cursor: CursorData): boolean {
@@ -313,7 +317,7 @@ function createStatusIconClickListener(
     }
 
     const blockId = Number(blockEl.dataset.id)
-    if (Number.isNaN(blockId)) {
+    if (!isValidDbId(blockId)) {
       return
     }
 

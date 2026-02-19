@@ -1,9 +1,15 @@
 import type { Block, BlockProperty, BlockRef, DbId } from "../orca.d.ts"
-import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
+import {
+  dedupeDbIds,
+  getMirrorId,
+  getMirrorIdFromBlock,
+  isValidDbId,
+} from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
+  toRefDataForSave,
   toTaskMetaPropertyForSave,
   type TaskPropertyValues,
 } from "./task-properties"
@@ -20,6 +26,7 @@ import {
 } from "./task-review"
 
 const TAG_REF_TYPE = 2
+const REF_DATA_TYPE = 3
 const DATE_TIME_PROP_TYPE = 5
 const BOOLEAN_PROP_TYPE = 4
 
@@ -344,7 +351,12 @@ export async function cycleTaskStatusInView(
     getMirrorId(blockId),
     blockId,
   )
-  const taskBlock = resolveTaskBlockFromCandidates(targetIds)
+  const writableTargetIds = await resolveExistingCandidateIds(targetIds)
+  if (writableTargetIds.length === 0) {
+    throw new Error("No task block id available for status update")
+  }
+
+  const taskBlock = resolveTaskBlockFromCandidates(writableTargetIds)
   const taskRefFromState = resolveTaskRefFromState(blockId, schema)
   const effectiveTaskRef = taskRefFromState ?? taskTagRef
   const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema, taskBlock)
@@ -393,7 +405,7 @@ export async function cycleTaskStatusInView(
       await orca.commands.invokeEditorCommand(
         "core.editor.setProperties",
         null,
-        [targetIds[0] ?? blockId],
+        [writableTargetIds[0]],
         [metaProperty],
       )
       await createRecurringTaskInTodayJournal(
@@ -410,7 +422,7 @@ export async function cycleTaskStatusInView(
   }
 
   let lastError: unknown = null
-  for (const targetId of targetIds) {
+  for (const targetId of writableTargetIds) {
     try {
       await orca.commands.invokeEditorCommand(
         "core.editor.insertTag",
@@ -479,9 +491,13 @@ export async function toggleTaskStarInView(
     getMirrorId(blockId),
     blockId,
   )
+  const writableTargetIds = await resolveExistingCandidateIds(targetIds)
+  if (writableTargetIds.length === 0) {
+    throw new Error("No task block id available for star update")
+  }
 
   let lastError: unknown = null
-  for (const targetId of targetIds) {
+  for (const targetId of writableTargetIds) {
     try {
       await orca.commands.invokeEditorCommand(
         "core.editor.insertTag",
@@ -514,7 +530,12 @@ export async function markTaskReviewedInView(
     getMirrorId(blockId),
     blockId,
   )
-  const taskBlock = resolveTaskBlockFromCandidates(targetIds)
+  const writableTargetIds = await resolveExistingCandidateIds(targetIds)
+  if (writableTargetIds.length === 0) {
+    throw new Error("No task block id available for review update")
+  }
+
+  const taskBlock = resolveTaskBlockFromCandidates(writableTargetIds)
   const taskRefFromState = resolveTaskRefFromState(blockId, schema)
   const effectiveTaskRef = taskRefFromState ?? taskTagRef
   const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema, taskBlock)
@@ -534,7 +555,7 @@ export async function markTaskReviewedInView(
   const metaProperty = toTaskMetaPropertyForSave(nextValues, taskBlock)
 
   let lastError: unknown = null
-  for (const targetId of targetIds) {
+  for (const targetId of writableTargetIds) {
     try {
       await orca.commands.invokeEditorCommand(
         "core.editor.setProperties",
@@ -568,8 +589,9 @@ export async function addSubtaskInView(
     parentBlockId,
     options?.parentSourceBlockId ?? null,
   )
+  const writableParentIds = await resolveExistingCandidateIds(parentCandidateIds)
 
-  if (parentCandidateIds.length === 0) {
+  if (writableParentIds.length === 0) {
     throw new Error("No parent block id available for subtask")
   }
 
@@ -578,7 +600,7 @@ export async function addSubtaskInView(
     : ""
   let lastError: unknown = null
 
-  for (const parentId of parentCandidateIds) {
+  for (const parentId of writableParentIds) {
     try {
       const createdTaskId = await createTaskBlockAsLastChild(
         parentId,
@@ -610,9 +632,13 @@ export async function removeTaskTagInView(
     getMirrorId(blockId),
     blockId,
   )
+  const writableTargetIds = await resolveExistingCandidateIds(targetIds)
+  if (writableTargetIds.length === 0) {
+    throw new Error("No task block id available for tag removal")
+  }
 
   let lastError: unknown = null
-  for (const targetId of targetIds) {
+  for (const targetId of writableTargetIds) {
     try {
       await orca.commands.invokeEditorCommand(
         "core.editor.removeTag",
@@ -647,6 +673,7 @@ export async function removeTaskTagInView(
 
 export async function deleteTaskBlockInView(
   blockId: DbId,
+  schema: TaskSchemaDefinition,
   sourceBlockId?: DbId | null,
 ): Promise<void> {
   const targetIds = collectCandidateIds(
@@ -654,18 +681,45 @@ export async function deleteTaskBlockInView(
     getMirrorId(blockId),
     blockId,
   )
+  const writableTargetIds = await resolveExistingCandidateIds(targetIds)
+  if (writableTargetIds.length === 0) {
+    throw new Error("No task block id available for deletion")
+  }
 
   let lastError: unknown = null
-  for (const targetId of targetIds) {
+  for (const targetId of writableTargetIds) {
+    const deletionTargetIds = await collectDeletionTargetIds([targetId])
+    const cleanupPlans = await collectDependencyCleanupPlans(
+      schema,
+      deletionTargetIds,
+    )
     try {
       await orca.commands.invokeEditorCommand(
         "core.editor.deleteBlocks",
         null,
         [targetId],
       )
+      await applyDependencyCleanupPlans(schema, cleanupPlans)
       invalidateNextActionEvaluationCache()
       return
     } catch (error) {
+      if (cleanupPlans.length > 0) {
+        try {
+          await applyDependencyCleanupPlans(schema, cleanupPlans)
+          await orca.commands.invokeEditorCommand(
+            "core.editor.deleteBlocks",
+            null,
+            [targetId],
+          )
+          invalidateNextActionEvaluationCache()
+          return
+        } catch (retryError) {
+          lastError = retryError
+          console.error(retryError)
+          continue
+        }
+      }
+
       lastError = error
       console.error(error)
     }
@@ -674,6 +728,33 @@ export async function deleteTaskBlockInView(
   if (lastError != null) {
     throw lastError
   }
+}
+
+export async function countTaskDependentsForDeleteInView(
+  blockId: DbId,
+  schema: TaskSchemaDefinition,
+  sourceBlockId?: DbId | null,
+): Promise<number> {
+  const targetIds = collectCandidateIds(
+    sourceBlockId ?? null,
+    getMirrorId(blockId),
+    blockId,
+  )
+  const writableTargetIds = await resolveExistingCandidateIds(targetIds)
+  if (writableTargetIds.length === 0) {
+    return 0
+  }
+
+  const deletionTargetIds = await collectDeletionTargetIds(writableTargetIds)
+  if (deletionTargetIds.size === 0) {
+    return 0
+  }
+
+  const cleanupPlans = await collectDependencyCleanupPlans(
+    schema,
+    deletionTargetIds,
+  )
+  return cleanupPlans.length
 }
 
 type MoveTaskPosition = "before" | "after" | "child"
@@ -688,11 +769,11 @@ export async function moveTaskInView(
     moveToTodayJournalRoot?: boolean
   },
 ): Promise<void> {
-  const sourceCandidates = collectCandidateIds(
+  const sourceCandidates = await resolveExistingCandidateIds(collectCandidateIds(
     options.sourceSourceBlockId ?? null,
     getMirrorId(sourceBlockId),
     sourceBlockId,
-  )
+  ))
 
   if (sourceCandidates.length === 0) {
     throw new Error("No source block id available for move")
@@ -732,19 +813,25 @@ export async function moveTaskInView(
     return
   }
 
-  const targetCandidates = collectCandidateIds(
+  const targetCandidates = await resolveExistingCandidateIds(collectCandidateIds(
     options.targetSourceBlockId ?? null,
     getMirrorId(targetBlockId),
     targetBlockId,
-  )
+  ))
 
   if (targetCandidates.length === 0) {
     throw new Error("No target block id available for move")
   }
 
   let lastError: unknown = null
+  let attemptedMove = false
   for (const sourceId of sourceCandidates) {
     for (const targetId of targetCandidates) {
+      if (await isMovePairUnsafe(sourceId, targetId)) {
+        continue
+      }
+
+      attemptedMove = true
       try {
         await orca.commands.invokeEditorCommand(
           "core.editor.moveBlocks",
@@ -760,6 +847,10 @@ export async function moveTaskInView(
         console.error(error)
       }
     }
+  }
+
+  if (!attemptedMove) {
+    throw new Error("No valid move target available")
   }
 
   if (lastError != null) {
@@ -911,9 +1002,266 @@ function resolveTaskBlockFromCandidates(candidateIds: DbId[]): Block | null {
 }
 
 function collectCandidateIds(...candidates: Array<DbId | null | undefined>): DbId[] {
-  return candidates
-    .filter((id): id is DbId => id != null && !Number.isNaN(id))
-    .filter((id, index, all) => all.indexOf(id) === index)
+  return dedupeDbIds(candidates)
+}
+
+async function resolveExistingCandidateIds(
+  candidateIds: DbId[],
+): Promise<DbId[]> {
+  const resolved: DbId[] = []
+
+  for (const candidateId of candidateIds) {
+    if (orca.state.blocks[candidateId] != null) {
+      resolved.push(candidateId)
+      continue
+    }
+
+    try {
+      const block = (await orca.invokeBackend("get-block", candidateId)) as Block | null
+      if (block != null) {
+        resolved.push(candidateId)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  if (resolved.length === 0) {
+    return candidateIds
+  }
+
+  return dedupeDbIds(resolved)
+}
+
+interface DependencyCleanupPlan {
+  blockId: DbId
+  values: TaskPropertyValues
+  taskBlock: Block | null
+}
+
+async function collectDeletionTargetIds(
+  candidateIds: DbId[],
+): Promise<Set<DbId>> {
+  const deletionTargetIds = new Set<DbId>()
+  const visited = new Set<DbId>()
+  const queue = [...candidateIds]
+  const blockCacheById = new Map<DbId, Block | null>()
+
+  while (queue.length > 0) {
+    const rawId = queue.shift()
+    if (!isValidDbId(rawId)) {
+      continue
+    }
+
+    const blockId = getMirrorId(rawId)
+    if (!isValidDbId(blockId) || visited.has(blockId)) {
+      continue
+    }
+
+    visited.add(blockId)
+    deletionTargetIds.add(blockId)
+
+    const block = await getBlockByIdWithCache(blockId, blockCacheById)
+    if (block == null) {
+      continue
+    }
+
+    for (const childId of block.children) {
+      const normalizedChildId = getMirrorId(childId)
+      if (isValidDbId(normalizedChildId) && !visited.has(normalizedChildId)) {
+        queue.push(normalizedChildId)
+      }
+    }
+  }
+
+  return deletionTargetIds
+}
+
+async function applyDependencyCleanupPlans(
+  schema: TaskSchemaDefinition,
+  cleanupPlans: DependencyCleanupPlan[],
+): Promise<void> {
+  if (cleanupPlans.length === 0) {
+    return
+  }
+
+  let cacheInvalidated = false
+  for (const plan of cleanupPlans) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.insertTag",
+        null,
+        plan.blockId,
+        schema.tagAlias,
+        toRefDataForSave(plan.values, schema),
+      )
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setProperties",
+        null,
+        [plan.blockId],
+        [toTaskMetaPropertyForSave(plan.values, plan.taskBlock)],
+      )
+      cacheInvalidated = true
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  if (cacheInvalidated) {
+    invalidateNextActionEvaluationCache()
+  }
+}
+
+async function collectDependencyCleanupPlans(
+  schema: TaskSchemaDefinition,
+  deletedTargetIds: Set<DbId>,
+): Promise<DependencyCleanupPlan[]> {
+  const rawBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
+    schema.tagAlias,
+  ])) as Block[]
+
+  const plans: DependencyCleanupPlan[] = []
+  const seenTaskIds = new Set<DbId>()
+
+  for (const sourceBlock of rawBlocks) {
+    const taskId = getMirrorIdFromBlock(sourceBlock)
+    if (!isValidDbId(taskId) || seenTaskIds.has(taskId) || deletedTargetIds.has(taskId)) {
+      continue
+    }
+
+    const taskBlock = getLiveTaskBlock(sourceBlock)
+    const taskRef =
+      findTaskTagRef(taskBlock, schema.tagAlias) ??
+      findTaskTagRef(sourceBlock, schema.tagAlias)
+    if (taskRef == null) {
+      continue
+    }
+
+    const values = getTaskPropertiesFromRef(taskRef.data, schema, taskBlock)
+    if (values.dependsOn.length === 0) {
+      continue
+    }
+
+    const keptDependsOnRefIds = resolveDependsOnRefIdsAfterDeletion(
+      values.dependsOn,
+      collectDependencyRefMap(sourceBlock, taskBlock),
+      deletedTargetIds,
+    )
+    if (keptDependsOnRefIds.length === values.dependsOn.length) {
+      continue
+    }
+
+    const normalizedDependsMode =
+      values.dependsMode === "ALL" || values.dependsMode === "ANY"
+        ? values.dependsMode
+        : schema.dependencyModeChoices[0]
+    const nextValues = normalizeTaskValuesForStatus({
+      ...values,
+      dependsOn: keptDependsOnRefIds,
+      dependsMode:
+        keptDependsOnRefIds.length === 0
+          ? schema.dependencyModeChoices[0]
+          : normalizedDependsMode,
+      dependencyDelay:
+        keptDependsOnRefIds.length === 0
+          ? null
+          : values.dependencyDelay,
+    }, schema)
+
+    plans.push({
+      blockId: resolveUsableBlockId(taskId),
+      values: nextValues,
+      taskBlock,
+    })
+    seenTaskIds.add(taskId)
+  }
+
+  return plans
+}
+
+function collectDependencyRefMap(...blocks: Block[]): Map<DbId, BlockRef> {
+  const refById = new Map<DbId, BlockRef>()
+
+  for (const block of blocks) {
+    for (const ref of block.refs) {
+      if (!isValidDbId(ref.id) || ref.type !== REF_DATA_TYPE) {
+        continue
+      }
+
+      refById.set(ref.id, ref)
+    }
+  }
+
+  return refById
+}
+
+function resolveDependsOnRefIdsAfterDeletion(
+  dependsOnRefIds: DbId[],
+  refById: Map<DbId, BlockRef>,
+  deletedTargetIds: Set<DbId>,
+): DbId[] {
+  const kept: DbId[] = []
+
+  for (const refId of dependsOnRefIds) {
+    if (!isValidDbId(refId)) {
+      continue
+    }
+
+    const dependencyRef = refById.get(refId)
+    if (dependencyRef == null || !isValidDbId(dependencyRef.to)) {
+      continue
+    }
+
+    const dependencyTargetId = getMirrorId(dependencyRef.to)
+    if (!isValidDbId(dependencyTargetId) || deletedTargetIds.has(dependencyTargetId)) {
+      continue
+    }
+
+    kept.push(refId)
+  }
+
+  return dedupeDbIds(kept)
+}
+
+async function isMovePairUnsafe(
+  sourceId: DbId,
+  targetId: DbId,
+): Promise<boolean> {
+  if (sourceId === targetId) {
+    return true
+  }
+
+  return await isAncestorOrSelf(sourceId, targetId)
+}
+
+async function isAncestorOrSelf(
+  ancestorId: DbId,
+  blockId: DbId,
+): Promise<boolean> {
+  const ancestorIds = new Set(
+    collectCandidateIds(ancestorId, getMirrorId(ancestorId)),
+  )
+  const visited = new Set<DbId>()
+  const blockCacheById = new Map<DbId, Block | null>()
+  let currentId: DbId | null = blockId
+
+  while (currentId != null) {
+    const normalizedId = getMirrorId(currentId)
+    if (!isValidDbId(normalizedId) || visited.has(normalizedId)) {
+      return false
+    }
+
+    if (ancestorIds.has(normalizedId)) {
+      return true
+    }
+
+    visited.add(normalizedId)
+    const block = await getBlockByIdWithCache(normalizedId, blockCacheById)
+    const parentId = block?.parent
+    currentId = isValidDbId(parentId) ? parentId : null
+  }
+
+  return false
 }
 
 function findTaskTagRef(

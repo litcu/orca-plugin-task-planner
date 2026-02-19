@@ -4,7 +4,7 @@ import {
   DEFAULT_TASK_SCORE,
   type TaskSchemaDefinition,
 } from "../core/task-schema"
-import { getMirrorId } from "../core/block-utils"
+import { dedupeDbIds, getMirrorId, isValidDbId } from "../core/block-utils"
 import {
   buildTaskFieldLabels,
   getTaskPropertiesFromRef,
@@ -128,12 +128,17 @@ function ensureRoot(options?: OpenTaskPropertyPopupOptions) {
 function resolvePopupMountContainer(
   options?: OpenTaskPropertyPopupOptions,
 ): HTMLElement {
-  if (
-    options?.triggerSource === "panel-view"
-    && options.mountContainer != null
-    && options.mountContainer.isConnected
-  ) {
-    return options.mountContainer
+  if (options?.triggerSource === "panel-view") {
+    if (options.mountContainer != null && options.mountContainer.isConnected) {
+      return options.mountContainer
+    }
+
+    const fallbackPanelContainer = document.querySelector(
+      "[data-role='mlo-task-views-panel-root']",
+    )
+    if (fallbackPanelContainer instanceof HTMLElement && fallbackPanelContainer.isConnected) {
+      return fallbackPanelContainer
+    }
   }
   return document.body
 }
@@ -182,8 +187,25 @@ function TaskPropertyPopupView(props: {
   const labels = buildTaskFieldLabels(locale)
   const isChinese = locale === "zh-CN"
   const isCreateMode = props.mode === "create"
+  const effectivePanelMountContainer = React.useMemo(() => {
+    if (props.triggerSource !== "panel-view") {
+      return null
+    }
+
+    if (props.mountContainer != null && props.mountContainer.isConnected) {
+      return props.mountContainer
+    }
+
+    const fallbackPanelContainer = document.querySelector(
+      "[data-role='mlo-task-views-panel-root']",
+    )
+    return fallbackPanelContainer instanceof HTMLElement && fallbackPanelContainer.isConnected
+      ? fallbackPanelContainer
+      : null
+  }, [props.mountContainer, props.triggerSource])
   const isPanelSidebarMode =
-    props.triggerSource === "panel-view" && props.mountContainer != null
+    !isCreateMode &&
+    effectivePanelMountContainer != null
   const untitledTaskName = t("(Untitled task)")
   const block = props.blockId == null ? undefined : orca.state.blocks[props.blockId]
   const taskRef = block?.refs.find(
@@ -332,25 +354,26 @@ function TaskPropertyPopupView(props: {
   const [activationLoading, setActivationLoading] = React.useState(true)
 
   const dateAnchorRef = React.useRef<HTMLElement | null>(null)
+  const popupPanelRef = React.useRef<HTMLDivElement | null>(null)
   // Mount dropdown and date picker overlays inside the panel sidebar when possible.
   const popupMenuContainerRef = React.useRef<HTMLElement | null>(null)
   popupMenuContainerRef.current = isPanelSidebarMode
-    ? props.mountContainer ?? null
+    ? effectivePanelMountContainer ?? document.body
     : document.body
   const [mountContainerWidth, setMountContainerWidth] = React.useState(() => {
-    if (isPanelSidebarMode && props.mountContainer != null) {
-      return props.mountContainer.clientWidth || window.innerWidth
+    if (isPanelSidebarMode && effectivePanelMountContainer != null) {
+      return effectivePanelMountContainer.clientWidth || window.innerWidth
     }
     return window.innerWidth
   })
 
   React.useEffect(() => {
-    if (!isPanelSidebarMode || props.mountContainer == null) {
+    if (!isPanelSidebarMode || effectivePanelMountContainer == null) {
       setMountContainerWidth(window.innerWidth)
       return
     }
 
-    const mountContainer = props.mountContainer
+    const mountContainer = effectivePanelMountContainer
     const syncWidth = () => {
       const nextWidth = mountContainer.clientWidth
       if (nextWidth > 0) {
@@ -369,7 +392,7 @@ function TaskPropertyPopupView(props: {
       resizeObserver?.disconnect()
       window.removeEventListener("resize", syncWidth)
     }
-  }, [isPanelSidebarMode, props.mountContainer])
+  }, [effectivePanelMountContainer, isPanelSidebarMode])
   const estimatedPanelWidth = isPanelSidebarMode
     ? Math.min(Math.max(mountContainerWidth * 0.46, 300), mountContainerWidth)
     : isCreateMode
@@ -1389,32 +1412,29 @@ function TaskPropertyPopupView(props: {
         borderRadius: "12px 0 0 12px",
         boxShadow: "-12px 0 32px rgba(10, 18, 30, 0.24)",
       }
-  return React.createElement(
-    ModalOverlay,
+  const handleRequestClose = () => {
+    if (editingDateField != null) {
+      setEditingDateField(null)
+      return
+    }
+    props.onClose()
+  }
+
+  React.useEffect(() => {
+    if (!isPanelSidebarMode || props.visible) {
+      return
+    }
+
+    props.onDispose()
+  }, [isPanelSidebarMode, props.onDispose, props.visible])
+
+  const panelContent = React.createElement(
+    "div",
     {
-      visible: props.visible,
-      blurred: false,
-      style: overlayStyle,
-      canClose: true,
-      onClose: () => {
-        if (editingDateField != null) {
-          setEditingDateField(null)
-          return
-        }
-        props.onClose()
-      },
-      onClosed: () => {
-        if (!props.visible) {
-          props.onDispose()
-        }
-      },
+      ref: popupPanelRef,
+      style: panelStyle,
+      onClick: (event: MouseEvent) => event.stopPropagation(),
     },
-      React.createElement(
-        "div",
-        {
-          style: panelStyle,
-          onClick: (event: MouseEvent) => event.stopPropagation(),
-        },
         React.createElement(
           "div",
           {
@@ -1857,11 +1877,12 @@ function TaskPropertyPopupView(props: {
               width: "100%",
               menuContainer: popupMenuContainerRef,
               onChange: (selected: string[]) => {
-                const normalized = selected
-                  .map((item) => Number(item))
-                  .filter((item) => !Number.isNaN(item))
-                  .map((item) => getMirrorId(item))
-                  .filter((item, index, all) => all.indexOf(item) === index)
+                const normalized = dedupeBlockIds(
+                  selected
+                    .map((item) => Number(item))
+                    .filter((item): item is DbId => isValidDbId(item))
+                    .map((item) => getMirrorId(item)),
+                )
 
                 setDependsOnValues(normalized)
                 if (normalized.length === 0) {
@@ -1985,8 +2006,39 @@ function TaskPropertyPopupView(props: {
               errorText,
             )
           : null,
-      ),
+      )
+
+  if (isPanelSidebarMode) {
+    if (!props.visible) {
+      return null
+    }
+
+    return React.createElement(
+      "div",
+      {
+        style: overlayStyle,
+        onClick: () => handleRequestClose(),
+      },
+      panelContent,
     )
+  }
+
+  return React.createElement(
+    ModalOverlay,
+    {
+      visible: props.visible,
+      blurred: false,
+      style: overlayStyle,
+      canClose: true,
+      onClose: () => handleRequestClose(),
+      onClosed: () => {
+        if (!props.visible) {
+          props.onDispose()
+        }
+      },
+    },
+    panelContent,
+  )
 }
 
 interface TaskEditorSnapshotInput {
@@ -2048,7 +2100,7 @@ async function resolveExistingBlockId(
   fallback: DbId | null = null,
 ): Promise<DbId | null> {
   for (const id of ids) {
-    if (id == null || Number.isNaN(id)) {
+    if (!isValidDbId(id)) {
       continue
     }
 
@@ -2072,9 +2124,7 @@ async function resolveExistingBlockId(
 function dedupeBlockIds(
   ids: Array<DbId | null | undefined>,
 ): DbId[] {
-  return ids
-    .filter((id): id is DbId => id != null && !Number.isNaN(id))
-    .filter((id, index, all) => all.indexOf(id) === index)
+  return dedupeDbIds(ids)
 }
 
 function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {
@@ -2207,14 +2257,22 @@ function normalizeDependsOnForSelect(
   dependsOn: DbId[],
   _dependsOnPropertyName: string,
 ): DbId[] {
+  const seen = new Set<DbId>()
   const normalized: DbId[] = []
 
   for (const value of dependsOn) {
+    if (!isValidDbId(value)) {
+      continue
+    }
+
     const matchedRef = sourceBlock?.refs.find((ref) => ref.id === value)
     const targetId = getMirrorId(matchedRef?.to ?? value)
-    if (!normalized.includes(targetId)) {
-      normalized.push(targetId)
+    if (!isValidDbId(targetId) || seen.has(targetId)) {
+      continue
     }
+
+    seen.add(targetId)
+    normalized.push(targetId)
   }
 
   return normalized
@@ -2224,18 +2282,36 @@ async function ensureDependencyRefIds(
   sourceBlockId: DbId,
   targetTaskIds: DbId[],
 ): Promise<DbId[]> {
-  const uniqueTargetIds = targetTaskIds
-    .map((item) => getMirrorId(item))
-    .filter((item, index, all) => all.indexOf(item) === index)
+  const sourceCandidates = dedupeBlockIds([
+    getMirrorId(sourceBlockId),
+    sourceBlockId,
+  ])
+  const normalizedSourceBlockId = sourceCandidates[0] ?? null
+  if (normalizedSourceBlockId == null) {
+    return []
+  }
+
+  const uniqueTargetIds = dedupeBlockIds(
+    targetTaskIds.map((item) => getMirrorId(item)),
+  ).filter((item) => item !== normalizedSourceBlockId)
 
   const resolvedRefIds: DbId[] = []
-  for (const targetTaskId of uniqueTargetIds) {
-    const sourceBlock = orca.state.blocks[sourceBlockId]
+  for (const unresolvedTargetTaskId of uniqueTargetIds) {
+    const resolvedTargetTaskId = await resolveExistingBlockId([
+      unresolvedTargetTaskId,
+      getMirrorId(unresolvedTargetTaskId),
+    ])
+    const targetTaskId = resolvedTargetTaskId ?? unresolvedTargetTaskId
+    if (targetTaskId == null || targetTaskId === normalizedSourceBlockId) {
+      continue
+    }
+
+    const sourceBlock = orca.state.blocks[normalizedSourceBlockId]
     const existingRefId = sourceBlock?.refs.find((ref) => {
       return ref.type === REF_DATA_TYPE && getMirrorId(ref.to) === targetTaskId
     })?.id
 
-    if (existingRefId != null) {
+    if (isValidDbId(existingRefId)) {
       resolvedRefIds.push(existingRefId)
       continue
     }
@@ -2243,14 +2319,16 @@ async function ensureDependencyRefIds(
     const createdRefId = (await orca.commands.invokeEditorCommand(
       "core.editor.createRef",
       null,
-      sourceBlockId,
+      normalizedSourceBlockId,
       targetTaskId,
       REF_DATA_TYPE,
     )) as DbId
-    resolvedRefIds.push(createdRefId)
+    if (isValidDbId(createdRefId)) {
+      resolvedRefIds.push(createdRefId)
+    }
   }
 
-  return resolvedRefIds
+  return dedupeBlockIds(resolvedRefIds)
 }
 
 function normalizeTaskLabelValues(labels: string[]): string[] {

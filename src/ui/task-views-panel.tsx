@@ -26,6 +26,7 @@ import {
 } from "../core/dependency-engine"
 import {
   collectAllTasks,
+  countTaskDependentsForDeleteInView,
   cycleTaskStatusInView,
   deleteTaskBlockInView,
   markTaskReviewedInView,
@@ -735,8 +736,25 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       })
 
       try {
+        const dependentCount = await countTaskDependentsForDeleteInView(
+          item.blockId,
+          props.schema,
+          item.sourceBlockId,
+        )
+        if (dependentCount > 0) {
+          const confirmed = window.confirm(
+            t("This task is depended on by ${count} tasks. Delete anyway? Dependencies will be removed automatically.", {
+              count: String(dependentCount),
+            }),
+          )
+          if (!confirmed) {
+            return
+          }
+        }
+
         await deleteTaskBlockInView(
           item.blockId,
+          props.schema,
           item.sourceBlockId,
         )
         setErrorText("")
@@ -752,7 +770,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         })
       }
     },
-    [loadByTab, tab],
+    [loadByTab, props.schema, tab],
   )
 
   const markTaskItemsReviewed = React.useCallback(
@@ -2221,6 +2239,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     "div",
     {
       ref: panelRootRef,
+      "data-role": "mlo-task-views-panel-root",
       style: {
         height: "100%",
         width: "100%",
