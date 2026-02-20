@@ -231,6 +231,7 @@
   "Blocked by ancestor dependencies": "父任务依赖未满足",
 
   "Open Task Views Panel": "打开任务视图面板",
+  "Open task management panel": "打开任务管理面板",
   "Toggle Task Views Panel": "切换任务视图面板",
   "Toggle task panel": "切换任务面板",
 
@@ -259,6 +260,7 @@
   "No task block found. Put cursor inside a task block first": "未定位到任务块，请先将光标放在任务块中",
   "Current block is not a task": "当前块不是任务，无法打开任务属性",
   "Open task properties": "打开任务属性",
+  "Open task property popup": "打开任务属性弹窗",
   "No repeat": "不重复",
   "By day": "按天",
   "By week": "按周",

@@ -1,4 +1,5 @@
 import type { Block, BlockProperty, CursorData, DbId } from "../orca.d.ts"
+import { t } from "../libs/l10n"
 import { DEFAULT_TASK_SCORE, type TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId, isValidDbId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
@@ -12,6 +13,7 @@ import { createRecurringTaskInTodayJournal } from "./task-recurrence"
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
 const TASK_STATUS_SHORTCUT = "alt+enter"
+const COMMAND_PREFIX = "task-planner"
 
 export interface TaskQuickActionsHandle {
   commandId: string
@@ -22,7 +24,17 @@ export async function setupTaskQuickActions(
   pluginName: string,
   schema: TaskSchemaDefinition,
 ): Promise<TaskQuickActionsHandle> {
-  const commandId = `${pluginName}.cycleTaskStatus`
+  const commandId = `${COMMAND_PREFIX}.cycleTaskStatus`
+  const legacyCommandIds = [
+    `${pluginName}.cycleTaskStatus`,
+    "orca-task-planner.cycleTaskStatus",
+  ].filter((id, index, list) => id !== commandId && list.indexOf(id) === index)
+
+  for (const legacyCommandId of legacyCommandIds) {
+    if (orca.state.commands[legacyCommandId] != null) {
+      orca.commands.unregisterEditorCommand(legacyCommandId)
+    }
+  }
 
   // 命令用于 Alt+Enter 和左侧状态图标点击，共享同一条状态流转逻辑。
   registerCycleTaskStatusCommand(commandId, schema)
@@ -44,6 +56,12 @@ export async function setupTaskQuickActions(
       removeTaskStatusStyles(pluginName)
       await orca.shortcuts.reset(commandId)
       orca.commands.unregisterEditorCommand(commandId)
+
+      for (const legacyCommandId of legacyCommandIds) {
+        if (orca.state.commands[legacyCommandId] != null) {
+          orca.commands.unregisterEditorCommand(legacyCommandId)
+        }
+      }
     },
   }
 }
@@ -85,7 +103,7 @@ function registerCycleTaskStatusCommand(
       return null
     },
     () => {},
-    { label: "切换任务状态" },
+    { label: t("Toggle task status") },
   )
 }
 

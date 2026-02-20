@@ -4,6 +4,8 @@ import type { TaskSchemaDefinition } from "./task-schema"
 import { TaskViewsPanel } from "../ui/task-views-panel"
 import { setPreferredTaskViewsTab } from "./task-views-state"
 
+const COMMAND_PREFIX = "task-planner"
+
 export interface NextActionsEntryHandle {
   panelType: string
   openCommandIds: string[]
@@ -16,23 +18,21 @@ export function setupNextActionsEntry(
 ): NextActionsEntryHandle {
   const panelType = `${pluginName}.taskViewsPanel`
   const legacyPanelTypes = [`${pluginName}.nextActionsPanel`, `${pluginName}.allTasksPanel`]
-  const dynamicOpenTaskViewsCommandId = `${pluginName}.openTaskViewsPanel`
-  const fixedOpenTaskViewsCommandId = "orca-task-planner.openTaskViewsPanel"
-  const dynamicToggleTaskViewsCommandId = `${pluginName}.toggleTaskViewsPanel`
-  const fixedToggleTaskViewsCommandId = "orca-task-planner.toggleTaskViewsPanel"
-  const headbarButtonId = `${pluginName}.toggleTaskViewsPanel`
-  const legacyOpenCommandIds = [
+  const openTaskViewsCommandId = `${COMMAND_PREFIX}.openTaskViewsPanel`
+  const headbarButtonId = `${COMMAND_PREFIX}.taskViewsHeadbarButton`
+  const legacyCommandIds = [
+    `${pluginName}.openTaskViewsPanel`,
+    `${pluginName}.toggleTaskViewsPanel`,
     `${pluginName}.openNextActionsPanel`,
     `${pluginName}.openAllTasksPanel`,
-  ]
-  const openCommandIds = [
-    dynamicOpenTaskViewsCommandId,
-    fixedOpenTaskViewsCommandId,
-  ].filter((id, index, list) => list.indexOf(id) === index)
-  const toggleCommandIds = [
-    dynamicToggleTaskViewsCommandId,
-    fixedToggleTaskViewsCommandId,
-  ].filter((id, index, list) => list.indexOf(id) === index)
+    "orca-task-planner.openTaskViewsPanel",
+    "orca-task-planner.toggleTaskViewsPanel",
+  ].filter((id, index, list) => id !== openTaskViewsCommandId && list.indexOf(id) === index)
+  const legacyHeadbarButtonIds = [
+    `${pluginName}.toggleTaskViewsPanel`,
+    "orca-task-planner.toggleTaskViewsPanel",
+  ].filter((id, index, list) => id !== headbarButtonId && list.indexOf(id) === index)
+  const openCommandIds = [openTaskViewsCommandId]
 
   // Inject schema through closure to keep renderer and schema in sync.
   const panelRenderer = (panelProps: PanelProps) => {
@@ -54,21 +54,17 @@ export function setupNextActionsEntry(
     orca.panels.registerPanel(panelType, panelRenderer)
   }
 
-  registerOpenCommand(
-    dynamicOpenTaskViewsCommandId,
-    "next-actions",
-    t("Open Task Views Panel"),
-  )
-  registerOpenCommand(
-    fixedOpenTaskViewsCommandId,
-    "next-actions",
-    t("Open Task Views Panel"),
-  )
-  registerToggleCommand(dynamicToggleTaskViewsCommandId, t("Toggle Task Views Panel"))
-  registerToggleCommand(fixedToggleTaskViewsCommandId, t("Toggle Task Views Panel"))
+  registerOpenCommand(openTaskViewsCommandId, t("Open task management panel"))
+
+  for (const legacyHeadbarButtonId of legacyHeadbarButtonIds) {
+    if (orca.state.headbarButtons[legacyHeadbarButtonId] != null) {
+      orca.headbar.unregisterHeadbarButton(legacyHeadbarButtonId)
+    }
+  }
+
   registerHeadbarButton()
 
-  for (const legacyCommandId of legacyOpenCommandIds) {
+  for (const legacyCommandId of legacyCommandIds) {
     if (orca.state.commands[legacyCommandId] != null) {
       orca.commands.unregisterCommand(legacyCommandId)
     }
@@ -86,15 +82,7 @@ export function setupNextActionsEntry(
         orca.commands.unregisterCommand(commandId)
       }
 
-      for (const commandId of toggleCommandIds) {
-        if (orca.state.commands[commandId] == null) {
-          continue
-        }
-
-        orca.commands.unregisterCommand(commandId)
-      }
-
-      for (const legacyCommandId of legacyOpenCommandIds) {
+      for (const legacyCommandId of legacyCommandIds) {
         if (orca.state.commands[legacyCommandId] == null) {
           continue
         }
@@ -115,14 +103,16 @@ export function setupNextActionsEntry(
       if (orca.state.headbarButtons[headbarButtonId] != null) {
         orca.headbar.unregisterHeadbarButton(headbarButtonId)
       }
+
+      for (const legacyHeadbarButtonId of legacyHeadbarButtonIds) {
+        if (orca.state.headbarButtons[legacyHeadbarButtonId] != null) {
+          orca.headbar.unregisterHeadbarButton(legacyHeadbarButtonId)
+        }
+      }
     },
   }
 
-  function registerOpenCommand(
-    commandId: string,
-    tab: "next-actions" | "all-tasks",
-    label: string,
-  ) {
+  function registerOpenCommand(commandId: string, label: string) {
     if (orca.state.commands[commandId] != null) {
       orca.commands.unregisterCommand(commandId)
     }
@@ -130,28 +120,6 @@ export function setupNextActionsEntry(
     orca.commands.registerCommand(
       commandId,
       async () => {
-        setPreferredTaskViewsTab(tab)
-        const panelId = orca.state.activePanel
-        orca.nav.goTo(panelType, {}, panelId)
-      },
-      label,
-    )
-  }
-
-  function registerToggleCommand(commandId: string, label: string) {
-    if (orca.state.commands[commandId] != null) {
-      orca.commands.unregisterCommand(commandId)
-    }
-
-    orca.commands.registerCommand(
-      commandId,
-      async () => {
-        const openedPanelId = findPanelIdByViewType(panelType, orca.state.panels)
-        if (openedPanelId != null) {
-          orca.nav.close(openedPanelId)
-          return
-        }
-
         setPreferredTaskViewsTab("next-actions")
         const panelId = orca.state.activePanel
         orca.nav.goTo(panelType, {}, panelId)
@@ -175,7 +143,13 @@ export function setupNextActionsEntry(
           variant: "plain",
           title: t("Toggle task panel"),
           onClick: () => {
-            void orca.commands.invokeCommand(fixedToggleTaskViewsCommandId)
+            const openedPanelId = findPanelIdByViewType(panelType, orca.state.panels)
+            if (openedPanelId != null) {
+              orca.nav.close(openedPanelId)
+              return
+            }
+
+            void orca.commands.invokeCommand(openTaskViewsCommandId)
           },
         },
         React.createElement("i", {
