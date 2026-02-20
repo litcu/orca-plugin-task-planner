@@ -261,6 +261,20 @@ Use plugin settings:
 - **Due soon days**
 - **Include overdue in Due Soon**
 
+### How do I set the initial task panel view?
+
+Use plugin setting:
+
+- **Default task panel view** (used when opening the task panel for the first time)
+
+### Can I hide the top task panel icon?
+
+Yes. In plugin settings:
+
+- **Show task panel icon** (enabled by default)
+
+If disabled, you can still open the panel via commands/shortcuts bound to: `Open Task Views Panel` and `Toggle Task Views Panel`.
+
 ## Development
 
 ```bash

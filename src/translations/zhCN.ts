@@ -6,6 +6,10 @@
   "Number of days used by the Due Soon view.": "“即将到期”视图使用的天数范围。",
   "Include overdue in Due Soon": "即将到期包含超期任务",
   "Whether the Due Soon view should include overdue tasks.": "控制“即将到期”视图是否显示已超期任务。",
+  "Default task panel view": "任务面板默认视图",
+  "The view shown when opening task panel for the first time.": "首次打开任务面板时展示的默认视图。",
+  "Show task panel icon": "显示任务面板图标",
+  "Show task panel icon in the top bar.": "是否在顶部栏显示任务面板图标。",
   "Task tag name already exists: ${name}": "任务标签名称已存在：${name}",
   "Failed to apply task tag name: ${message}": "任务标签名称应用失败：${message}",
 

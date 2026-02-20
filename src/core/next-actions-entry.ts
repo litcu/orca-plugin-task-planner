@@ -2,7 +2,8 @@ import type { ColumnPanel, PanelProps, RowPanel, ViewPanel } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import type { TaskSchemaDefinition } from "./task-schema"
 import { TaskViewsPanel } from "../ui/task-views-panel"
-import { setPreferredTaskViewsTab } from "./task-views-state"
+import { getPluginSettings } from "./plugin-settings"
+import { initializePreferredTaskViewsTab } from "./task-views-state"
 
 const COMMAND_PREFIX = "task-planner"
 
@@ -16,6 +17,7 @@ export function setupNextActionsEntry(
   pluginName: string,
   schema: TaskSchemaDefinition,
 ): NextActionsEntryHandle {
+  const initialSettings = getPluginSettings(pluginName)
   const panelType = `${pluginName}.taskViewsPanel`
   const legacyPanelTypes = [`${pluginName}.nextActionsPanel`, `${pluginName}.allTasksPanel`]
   const openTaskViewsCommandId = `${COMMAND_PREFIX}.openTaskViewsPanel`
@@ -33,6 +35,10 @@ export function setupNextActionsEntry(
     "orca-task-planner.toggleTaskViewsPanel",
   ].filter((id, index, list) => id !== headbarButtonId && list.indexOf(id) === index)
   const openCommandIds = [openTaskViewsCommandId]
+  let showTaskPanelIcon = initialSettings.showTaskPanelIcon
+  let settingsUnsubscribe: (() => void) | null = null
+
+  initializePreferredTaskViewsTab(initialSettings.defaultTaskViewsTab)
 
   // Inject schema through closure to keep renderer and schema in sync.
   const panelRenderer = (panelProps: PanelProps) => {
@@ -62,7 +68,23 @@ export function setupNextActionsEntry(
     }
   }
 
-  registerHeadbarButton()
+  syncHeadbarButtonVisibility(showTaskPanelIcon)
+
+  const pluginState = orca.state.plugins[pluginName]
+  if (pluginState != null) {
+    const { subscribe } = window.Valtio
+    settingsUnsubscribe = subscribe(pluginState, () => {
+      const latestSettings = getPluginSettings(pluginName)
+      initializePreferredTaskViewsTab(latestSettings.defaultTaskViewsTab)
+
+      if (latestSettings.showTaskPanelIcon === showTaskPanelIcon) {
+        return
+      }
+
+      showTaskPanelIcon = latestSettings.showTaskPanelIcon
+      syncHeadbarButtonVisibility(showTaskPanelIcon)
+    })
+  }
 
   for (const legacyCommandId of legacyCommandIds) {
     if (orca.state.commands[legacyCommandId] != null) {
@@ -74,6 +96,11 @@ export function setupNextActionsEntry(
     panelType,
     openCommandIds,
     dispose: () => {
+      if (settingsUnsubscribe != null) {
+        settingsUnsubscribe()
+        settingsUnsubscribe = null
+      }
+
       for (const commandId of openCommandIds) {
         if (orca.state.commands[commandId] == null) {
           continue
@@ -120,12 +147,23 @@ export function setupNextActionsEntry(
     orca.commands.registerCommand(
       commandId,
       async () => {
-        setPreferredTaskViewsTab("next-actions")
+        initializePreferredTaskViewsTab(getPluginSettings(pluginName).defaultTaskViewsTab)
         const panelId = orca.state.activePanel
         orca.nav.goTo(panelType, {}, panelId)
       },
       label,
     )
+  }
+
+  function syncHeadbarButtonVisibility(visible: boolean) {
+    if (!visible) {
+      if (orca.state.headbarButtons[headbarButtonId] != null) {
+        orca.headbar.unregisterHeadbarButton(headbarButtonId)
+      }
+      return
+    }
+
+    registerHeadbarButton()
   }
 
   function registerHeadbarButton() {

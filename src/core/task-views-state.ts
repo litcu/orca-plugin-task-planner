@@ -14,6 +14,7 @@ const CUSTOM_TASK_VIEWS_TAB_PREFIX = "custom:"
 const TASK_VIEWS_TAB_EVENT = "mlo:task-views-tab-change"
 
 let preferredTaskViewsTab: TaskViewsTab = "next-actions"
+let preferredTaskViewsTabDirty = false
 
 export function isTaskViewsTab(tab: unknown): tab is TaskViewsTab {
   return tab === "dashboard" ||
@@ -47,7 +48,16 @@ export function getPreferredTaskViewsTab(): TaskViewsTab {
   return preferredTaskViewsTab
 }
 
+export function initializePreferredTaskViewsTab(tab: TaskViewsTab) {
+  if (preferredTaskViewsTabDirty) {
+    return
+  }
+
+  preferredTaskViewsTab = tab
+}
+
 export function setPreferredTaskViewsTab(tab: TaskViewsTab) {
+  preferredTaskViewsTabDirty = true
   preferredTaskViewsTab = tab
   window.dispatchEvent(
     new CustomEvent<TaskViewsTab>(TASK_VIEWS_TAB_EVENT, {
