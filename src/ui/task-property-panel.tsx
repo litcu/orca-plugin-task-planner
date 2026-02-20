@@ -1366,9 +1366,10 @@ function TaskPropertyPopupView(props: {
         background: "rgba(2, 6, 23, 0.32)",
         backdropFilter: "none",
         display: "flex",
-        justifyContent: "flex-end",
-        alignItems: "stretch",
-        padding: 0,
+        justifyContent: "center",
+        alignItems: "center",
+        padding: "16px",
+        overflow: "auto",
       }
   const panelStyle = isPanelSidebarMode
     ? {
@@ -1402,15 +1403,14 @@ function TaskPropertyPopupView(props: {
       : {
         width: "min(560px, calc(100vw - 20px))",
         minWidth: 0,
-        height: "100vh",
-        maxHeight: "100vh",
+        maxHeight: "min(88vh, 920px)",
         overflow: "auto",
         padding: "18px 16px",
         boxSizing: "border-box",
         background: "var(--orca-color-bg-1)",
-        borderLeft: "1px solid var(--orca-color-border-1)",
-        borderRadius: "12px 0 0 12px",
-        boxShadow: "-12px 0 32px rgba(10, 18, 30, 0.24)",
+        border: "1px solid var(--orca-color-border-1)",
+        borderRadius: "12px",
+        boxShadow: "0 16px 36px rgba(10, 18, 30, 0.28)",
       }
   const handleRequestClose = () => {
     if (editingDateField != null) {
