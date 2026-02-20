@@ -2,6 +2,7 @@
   "name": "orca-plugin-task-planner",
   "version": "0.6.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
