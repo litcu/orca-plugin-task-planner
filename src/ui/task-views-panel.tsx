@@ -40,6 +40,23 @@ import {
   type TaskPlannerSettings,
 } from "../core/plugin-settings"
 import {
+  addTaskToMyDayState,
+  ensureMyDayMirrorInTodayJournal,
+  loadMyDayState,
+  pruneMissingMyDayTasks,
+  removeMyDayMirrorBlock,
+  removeTaskFromMyDayState,
+  resolveMyDayKey,
+  saveMyDayState,
+  setMyDayDisplayMode,
+  setMyDayJournalSectionBlockId,
+  setMyDayTaskMirrorBlockId,
+  updateMyDayTaskSchedule,
+  type MyDayDisplayMode,
+  type MyDayState,
+  type MyDayTaskEntry,
+} from "../core/my-day-state"
+import {
   cloneCustomTaskViewFilterGroup,
   createCustomTaskViewId,
   createDefaultCustomTaskViewFilterGroup,
@@ -69,6 +86,10 @@ import {
   type TaskDashboardData,
   type TaskDashboardQuickFilter,
 } from "./task-dashboard"
+import {
+  MyDayScheduleBoard,
+  type MyDayScheduleTaskItem,
+} from "./my-day-schedule-board"
 import { TaskListRow, type TaskListRowItem } from "./task-list-row"
 import { openTaskPropertyPopup } from "./task-property-panel"
 
@@ -217,6 +238,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [dropTarget, setDropTarget] = React.useState<TaskDropTarget | null>(null)
   const [nextActionItems, setNextActionItems] = React.useState<NextActionItem[]>([])
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
+  const [allTaskItemsLoaded, setAllTaskItemsLoaded] = React.useState(false)
   const [dashboardBlockedCounts, setDashboardBlockedCounts] = React.useState<BlockedReasonCountMap>(
     {},
   )
@@ -231,6 +253,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [panelSettings, setPanelSettings] = React.useState<TaskPlannerSettings>(() =>
     getPluginSettings(props.pluginName)
   )
+  const [myDayState, setMyDayState] = React.useState<MyDayState | null>(null)
+  const [myDayLoaded, setMyDayLoaded] = React.useState(false)
+  const [myDaySaving, setMyDaySaving] = React.useState(false)
+  const [myDayUpdatingIds, setMyDayUpdatingIds] = React.useState<Set<DbId>>(
+    () => new Set(),
+  )
+  const myDayStateRef = React.useRef<MyDayState | null>(null)
+  if (myDayStateRef.current !== myDayState) {
+    myDayStateRef.current = myDayState
+  }
   const activeCustomViewId = React.useMemo(() => {
     return getCustomTaskViewIdFromTab(tab)
   }, [tab])
@@ -315,6 +347,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             collectNextActionEvaluations(props.schema),
           ])
           setAllTaskItems(allTasks)
+          setAllTaskItemsLoaded(true)
           setNextActionItems(selectNextActionsFromEvaluations(evaluations))
           setDashboardBlockedCounts(countBlockedReasons(evaluations))
           setDashboardBlockedTaskIds(collectDashboardBlockedTaskIds(evaluations))
@@ -322,12 +355,18 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         } else if (targetTab === "next-actions") {
           const nextActions = await collectNextActions(props.schema)
           setNextActionItems(nextActions)
+        } else if (targetTab === "my-day") {
+          const allTasks = await collectAllTasks(props.schema)
+          setAllTaskItems(allTasks)
+          setAllTaskItemsLoaded(true)
         } else if (isCustomTaskViewsTab(targetTab)) {
           const allTasks = await collectAllTasks(props.schema)
           setAllTaskItems(allTasks)
+          setAllTaskItemsLoaded(true)
         } else {
           const allTasks = await collectAllTasks(props.schema)
           setAllTaskItems(allTasks)
+          setAllTaskItemsLoaded(true)
         }
 
         setErrorText("")
@@ -375,6 +414,191 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       setPanelSettings(getPluginSettings(props.pluginName))
     })
   }, [props.pluginName])
+
+  const persistMyDayState = React.useCallback(
+    async (nextState: MyDayState): Promise<MyDayState | null> => {
+      setMyDaySaving(true)
+      try {
+        const savedState = await saveMyDayState(props.pluginName, nextState)
+        setMyDayState(savedState)
+        myDayStateRef.current = savedState
+        return savedState
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to update My Day"))
+        return null
+      } finally {
+        setMyDaySaving(false)
+      }
+    },
+    [props.pluginName],
+  )
+
+  React.useEffect(() => {
+    let cancelled = false
+    setMyDayLoaded(false)
+
+    const run = async () => {
+      try {
+        const loadedState = await loadMyDayState(
+          props.pluginName,
+          panelSettings.myDayResetHour,
+        )
+        if (cancelled) {
+          return
+        }
+
+        setMyDayState(loadedState)
+        myDayStateRef.current = loadedState
+      } catch (error) {
+        console.error(error)
+        if (!cancelled) {
+          setErrorText(t("Failed to load My Day"))
+        }
+      } finally {
+        if (!cancelled) {
+          setMyDayLoaded(true)
+        }
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [panelSettings.myDayResetHour, props.pluginName])
+
+  React.useEffect(() => {
+    const timerId = window.setInterval(() => {
+      const currentState = myDayStateRef.current
+      if (currentState == null) {
+        return
+      }
+
+      const currentDayKey = resolveMyDayKey(new Date(), panelSettings.myDayResetHour)
+      if (currentState.dayKey === currentDayKey) {
+        return
+      }
+
+      void (async () => {
+        try {
+          const refreshedState = await loadMyDayState(
+            props.pluginName,
+            panelSettings.myDayResetHour,
+          )
+          setMyDayState(refreshedState)
+          myDayStateRef.current = refreshedState
+        } catch (error) {
+          console.error(error)
+        }
+      })()
+    }, 60 * 1000)
+
+    return () => {
+      window.clearInterval(timerId)
+    }
+  }, [panelSettings.myDayResetHour, props.pluginName])
+
+  React.useEffect(() => {
+    if (tab !== "my-day") {
+      return
+    }
+    if (panelSettings.myDayEnabled) {
+      return
+    }
+
+    setPreferredTaskViewsTab("next-actions")
+  }, [panelSettings.myDayEnabled, tab])
+
+  const myDayJournalSyncKey = React.useMemo(() => {
+    if (myDayState == null) {
+      return ""
+    }
+    return `${myDayState.dayKey}:${myDayState.tasks.length}`
+  }, [myDayState])
+  const myDayJournalSyncKeyRef = React.useRef<string>("")
+
+  React.useEffect(() => {
+    if (!panelSettings.myDayEnabled || !myDayLoaded || myDayState == null) {
+      return
+    }
+    if (myDayState.tasks.length === 0) {
+      return
+    }
+    if (myDayJournalSyncKeyRef.current === myDayJournalSyncKey) {
+      return
+    }
+
+    myDayJournalSyncKeyRef.current = myDayJournalSyncKey
+    let cancelled = false
+    const run = async () => {
+      try {
+        let nextState = myDayStateRef.current ?? myDayState
+        let changed = false
+
+        for (const entry of nextState.tasks) {
+          if (cancelled) {
+            return
+          }
+
+          const mirrorResult = await ensureMyDayMirrorInTodayJournal({
+            taskId: entry.taskId,
+            dayKey: nextState.dayKey,
+            sectionTitle: t("My Day"),
+            existingSectionBlockId: nextState.journalSectionBlockId,
+          })
+
+          if (
+            mirrorResult.journalSectionBlockId != null &&
+            mirrorResult.journalSectionBlockId !== nextState.journalSectionBlockId
+          ) {
+            nextState = setMyDayJournalSectionBlockId(
+              nextState,
+              mirrorResult.journalSectionBlockId,
+            )
+            changed = true
+          }
+
+          const currentEntry = nextState.tasks.find((item: MyDayTaskEntry) => {
+            return item.taskId === getMirrorId(entry.taskId)
+          }) ?? null
+          if (
+            mirrorResult.mirrorBlockId != null &&
+            mirrorResult.mirrorBlockId !== currentEntry?.mirrorBlockId
+          ) {
+            nextState = setMyDayTaskMirrorBlockId(
+              nextState,
+              entry.taskId,
+              mirrorResult.mirrorBlockId,
+            )
+            changed = true
+          }
+        }
+
+        if (!changed || cancelled) {
+          return
+        }
+
+        const savedState = await persistMyDayState(nextState)
+        if (savedState != null && !cancelled) {
+          setErrorText("")
+        }
+      } catch (error) {
+        console.error(error)
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    myDayJournalSyncKey,
+    myDayLoaded,
+    myDayState,
+    panelSettings.myDayEnabled,
+    persistMyDayState,
+  ])
 
   React.useEffect(() => {
     if (!panelSettings.taskTimerEnabled) {
@@ -904,6 +1128,190 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     [markTaskItemsReviewed],
   )
 
+  const addTaskToMyDay = React.useCallback(
+    async (item: TaskListRowItem) => {
+      if (!panelSettings.myDayEnabled) {
+        return
+      }
+
+      setMyDayUpdatingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(item.blockId)
+        return next
+      })
+
+      try {
+        const baseState =
+          myDayStateRef.current ??
+          await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
+        let nextState = addTaskToMyDayState(baseState, {
+          taskId: item.blockId,
+          sourceBlockId: item.sourceBlockId,
+        }).state
+        const mirrorResult = await ensureMyDayMirrorInTodayJournal({
+          taskId: item.blockId,
+          dayKey: nextState.dayKey,
+          sectionTitle: t("My Day"),
+          existingSectionBlockId: nextState.journalSectionBlockId,
+        })
+
+        if (mirrorResult.journalSectionBlockId != null) {
+          nextState = setMyDayJournalSectionBlockId(
+            nextState,
+            mirrorResult.journalSectionBlockId,
+          )
+        }
+        if (mirrorResult.mirrorBlockId != null) {
+          nextState = setMyDayTaskMirrorBlockId(
+            nextState,
+            item.blockId,
+            mirrorResult.mirrorBlockId,
+          )
+        } else {
+          orca.notify("warn", t("Failed to sync My Day journal"))
+        }
+
+        const savedState = await persistMyDayState(nextState)
+        if (savedState != null) {
+          setErrorText("")
+        }
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to update My Day"))
+      } finally {
+        setMyDayUpdatingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(item.blockId)
+          return next
+        })
+      }
+    },
+    [
+      panelSettings.myDayEnabled,
+      panelSettings.myDayResetHour,
+      persistMyDayState,
+      props.pluginName,
+    ],
+  )
+
+  const removeTaskFromMyDay = React.useCallback(
+    async (item: TaskListRowItem) => {
+      setMyDayUpdatingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(item.blockId)
+        return next
+      })
+
+      try {
+        const baseState =
+          myDayStateRef.current ??
+          await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
+        const removeResult = removeTaskFromMyDayState(baseState, item.blockId)
+        if (!removeResult.removed) {
+          return
+        }
+
+        await removeMyDayMirrorBlock(removeResult.removedEntry?.mirrorBlockId)
+        const savedState = await persistMyDayState(removeResult.state)
+        if (savedState != null) {
+          setErrorText("")
+        }
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to update My Day"))
+      } finally {
+        setMyDayUpdatingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(item.blockId)
+          return next
+        })
+      }
+    },
+    [panelSettings.myDayResetHour, persistMyDayState, props.pluginName],
+  )
+
+  const applyMyDaySchedule = React.useCallback(
+    async (taskId: DbId, startMinute: number, endMinute: number) => {
+      setMyDayUpdatingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(taskId)
+        return next
+      })
+
+      try {
+        const baseState =
+          myDayStateRef.current ??
+          await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
+        const nextState = updateMyDayTaskSchedule(
+          baseState,
+          taskId,
+          startMinute,
+          endMinute,
+        )
+        const savedState = await persistMyDayState(nextState)
+        if (savedState != null) {
+          setErrorText("")
+        }
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to update My Day"))
+      } finally {
+        setMyDayUpdatingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(taskId)
+          return next
+        })
+      }
+    },
+    [panelSettings.myDayResetHour, persistMyDayState, props.pluginName],
+  )
+
+  const clearMyDaySchedule = React.useCallback(
+    async (taskId: DbId) => {
+      setMyDayUpdatingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(taskId)
+        return next
+      })
+
+      try {
+        const baseState =
+          myDayStateRef.current ??
+          await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
+        const nextState = updateMyDayTaskSchedule(baseState, taskId, null, null)
+        const savedState = await persistMyDayState(nextState)
+        if (savedState != null) {
+          setErrorText("")
+        }
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to update My Day"))
+      } finally {
+        setMyDayUpdatingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(taskId)
+          return next
+        })
+      }
+    },
+    [panelSettings.myDayResetHour, persistMyDayState, props.pluginName],
+  )
+
+  const updateMyDayDisplayMode = React.useCallback(
+    async (mode: MyDayDisplayMode) => {
+      const baseState =
+        myDayStateRef.current ??
+        await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
+      const nextState = setMyDayDisplayMode(baseState, mode)
+      if (nextState === baseState) {
+        return
+      }
+
+      await persistMyDayState(nextState)
+    },
+    [panelSettings.myDayResetHour, persistMyDayState, props.pluginName],
+  )
+
   const addTask = React.useCallback(() => {
     openTaskPropertyPopup({
       pluginName: props.pluginName,
@@ -1303,12 +1711,69 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     matchesItem,
     tab,
   ])
+  const myDayTaskIdSet = React.useMemo((): Set<DbId> => {
+    return new Set<DbId>((myDayState?.tasks ?? []).map((item: MyDayTaskEntry) => item.taskId))
+  }, [myDayState])
+  const filteredMyDayTaskItems = React.useMemo((): AllTaskItem[] => {
+    if (myDayState == null) {
+      return []
+    }
+
+    const itemById = new Map<DbId, AllTaskItem>()
+    for (const item of allTaskItems) {
+      itemById.set(item.blockId, item)
+    }
+
+    return myDayState.tasks
+      .map((entry: MyDayTaskEntry) => itemById.get(entry.taskId))
+      .filter((item: AllTaskItem | undefined): item is AllTaskItem => item != null)
+      .filter(matchesItem)
+  }, [allTaskItems, matchesItem, myDayState])
+  const myDayScheduleItems = React.useMemo((): MyDayScheduleTaskItem[] => {
+    if (myDayState == null) {
+      return []
+    }
+
+    const itemById = new Map<DbId, AllTaskItem>()
+    for (const item of allTaskItems) {
+      itemById.set(item.blockId, item)
+    }
+
+    const result: MyDayScheduleTaskItem[] = []
+    for (const entry of myDayState.tasks) {
+      const taskItem = itemById.get(entry.taskId)
+      if (taskItem == null || !matchesItem(taskItem)) {
+        continue
+      }
+
+      result.push({
+        blockId: taskItem.blockId,
+        text: taskItem.text,
+        status: taskItem.status,
+        labels: taskItem.labels,
+        star: taskItem.star,
+        scheduleStartMinute: entry.scheduleStartMinute,
+        scheduleEndMinute: entry.scheduleEndMinute,
+      })
+    }
+
+    return result
+  }, [allTaskItems, matchesItem, myDayState])
   const isDashboardTab = tab === "dashboard"
+  const isMyDayTab = tab === "my-day"
+  const myDayDisplayMode: MyDayDisplayMode = myDayState?.displayMode === "schedule"
+    ? "schedule"
+    : "list"
+  const isMyDayScheduleMode = isMyDayTab && myDayDisplayMode === "schedule"
   const isReviewDueTab = tab === "review-due"
   const isAllTasksTab = tab === "all-tasks"
   const isCustomViewTab = isCustomTaskViewsTab(tab)
   const showParentTaskContext = tab === "next-actions"
   const flatVisibleItems = React.useMemo((): TaskListRowItem[] => {
+    if (tab === "my-day") {
+      return filteredMyDayTaskItems
+    }
+
     if (tab === "next-actions") {
       return filteredNextActionItems
     }
@@ -1333,6 +1798,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   }, [
     filteredCustomViewTaskItems,
     filteredDueSoonTaskItems,
+    filteredMyDayTaskItems,
     filteredNextActionItems,
     filteredReviewDueTaskItems,
     filteredStarredTaskItems,
@@ -1474,6 +1940,37 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     }
     return map
   }, [allTaskItems])
+
+  React.useEffect(() => {
+    if (!allTaskItemsLoaded || !myDayLoaded || myDayState == null) {
+      return
+    }
+
+    const validTaskIds = new Set<DbId>(allTaskItems.map((item: AllTaskItem) => item.blockId))
+    const pruneResult = pruneMissingMyDayTasks(myDayState, validTaskIds)
+    if (pruneResult.removedEntries.length === 0) {
+      return
+    }
+
+    let cancelled = false
+    const run = async () => {
+      for (const removedEntry of pruneResult.removedEntries) {
+        await removeMyDayMirrorBlock(removedEntry.mirrorBlockId)
+      }
+
+      const savedState = await persistMyDayState(pruneResult.state)
+      if (cancelled || savedState == null) {
+        return
+      }
+
+      myDayStateRef.current = savedState
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [allTaskItems, allTaskItemsLoaded, myDayLoaded, myDayState, persistMyDayState])
 
   const isDescendantTask = React.useCallback(
     (taskId: DbId, ancestorTaskId: DbId): boolean => {
@@ -1676,11 +2173,19 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     props.schema,
   ])
   const taskViewSegmentedOptions = React.useMemo(() => {
-    const baseOptions = [
+    const baseOptions: Array<{ value: TaskViewsTab; label: string }> = [
       {
         value: "dashboard",
         label: t("Dashboard"),
       },
+    ]
+    if (panelSettings.myDayEnabled) {
+      baseOptions.push({
+        value: "my-day",
+        label: t("My Day"),
+      })
+    }
+    baseOptions.push(
       {
         value: "next-actions",
         label: t("Active Tasks"),
@@ -1701,14 +2206,14 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         value: "review-due",
         label: t("Review"),
       },
-    ]
+    )
 
     const customOptions = customViews.map((view: CustomTaskView) => ({
       value: toCustomTaskViewsTab(view.id),
       label: view.name,
     }))
     return [...baseOptions, ...customOptions]
-  }, [customViews])
+  }, [customViews, panelSettings.myDayEnabled])
   const estimatedSegmentedWidth = React.useMemo(() => {
     return taskViewSegmentedOptions.reduce((total: number, option: { value: string; label: string }) => {
       const baseLabelWidth = isChinese
@@ -1725,6 +2230,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
   const viewName = tab === "dashboard"
     ? t("Dashboard")
+    : tab === "my-day"
+      ? t("My Day")
     : tab === "next-actions"
       ? t("Active Tasks")
       : tab === "all-tasks"
@@ -1740,9 +2247,13 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     ? visibleAllTaskRows.length
     : isDashboardTab
       ? allTaskItems.length
+      : isMyDayTab
+        ? filteredMyDayTaskItems.length
       : flatVisibleItems.length
   const emptyText = tab === "next-actions"
     ? t("No actionable tasks")
+    : tab === "my-day"
+      ? t("No tasks in My Day")
     : tab === "all-tasks"
       ? t("No matched tasks")
       : tab === "starred-tasks"
@@ -1756,6 +2267,8 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             : t("No tasks to review")
   const panelAccentGlow = tab === "dashboard"
     ? "rgba(13, 148, 136, 0.2)"
+    : tab === "my-day"
+      ? "rgba(11, 95, 255, 0.22)"
     : tab === "next-actions"
       ? "rgba(37, 99, 235, 0.18)"
       : tab === "all-tasks"
@@ -2464,7 +2977,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                   },
                 }),
               ),
-          !isDashboardTab
+          !isDashboardTab && !isMyDayTab
             ? React.createElement(
                 "div",
                 {
@@ -2896,6 +3409,28 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             minWidth: "160px",
           },
         }),
+        isMyDayTab
+          ? React.createElement(Segmented, {
+              selected: myDayDisplayMode,
+              options: [
+                {
+                  value: "list",
+                  label: t("List"),
+                },
+                {
+                  value: "schedule",
+                  label: t("Schedule"),
+                },
+              ],
+              onChange: (value: string) => {
+                const mode = value === "schedule" ? "schedule" : "list"
+                void updateMyDayDisplayMode(mode)
+              },
+              style: {
+                minWidth: "200px",
+              },
+            })
+          : null,
         isAllTasksTab && dashboardQuickFilter != null
           ? React.createElement(
               "div",
@@ -3000,6 +3535,19 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
             },
             t("Live metrics across your tasks"),
           )
+        : isMyDayTab
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  flex: "1 1 auto",
+                  minWidth: 0,
+                  fontSize: "12px",
+                  color: "var(--orca-color-text-2)",
+                },
+              },
+              t("Plan your day with list and schedule"),
+            )
         : null,
       React.createElement(
         "div",
@@ -3262,7 +3810,42 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               }),
             )
           : null,
-        !loading && !isDashboardTab && visibleCount > 0
+        !loading && isMyDayTab && isMyDayScheduleMode && visibleCount > 0
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  flex: 1,
+                  minHeight: 0,
+                  width: "100%",
+                  minWidth: 0,
+                },
+              },
+              React.createElement(MyDayScheduleBoard, {
+                items: myDayScheduleItems,
+                disabled: loading || myDaySaving,
+                updatingTaskIds: myDayUpdatingIds,
+                onOpenTask: (blockId: DbId) => {
+                  openTaskProperty(blockId)
+                },
+                onRemoveTask: async (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+
+                  await removeTaskFromMyDay(matched)
+                },
+                onApplySchedule: async (blockId: DbId, startMinute: number, endMinute: number) => {
+                  await applyMyDaySchedule(blockId, startMinute, endMinute)
+                },
+                onClearSchedule: async (blockId: DbId) => {
+                  await clearMyDaySchedule(blockId)
+                },
+              }),
+            )
+          : null,
+        !loading && !isDashboardTab && (!isMyDayTab || !isMyDayScheduleMode) && visibleCount > 0
           ? React.createElement(
               "div",
               {
@@ -3353,6 +3936,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                           onAddSubtask: () => addSubtask(row.node.item),
                           onDeleteTaskTag: () => removeTaskTag(row.node.item),
                           onDeleteTaskBlock: () => deleteTaskBlock(row.node.item),
+                          showMyDayAction: panelSettings.myDayEnabled,
+                          myDaySelected: myDayTaskIdSet.has(row.node.item.blockId),
+                          myDayUpdating: myDayUpdatingIds.has(row.node.item.blockId),
+                          onAddToMyDay: () => addTaskToMyDay(row.node.item),
+                          onRemoveFromMyDay: () => removeTaskFromMyDay(row.node.item),
                           onOpen: () => openTaskProperty(row.node.item.blockId),
                         }),
                       )
@@ -3393,6 +3981,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       onAddSubtask: () => addSubtask(item),
                       onDeleteTaskTag: () => removeTaskTag(item),
                       onDeleteTaskBlock: () => deleteTaskBlock(item),
+                      showMyDayAction: panelSettings.myDayEnabled,
+                      myDaySelected: myDayTaskIdSet.has(item.blockId),
+                      myDayUpdating: myDayUpdatingIds.has(item.blockId),
+                      onAddToMyDay: () => addTaskToMyDay(item),
+                      onRemoveFromMyDay: () => removeTaskFromMyDay(item),
                       onOpen: () => openTaskProperty(item.blockId),
                     })
                   }),

@@ -60,6 +60,11 @@ interface TaskListRowProps {
   onAddSubtask: () => void | Promise<void>
   onDeleteTaskTag: () => void | Promise<void>
   onDeleteTaskBlock: () => void | Promise<void>
+  showMyDayAction?: boolean
+  myDaySelected?: boolean
+  myDayUpdating?: boolean
+  onAddToMyDay?: () => void | Promise<void>
+  onRemoveFromMyDay?: () => void | Promise<void>
   onOpen: () => void
 }
 
@@ -136,6 +141,11 @@ export function TaskListRow(props: TaskListRowProps) {
     props.starUpdating ||
     props.timerUpdating ||
     props.reviewUpdating
+  const canShowMyDayAction =
+    props.showMyDayAction === true &&
+    ((props.myDaySelected === true && props.onRemoveFromMyDay != null) ||
+      (props.myDaySelected !== true && props.onAddToMyDay != null))
+  const myDayMutationDisabled = mutationDisabled || props.myDayUpdating === true
 
   React.useEffect(() => {
     ensureTaskRowStyles()
@@ -830,6 +840,30 @@ export function TaskListRow(props: TaskListRowProps) {
                 props.onNavigate()
               },
             }),
+            canShowMyDayAction
+              ? React.createElement(MenuText, {
+                  title: props.myDaySelected
+                    ? t("Remove from My Day")
+                    : t("Add to My Day"),
+                  preIcon: props.myDaySelected
+                    ? "ti ti-calendar-minus"
+                    : "ti ti-calendar-plus",
+                  disabled: myDayMutationDisabled,
+                  onClick: (event: MouseEvent) => {
+                    event.stopPropagation()
+                    setContextMenuVisible(false)
+                    if (myDayMutationDisabled) {
+                      return
+                    }
+
+                    if (props.myDaySelected) {
+                      void props.onRemoveFromMyDay?.()
+                      return
+                    }
+                    void props.onAddToMyDay?.()
+                  },
+                })
+              : null,
             React.createElement(MenuSeparator, {}),
             React.createElement(
               ConfirmBox,

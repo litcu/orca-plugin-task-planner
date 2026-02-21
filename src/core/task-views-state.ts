@@ -1,5 +1,6 @@
 export type BuiltinTaskViewsTab =
   | "dashboard"
+  | "my-day"
   | "next-actions"
   | "all-tasks"
   | "starred-tasks"
@@ -18,6 +19,7 @@ let preferredTaskViewsTabDirty = false
 
 export function isTaskViewsTab(tab: unknown): tab is TaskViewsTab {
   return tab === "dashboard" ||
+    tab === "my-day" ||
     tab === "next-actions" ||
     tab === "all-tasks" ||
     tab === "starred-tasks" ||

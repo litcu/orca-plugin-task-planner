@@ -26,6 +26,10 @@ const TAG_BUTTON_ICON_ROLE = "mlo-task-timer-tag-icon"
 const TAG_BUTTON_TEXT_ROLE = "mlo-task-timer-tag-text"
 const DETAIL_ROLE = "mlo-task-timer-detail"
 const INLINE_STYLE_ROLE = "mlo-task-timer-inline-style"
+const DETAIL_BASE_INDENT_PX = 24
+const DETAIL_TEXT_OFFSET_FROM_STATUS_ICON_PX = 20
+const DETAIL_MIRROR_FALLBACK_OFFSET_PX = 12
+const DETAIL_MAX_MIRROR_OFFSET_PX = 64
 
 export interface TaskTimerInlineHandle {
   dispose: () => void
@@ -371,6 +375,7 @@ function renderBlockTimerUi(
   }
 
   detailEl.className = `mlo-task-timer-detail ${timer.running ? "is-running" : ""}`
+  applyDetailAlignment(detailEl, blockEl, rawBlockId)
   let detailText = settings.taskTimerMode === "pomodoro"
     ? ""
     : t("Elapsed ${time}", { time: elapsedText })
@@ -440,9 +445,7 @@ function ensureTagButtonText(button: HTMLButtonElement): HTMLElement {
 }
 
 function ensureDetailElement(blockEl: HTMLElement): HTMLElement | null {
-  const host =
-    blockEl.querySelector(":scope > .orca-repr > .orca-repr-main") ??
-    blockEl.querySelector(".orca-repr-main")
+  const host = resolveDetailHostElement(blockEl)
   if (!(host instanceof HTMLElement)) {
     removeDetail(blockEl)
     return null
@@ -458,6 +461,149 @@ function ensureDetailElement(blockEl: HTMLElement): HTMLElement | null {
   detail.className = "mlo-task-timer-detail"
   host.appendChild(detail)
   return detail
+}
+
+function resolveDetailHostElement(blockEl: HTMLElement): HTMLElement | null {
+  const host =
+    blockEl.querySelector(":scope > .orca-repr > .orca-repr-main") ??
+    blockEl.querySelector(".orca-repr-main")
+  return host instanceof HTMLElement ? host : null
+}
+
+function applyDetailAlignment(
+  detailEl: HTMLElement,
+  blockEl: HTMLElement,
+  rawBlockId: DbId,
+) {
+  const host = resolveDetailHostElement(blockEl)
+  if (host == null) {
+    detailEl.style.setProperty(
+      "--mlo-task-timer-detail-indent",
+      `${DETAIL_BASE_INDENT_PX}px`,
+    )
+    return
+  }
+
+  const indentPx = resolveDetailIndentPx(host, blockEl, rawBlockId)
+  detailEl.style.setProperty(
+    "--mlo-task-timer-detail-indent",
+    `${indentPx}px`,
+  )
+}
+
+function resolveDetailIndentPx(
+  host: HTMLElement,
+  blockEl: HTMLElement,
+  rawBlockId: DbId,
+): number {
+  const hostRect = host.getBoundingClientRect()
+  if (hostRect.width > 0) {
+    const statusIconLeft = resolveTaskStatusIconLeft(host, blockEl)
+    if (statusIconLeft != null) {
+      const alignedIndent = Math.round(
+        statusIconLeft - hostRect.left + DETAIL_TEXT_OFFSET_FROM_STATUS_ICON_PX,
+      )
+      return Math.max(
+        DETAIL_BASE_INDENT_PX,
+        Math.min(DETAIL_BASE_INDENT_PX + DETAIL_MAX_MIRROR_OFFSET_PX, alignedIndent),
+      )
+    }
+  }
+
+  const taskId = getMirrorId(rawBlockId)
+  if (taskId === rawBlockId) {
+    return DETAIL_BASE_INDENT_PX
+  }
+
+  if (hostRect.width <= 0) {
+    return DETAIL_BASE_INDENT_PX + DETAIL_MIRROR_FALLBACK_OFFSET_PX
+  }
+
+  let mirrorOffsetPx = 0
+  const nestedMainEls = host.querySelectorAll(".orca-repr-main")
+  for (const candidate of nestedMainEls) {
+    if (!(candidate instanceof HTMLElement) || candidate === host) {
+      continue
+    }
+
+    const candidateRect = candidate.getBoundingClientRect()
+    const rawOffsetPx = Math.round(candidateRect.left - hostRect.left)
+    if (rawOffsetPx <= 0) {
+      continue
+    }
+
+    mirrorOffsetPx = Math.max(mirrorOffsetPx, rawOffsetPx)
+  }
+
+  if (mirrorOffsetPx <= 0) {
+    mirrorOffsetPx = DETAIL_MIRROR_FALLBACK_OFFSET_PX
+  }
+
+  const clampedOffsetPx = Math.min(mirrorOffsetPx, DETAIL_MAX_MIRROR_OFFSET_PX)
+  return DETAIL_BASE_INDENT_PX + clampedOffsetPx
+}
+
+function resolveTaskStatusIconLeft(
+  host: HTMLElement,
+  blockEl: HTMLElement,
+): number | null {
+  const candidates: HTMLElement[] = []
+  const selector = [
+    'input[type="checkbox"]',
+    '[role="checkbox"]',
+    ".orca-checkbox",
+    ".orca-task-checkbox",
+    ".orca-task-state",
+    ".orca-task-icon",
+    'i[class*="ti-"]',
+  ].join(",")
+
+  const queried = blockEl.querySelectorAll(selector)
+  for (const node of queried) {
+    if (!(node instanceof HTMLElement)) {
+      continue
+    }
+
+    if (node.closest(`[data-role="${TAG_BUTTON_ROLE}"]`) != null) {
+      continue
+    }
+
+    if (node.closest(`[data-role="${DETAIL_ROLE}"]`) != null) {
+      continue
+    }
+
+    if (node.matches('i[class*="ti-"]')) {
+      const className = node.className
+      if (
+        !/(ti-(circle|square|checkbox|check|point|minus|x))/i.test(className) ||
+        /(ti-(chevron|caret|arrow|plus))/i.test(className)
+      ) {
+        continue
+      }
+    }
+
+    candidates.push(node)
+  }
+
+  if (candidates.length === 0) {
+    return null
+  }
+
+  const hostRect = host.getBoundingClientRect()
+  let leftMost: number | null = null
+  for (const element of candidates) {
+    const rect = element.getBoundingClientRect()
+    const left = Math.round(rect.left)
+    if (left < Math.round(hostRect.left) - 1) {
+      continue
+    }
+
+    if (leftMost == null || left < leftMost) {
+      leftMost = left
+    }
+  }
+
+  return leftMost
 }
 
 function removeTagButton(blockEl: HTMLElement) {
@@ -565,7 +711,7 @@ function injectInlineTimerStyles(pluginName: string) {
     }
 
     [data-role="${DETAIL_ROLE}"] {
-      margin: 2px 0 0 24px;
+      margin: 2px 0 0 var(--mlo-task-timer-detail-indent, 24px);
       font-size: 10px;
       line-height: 1.3;
       color: color-mix(in srgb, var(--orca-color-text-2) 80%, transparent);

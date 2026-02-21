@@ -5,6 +5,8 @@ import type { BuiltinTaskViewsTab } from "./task-views-state"
 
 export interface TaskPlannerSettings {
   taskTagName: string
+  myDayEnabled: boolean
+  myDayResetHour: number
   dueSoonDays: number
   dueSoonIncludeOverdue: boolean
   defaultTaskViewsTab: BuiltinTaskViewsTab
@@ -15,6 +17,8 @@ export interface TaskPlannerSettings {
 }
 
 const TASK_TAG_NAME_SETTING = "taskTagName"
+const MY_DAY_ENABLED_SETTING = "myDayEnabled"
+const MY_DAY_RESET_HOUR_SETTING = "myDayResetHour"
 const DUE_SOON_DAYS_SETTING = "dueSoonDays"
 const DUE_SOON_INCLUDE_OVERDUE_SETTING = "dueSoonIncludeOverdue"
 const DEFAULT_TASK_VIEWS_TAB_SETTING = "defaultTaskViewsTab"
@@ -22,6 +26,7 @@ const SHOW_TASK_PANEL_ICON_SETTING = "showTaskPanelIcon"
 const TASK_TIMER_ENABLED_SETTING = "taskTimerEnabled"
 const TASK_TIMER_AUTO_START_ON_DOING_SETTING = "taskTimerAutoStartOnDoing"
 const TASK_TIMER_MODE_SETTING = "taskTimerMode"
+const DEFAULT_MY_DAY_RESET_HOUR = 5
 const DEFAULT_DUE_SOON_DAYS = 7
 const DEFAULT_TASK_VIEWS_TAB: BuiltinTaskViewsTab = "next-actions"
 const DEFAULT_TASK_TIMER_MODE: TaskTimerMode = "direct"
@@ -33,6 +38,18 @@ export async function ensurePluginSettingsSchema(pluginName: string): Promise<vo
       description: t("Name of the tag used to identify tasks. Changes apply after clicking Save."),
       type: "string",
       defaultValue: TASK_TAG_ALIAS,
+    },
+    [MY_DAY_ENABLED_SETTING]: {
+      label: t("Enable My Day"),
+      description: t("Enable My Day view in task panel."),
+      type: "boolean",
+      defaultValue: false,
+    },
+    [MY_DAY_RESET_HOUR_SETTING]: {
+      label: t("My Day reset hour"),
+      description: t("My Day clears after this local hour each day (0-23)."),
+      type: "number",
+      defaultValue: DEFAULT_MY_DAY_RESET_HOUR,
     },
     [DUE_SOON_DAYS_SETTING]: {
       label: t("Due soon days"),
@@ -54,6 +71,10 @@ export async function ensurePluginSettingsSchema(pluginName: string): Promise<vo
         {
           label: t("Dashboard"),
           value: "dashboard",
+        },
+        {
+          label: t("My Day"),
+          value: "my-day",
         },
         {
           label: t("Active Tasks"),
@@ -120,6 +141,12 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
   const taskTagName = normalizeTaskTagName(
     pluginSettings?.[TASK_TAG_NAME_SETTING],
   )
+  const myDayEnabled = normalizeMyDayEnabled(
+    pluginSettings?.[MY_DAY_ENABLED_SETTING],
+  )
+  const myDayResetHour = normalizeMyDayResetHour(
+    pluginSettings?.[MY_DAY_RESET_HOUR_SETTING],
+  )
   const dueSoonDays = normalizeDueSoonDays(pluginSettings?.[DUE_SOON_DAYS_SETTING])
   const dueSoonIncludeOverdue = normalizeDueSoonIncludeOverdue(
     pluginSettings?.[DUE_SOON_INCLUDE_OVERDUE_SETTING],
@@ -142,6 +169,8 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
 
   return {
     taskTagName,
+    myDayEnabled,
+    myDayResetHour,
     dueSoonDays,
     dueSoonIncludeOverdue,
     defaultTaskViewsTab,
@@ -178,9 +207,31 @@ function normalizeDueSoonIncludeOverdue(rawValue: unknown): boolean {
   return rawValue === true
 }
 
+function normalizeMyDayEnabled(rawValue: unknown): boolean {
+  return rawValue === true
+}
+
+function normalizeMyDayResetHour(rawValue: unknown): number {
+  if (typeof rawValue !== "number" || Number.isNaN(rawValue) || !Number.isFinite(rawValue)) {
+    return DEFAULT_MY_DAY_RESET_HOUR
+  }
+
+  const rounded = Math.round(rawValue)
+  if (rounded < 0) {
+    return 0
+  }
+
+  if (rounded > 23) {
+    return 23
+  }
+
+  return rounded
+}
+
 function normalizeDefaultTaskViewsTab(rawValue: unknown): BuiltinTaskViewsTab {
   switch (rawValue) {
     case "dashboard":
+    case "my-day":
     case "next-actions":
     case "all-tasks":
     case "starred-tasks":
