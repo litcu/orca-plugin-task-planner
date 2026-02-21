@@ -918,7 +918,7 @@ function TaskPropertyPopupView(props: {
       }
 
       if (taskRef == null || props.blockId == null) {
-        const message = t("Task ref not found")
+        const message = t("Task metadata missing. Reopen the panel and try again")
         setErrorText(message)
         orca.notify("error", message)
         setLastFailedSnapshot(snapshot)

@@ -10,6 +10,7 @@ export interface TaskPlannerSettings {
   myDayResetHour: number
   dueSoonDays: number
   dueSoonIncludeOverdue: boolean
+  startupTaskSummaryNotificationEnabled: boolean
   defaultTaskViewsTab: BuiltinTaskViewsTab
   showTaskPanelIcon: boolean
   taskTimerEnabled: boolean
@@ -22,6 +23,7 @@ const MY_DAY_ENABLED_SETTING = "myDayEnabled"
 const MY_DAY_RESET_HOUR_SETTING = "myDayResetHour"
 const DUE_SOON_DAYS_SETTING = "dueSoonDays"
 const DUE_SOON_INCLUDE_OVERDUE_SETTING = "dueSoonIncludeOverdue"
+const STARTUP_TASK_SUMMARY_NOTIFICATION_ENABLED_SETTING = "startupTaskSummaryNotificationEnabled"
 const DEFAULT_TASK_VIEWS_TAB_SETTING = "defaultTaskViewsTab"
 const SHOW_TASK_PANEL_ICON_SETTING = "showTaskPanelIcon"
 const TASK_TIMER_ENABLED_SETTING = "taskTimerEnabled"
@@ -116,6 +118,12 @@ export async function ensurePluginSettingsSchema(
     type: "boolean",
     defaultValue: false,
   }
+  schema[STARTUP_TASK_SUMMARY_NOTIFICATION_ENABLED_SETTING] = {
+    label: t("Notify task summary on startup"),
+    description: t("Show a notification on plugin load with counts of active, overdue, and due soon tasks."),
+    type: "boolean",
+    defaultValue: true,
+  }
   schema[TASK_TIMER_ENABLED_SETTING] = {
     label: t("Enable task timer"),
     description: t("Show timer controls for tasks and persist elapsed time."),
@@ -163,6 +171,9 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
   const dueSoonIncludeOverdue = normalizeDueSoonIncludeOverdue(
     pluginSettings?.[DUE_SOON_INCLUDE_OVERDUE_SETTING],
   )
+  const startupTaskSummaryNotificationEnabled = normalizeStartupTaskSummaryNotificationEnabled(
+    pluginSettings?.[STARTUP_TASK_SUMMARY_NOTIFICATION_ENABLED_SETTING],
+  )
   const defaultTaskViewsTab = normalizeDefaultTaskViewsTab(
     pluginSettings?.[DEFAULT_TASK_VIEWS_TAB_SETTING],
   )
@@ -185,6 +196,7 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
     myDayResetHour,
     dueSoonDays,
     dueSoonIncludeOverdue,
+    startupTaskSummaryNotificationEnabled,
     defaultTaskViewsTab,
     showTaskPanelIcon,
     taskTimerEnabled,
@@ -217,6 +229,10 @@ function normalizeDueSoonDays(rawValue: unknown): number {
 
 function normalizeDueSoonIncludeOverdue(rawValue: unknown): boolean {
   return rawValue === true
+}
+
+function normalizeStartupTaskSummaryNotificationEnabled(rawValue: unknown): boolean {
+  return rawValue !== false
 }
 
 function normalizeMyDayEnabled(rawValue: unknown): boolean {

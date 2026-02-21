@@ -8,8 +8,11 @@ import {
   getPluginSettings,
   type TaskPlannerSettings,
 } from "./core/plugin-settings"
+import { collectNextActionEvaluations } from "./core/dependency-engine"
 import { setupL10N, t } from "./libs/l10n"
 import zhCN from "./translations/zhCN"
+
+const DAY_MS = 24 * 60 * 60 * 1000
 
 let pluginName: string
 let taskQuickActionsDisposer: (() => Promise<void>) | null = null
@@ -39,6 +42,7 @@ export async function load(_name: string) {
     settingsUnsubscribe = null
   }
   subscribeSettingsChanges()
+  await notifyStartupTaskSummary(schemaResult.schema, settings)
 
   console.log(
     t("Task schema initialized", {
@@ -176,6 +180,60 @@ async function setupRuntimeWithSchema(schema: TaskSchemaDefinition): Promise<voi
   taskQuickActionsDisposer = taskQuickActions.dispose
   taskPopupEntryDisposer = taskPopupEntry.dispose
   nextActionsEntryDisposer = nextActionsEntry.dispose
+}
+
+async function notifyStartupTaskSummary(
+  schema: TaskSchemaDefinition,
+  settings: TaskPlannerSettings,
+): Promise<void> {
+  if (!settings.startupTaskSummaryNotificationEnabled) {
+    return
+  }
+
+  try {
+    const nowMs = Date.now()
+    const dueSoonEndMs = nowMs + settings.dueSoonDays * DAY_MS
+    const evaluations = await collectNextActionEvaluations(schema, new Date(nowMs), {
+      useCache: false,
+    })
+
+    const activeCount = evaluations.filter((item) => item.isNextAction).length
+    let overdueCount = 0
+    let dueSoonCount = 0
+
+    for (const evaluation of evaluations) {
+      const dueMs = evaluation.item.endTime?.getTime()
+      if (typeof dueMs !== "number" || Number.isNaN(dueMs)) {
+        continue
+      }
+
+      if (dueMs < nowMs) {
+        overdueCount += 1
+        continue
+      }
+
+      if (dueMs <= dueSoonEndMs) {
+        dueSoonCount += 1
+      }
+    }
+
+    orca.notify(
+      "info",
+      t(
+        "Active tasks: ${active}, overdue tasks: ${overdue}, tasks due in the next ${days} days: ${dueSoon}",
+        {
+          active: String(activeCount),
+          overdue: String(overdueCount),
+          days: String(settings.dueSoonDays),
+          dueSoon: String(dueSoonCount),
+        },
+      ),
+      { title: t("Today's task overview") },
+    )
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(t("Failed to build startup task summary: ${message}", { message }))
+  }
 }
 
 async function disposeRuntime(): Promise<void> {
