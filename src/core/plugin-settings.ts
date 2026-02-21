@@ -1,4 +1,5 @@
 import { t } from "../libs/l10n"
+import type { PluginSettingsSchema } from "../orca.d.ts"
 import { TASK_TAG_ALIAS } from "./task-schema"
 import type { TaskTimerMode } from "./task-timer"
 import type { BuiltinTaskViewsTab } from "./task-views-state"
@@ -31,37 +32,30 @@ const DEFAULT_DUE_SOON_DAYS = 7
 const DEFAULT_TASK_VIEWS_TAB: BuiltinTaskViewsTab = "next-actions"
 const DEFAULT_TASK_TIMER_MODE: TaskTimerMode = "direct"
 
-export async function ensurePluginSettingsSchema(pluginName: string): Promise<void> {
-  await orca.plugins.setSettingsSchema(pluginName, {
+type PluginSettingsSchemaVisibility = Pick<
+  TaskPlannerSettings,
+  "myDayEnabled" | "taskTimerEnabled"
+>
+
+export async function ensurePluginSettingsSchema(
+  pluginName: string,
+  visibility?: Partial<PluginSettingsSchemaVisibility>,
+): Promise<void> {
+  const showMyDaySettings = visibility?.myDayEnabled === true
+  const showTaskTimerSettings = visibility?.taskTimerEnabled === true
+
+  const schema: PluginSettingsSchema = {
     [TASK_TAG_NAME_SETTING]: {
       label: t("Task tag name"),
       description: t("Name of the tag used to identify tasks. Changes apply after clicking Save."),
       type: "string",
       defaultValue: TASK_TAG_ALIAS,
     },
-    [MY_DAY_ENABLED_SETTING]: {
-      label: t("Enable My Day"),
-      description: t("Enable My Day view in task panel."),
+    [SHOW_TASK_PANEL_ICON_SETTING]: {
+      label: t("Show task panel icon"),
+      description: t("Show task panel icon in the top bar."),
       type: "boolean",
-      defaultValue: false,
-    },
-    [MY_DAY_RESET_HOUR_SETTING]: {
-      label: t("My Day start hour"),
-      description: t("My Day starts at this local hour (0-23), and the schedule timeline follows this start."),
-      type: "number",
-      defaultValue: DEFAULT_MY_DAY_RESET_HOUR,
-    },
-    [DUE_SOON_DAYS_SETTING]: {
-      label: t("Due soon days"),
-      description: t("Number of days used by the Due Soon view."),
-      type: "number",
-      defaultValue: DEFAULT_DUE_SOON_DAYS,
-    },
-    [DUE_SOON_INCLUDE_OVERDUE_SETTING]: {
-      label: t("Include overdue in Due Soon"),
-      description: t("Whether the Due Soon view should include overdue tasks."),
-      type: "boolean",
-      defaultValue: false,
+      defaultValue: true,
     },
     [DEFAULT_TASK_VIEWS_TAB_SETTING]: {
       label: t("Default task panel view"),
@@ -99,25 +93,50 @@ export async function ensurePluginSettingsSchema(pluginName: string): Promise<vo
       ],
       defaultValue: DEFAULT_TASK_VIEWS_TAB,
     },
-    [SHOW_TASK_PANEL_ICON_SETTING]: {
-      label: t("Show task panel icon"),
-      description: t("Show task panel icon in the top bar."),
-      type: "boolean",
-      defaultValue: true,
-    },
-    [TASK_TIMER_ENABLED_SETTING]: {
-      label: t("Enable task timer"),
-      description: t("Show timer controls for tasks and persist elapsed time."),
+    [MY_DAY_ENABLED_SETTING]: {
+      label: t("Enable My Day"),
+      description: t("Enable My Day view in task panel."),
       type: "boolean",
       defaultValue: false,
     },
-    [TASK_TIMER_AUTO_START_ON_DOING_SETTING]: {
+  }
+
+  if (showMyDaySettings) {
+    schema[MY_DAY_RESET_HOUR_SETTING] = {
+      label: t("My Day start hour"),
+      description: t("My Day starts at this local hour (0-23), and the schedule timeline follows this start."),
+      type: "number",
+      defaultValue: DEFAULT_MY_DAY_RESET_HOUR,
+    }
+  }
+
+  schema[DUE_SOON_DAYS_SETTING] = {
+    label: t("Due soon days"),
+    description: t("Number of days used by the Due Soon view."),
+    type: "number",
+    defaultValue: DEFAULT_DUE_SOON_DAYS,
+  }
+  schema[DUE_SOON_INCLUDE_OVERDUE_SETTING] = {
+    label: t("Include overdue in Due Soon"),
+    description: t("Whether the Due Soon view should include overdue tasks."),
+    type: "boolean",
+    defaultValue: false,
+  }
+  schema[TASK_TIMER_ENABLED_SETTING] = {
+    label: t("Enable task timer"),
+    description: t("Show timer controls for tasks and persist elapsed time."),
+    type: "boolean",
+    defaultValue: false,
+  }
+
+  if (showTaskTimerSettings) {
+    schema[TASK_TIMER_AUTO_START_ON_DOING_SETTING] = {
       label: t("Auto start timer when status becomes Doing"),
       description: t("Automatically start timer when task status changes to Doing."),
       type: "boolean",
       defaultValue: false,
-    },
-    [TASK_TIMER_MODE_SETTING]: {
+    }
+    schema[TASK_TIMER_MODE_SETTING] = {
       label: t("Task timer mode"),
       description: t("Choose how task timer is displayed."),
       type: "singleChoice",
@@ -132,8 +151,10 @@ export async function ensurePluginSettingsSchema(pluginName: string): Promise<vo
         },
       ],
       defaultValue: DEFAULT_TASK_TIMER_MODE,
-    },
-  })
+    }
+  }
+
+  await orca.plugins.setSettingsSchema(pluginName, schema)
 }
 
 export function getPluginSettings(pluginName: string): TaskPlannerSettings {

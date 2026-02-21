@@ -3,7 +3,11 @@ import { ensureTaskTagSchema, TASK_TAG_ALIAS, type TaskSchemaDefinition } from "
 import { setupTaskQuickActions } from "./core/task-service"
 import { setupTaskPopupEntry } from "./core/task-popup-entry"
 import { setupNextActionsEntry } from "./core/next-actions-entry"
-import { ensurePluginSettingsSchema, getPluginSettings } from "./core/plugin-settings"
+import {
+  ensurePluginSettingsSchema,
+  getPluginSettings,
+  type TaskPlannerSettings,
+} from "./core/plugin-settings"
 import { setupL10N, t } from "./libs/l10n"
 import zhCN from "./translations/zhCN"
 
@@ -14,17 +18,18 @@ let nextActionsEntryDisposer: (() => void) | null = null
 let settingsUnsubscribe: (() => void) | null = null
 let settingsUpdateChain: Promise<void> = Promise.resolve()
 let appliedTaskTagName = TASK_TAG_ALIAS
+let appliedSettingsVisibilityKey = ""
 let unloaded = false
 
 export async function load(_name: string) {
   pluginName = _name
   unloaded = false
   settingsUpdateChain = Promise.resolve()
+  appliedSettingsVisibilityKey = ""
 
   setupL10N(orca.state.locale, { "zh-CN": zhCN })
-  await ensurePluginSettingsSchema(pluginName)
-
   const settings = getPluginSettings(pluginName)
+  await syncSettingsSchemaVisibility(settings)
   const schemaResult = await ensureTaskTagSchema(orca.state.locale, settings.taskTagName)
   appliedTaskTagName = schemaResult.schema.tagAlias
   await setupRuntimeWithSchema(schemaResult.schema)
@@ -78,6 +83,8 @@ function subscribeSettingsChanges() {
         }
 
         const settings = getPluginSettings(pluginName)
+        await syncSettingsSchemaVisibility(settings)
+
         if (settings.taskTagName === appliedTaskTagName) {
           return
         }
@@ -93,6 +100,24 @@ function subscribeSettingsChanges() {
         console.error(t("Failed to apply task tag name: ${message}", { message }))
       })
   })
+}
+
+async function syncSettingsSchemaVisibility(settings: TaskPlannerSettings): Promise<void> {
+  const nextVisibilityKey = resolveSettingsVisibilityKey(settings)
+  if (nextVisibilityKey === appliedSettingsVisibilityKey) {
+    return
+  }
+
+  await ensurePluginSettingsSchema(pluginName, {
+    myDayEnabled: settings.myDayEnabled,
+    taskTimerEnabled: settings.taskTimerEnabled,
+  })
+
+  appliedSettingsVisibilityKey = nextVisibilityKey
+}
+
+function resolveSettingsVisibilityKey(settings: TaskPlannerSettings): string {
+  return `${settings.myDayEnabled ? "1" : "0"}|${settings.taskTimerEnabled ? "1" : "0"}`
 }
 
 async function applyTaskTagNameChange(nextTaskTagName: string): Promise<void> {
