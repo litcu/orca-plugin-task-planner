@@ -212,6 +212,7 @@
   "Unscheduled": "未排期",
   "Timeline": "时间轴",
   "Drag cards into timeline to plan your day": "拖拽任务卡片到时间轴，快速完成今天排期",
+  "Release to move to Unscheduled": "松开后移到未排期",
   "All tasks are scheduled": "已排期任务都在时间轴中",
   "No tasks in My Day": "“我的一天”中暂无任务",
   "All Tasks": "全部任务",

@@ -49,6 +49,7 @@ interface TimelinePointerDragState {
   originEndMinute: number
   previewStartMinute: number
   previewEndMinute: number
+  dropToUnscheduled: boolean
 }
 
 interface TimelineRenderItem {
@@ -74,6 +75,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   const React = window.React
   const timelineRef = React.useRef<HTMLDivElement | null>(null)
   const timelineScrollRef = React.useRef<HTMLDivElement | null>(null)
+  const unscheduledPanelRef = React.useRef<HTMLDivElement | null>(null)
   const [draggingTaskId, setDraggingTaskId] = React.useState<DbId | null>(null)
   const [dropMinute, setDropMinute] = React.useState<number | null>(null)
   const [timelinePointerDragState, setTimelinePointerDragState] =
@@ -88,8 +90,11 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   })
   const disabledRef = React.useRef(props.disabled)
   const onApplyScheduleRef = React.useRef(props.onApplySchedule)
+  const onClearScheduleRef = React.useRef(props.onClearSchedule)
   const timelineStartHour = normalizeTimelineStartHour(props.dayStartHour)
   const timelineStartOffsetMinute = timelineStartHour * 60
+  const timelinePointerDropToUnscheduled =
+    timelinePointerDragState?.mode === "move" && timelinePointerDragState.dropToUnscheduled
 
   const maybeAutoScrollTimeline = React.useCallback((pointerClientY: number) => {
     const scrollElement = timelineScrollRef.current
@@ -252,8 +257,27 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   }, [props.onApplySchedule])
 
   React.useEffect(() => {
+    onClearScheduleRef.current = props.onClearSchedule
+  }, [props.onClearSchedule])
+
+  React.useEffect(() => {
     timelinePointerDragStateRef.current = timelinePointerDragState
   }, [timelinePointerDragState])
+
+  const isPointerOverUnscheduledPanel = React.useCallback((clientX: number, clientY: number) => {
+    const panelElement = unscheduledPanelRef.current
+    if (panelElement == null) {
+      return false
+    }
+
+    const rect = panelElement.getBoundingClientRect()
+    return (
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom
+    )
+  }, [])
 
   React.useEffect(() => {
     const finishPointerDrag = (event: PointerEvent, applySchedule: boolean) => {
@@ -267,6 +291,11 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       setTimelinePointerDragState(null)
 
       if (!applySchedule || disabledRef.current) {
+        return
+      }
+
+      if (dragging.mode === "move" && dragging.dropToUnscheduled) {
+        void onClearScheduleRef.current(dragging.taskId)
         return
       }
 
@@ -300,22 +329,33 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       }
 
       event.preventDefault()
-      maybeAutoScrollTimeline(event.clientY)
-      const preview = resolvePointerInteractionPreviewMinutes(
-        dragging,
-        event.clientY,
-        timelineBoundsRef.current.startMinute,
-        timelineBoundsRef.current.endMinute,
-        timelineStartOffsetMinute,
-      )
+      const dropToUnscheduled =
+        dragging.mode === "move" && isPointerOverUnscheduledPanel(event.clientX, event.clientY)
+
+      if (!dropToUnscheduled) {
+        maybeAutoScrollTimeline(event.clientY)
+      }
+
+      const preview = dropToUnscheduled
+        ? {
+            startMinute: dragging.previewStartMinute,
+            endMinute: dragging.previewEndMinute,
+          }
+        : resolvePointerInteractionPreviewMinutes(
+            dragging,
+            event.clientY,
+            timelineBoundsRef.current.startMinute,
+            timelineBoundsRef.current.endMinute,
+            timelineStartOffsetMinute,
+          )
       if (preview == null) {
         return
       }
 
-      if (
+      const previewUnchanged =
         preview.startMinute === dragging.previewStartMinute &&
         preview.endMinute === dragging.previewEndMinute
-      ) {
+      if (previewUnchanged && dropToUnscheduled === dragging.dropToUnscheduled) {
         return
       }
 
@@ -323,6 +363,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
         ...dragging,
         previewStartMinute: preview.startMinute,
         previewEndMinute: preview.endMinute,
+        dropToUnscheduled,
       }
       timelinePointerDragStateRef.current = nextState
       setTimelinePointerDragState(nextState)
@@ -344,7 +385,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       window.removeEventListener("pointerup", onPointerUp)
       window.removeEventListener("pointercancel", onPointerCancel)
     }
-  }, [maybeAutoScrollTimeline, timelineStartOffsetMinute])
+  }, [isPointerOverUnscheduledPanel, maybeAutoScrollTimeline, timelineStartOffsetMinute])
 
   const beginTimelinePointerDrag = React.useCallback(
     (
@@ -371,6 +412,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
         originEndMinute: normalizedEndMinute,
         previewStartMinute: normalizedStartMinute,
         previewEndMinute: normalizedEndMinute,
+        dropToUnscheduled: false,
       }
 
       timelinePointerDragStateRef.current = nextState
@@ -415,6 +457,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
         originEndMinute: normalizedEndMinute,
         previewStartMinute: normalizedStartMinute,
         previewEndMinute: normalizedEndMinute,
+        dropToUnscheduled: false,
       }
 
       timelinePointerDragStateRef.current = nextState
@@ -658,7 +701,10 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       React.createElement(
         "div",
         {
-          className: "mlo-my-day-unscheduled-panel",
+          ref: unscheduledPanelRef,
+          className: timelinePointerDropToUnscheduled
+            ? "mlo-my-day-unscheduled-panel mlo-my-day-unscheduled-panel-drop-target"
+            : "mlo-my-day-unscheduled-panel",
         },
         React.createElement(
           "div",
@@ -667,6 +713,15 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
           },
           `${t("Unscheduled")} · ${unscheduledItems.length}`,
         ),
+        timelinePointerDropToUnscheduled
+          ? React.createElement(
+              "div",
+              {
+                className: "mlo-my-day-unscheduled-drop-cta",
+              },
+              t("Release to move to Unscheduled"),
+            )
+          : null,
         unscheduledItems.length === 0
           ? React.createElement(
               "div",
@@ -695,8 +750,6 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                   onDragEnd: () => endDragTask(),
                   onOpenTask: props.onOpenTask,
                   onRemoveTask: props.onRemoveTask,
-                  onApplySchedule: props.onApplySchedule,
-                  onClearSchedule: props.onClearSchedule,
                 })
               }),
             ),
@@ -823,8 +876,6 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                   )
                 },
                 onOpenTask: props.onOpenTask,
-                onRemoveTask: props.onRemoveTask,
-                onClearSchedule: props.onClearSchedule,
               })
             }),
           ),
@@ -844,8 +895,6 @@ interface MyDayScheduleCardProps {
   onDragEnd: () => void
   onOpenTask: (blockId: DbId) => void
   onRemoveTask: (blockId: DbId) => void | Promise<void>
-  onApplySchedule: (blockId: DbId, startMinute: number, endMinute: number) => void | Promise<void>
-  onClearSchedule: (blockId: DbId) => void | Promise<void>
 }
 
 function MyDayScheduleCard(props: MyDayScheduleCardProps) {
@@ -854,13 +903,14 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
   return React.createElement(
     "div",
     {
-      className: "mlo-my-day-card",
+      className: `mlo-my-day-card${props.item.star ? " mlo-my-day-card-starred" : ""}${props.disabled ? " mlo-my-day-card-disabled" : ""}`,
       draggable: props.draggable,
       onDragStart: props.onDragStart,
       onDragEnd: props.onDragEnd,
       style: {
         opacity: props.dragging ? 0.5 : 1,
         animationDelay: `${Math.min(props.rowIndex, 8) * 36}ms`,
+        "--mlo-myday-card-hue": computeCardHue(props.item.blockId, props.item.star),
       },
     },
     React.createElement(
@@ -889,28 +939,11 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
             )),
         )
       : null,
-    React.createElement(ScheduleTimeEditor, {
-      taskId: props.item.blockId,
-      scheduleStartMinute: props.item.scheduleStartMinute,
-      scheduleEndMinute: props.item.scheduleEndMinute,
-      disabled: props.disabled,
-      onApplySchedule: props.onApplySchedule,
-      onClearSchedule: props.onClearSchedule,
-    }),
     React.createElement(
       "div",
       {
-        className: "mlo-my-day-card-actions",
+        className: "mlo-my-day-card-foot",
       },
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "mlo-my-day-action-link",
-          onClick: () => props.onOpenTask(props.item.blockId),
-        },
-        t("Open task properties"),
-      ),
       React.createElement(
         "button",
         {
@@ -944,8 +977,6 @@ interface MyDayTimelineCardProps {
   onResizeStartPointerDown: (event: PointerEvent) => void
   onResizeEndPointerDown: (event: PointerEvent) => void
   onOpenTask: (blockId: DbId) => void
-  onRemoveTask: (blockId: DbId) => void | Promise<void>
-  onClearSchedule: (blockId: DbId) => void | Promise<void>
 }
 
 function MyDayTimelineCard(props: MyDayTimelineCardProps) {
@@ -959,7 +990,7 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
   return React.createElement(
     "div",
     {
-      className: "mlo-my-day-timeline-card",
+      className: `mlo-my-day-timeline-card${props.item.star ? " mlo-my-day-timeline-card-starred" : ""}${props.disabled ? " mlo-my-day-timeline-card-disabled" : ""}`,
       draggable: false,
       onPointerDown: props.onPointerDown,
       style: {
@@ -973,6 +1004,7 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
         "--mlo-timeline-lane-index": laneIndex,
         "--mlo-timeline-lane-count": laneCount,
         "--mlo-timeline-lane-gap": `${laneGapPx}px`,
+        "--mlo-myday-card-hue": computeCardHue(props.item.blockId, props.item.star),
       },
     },
     React.createElement("div", {
@@ -1047,157 +1079,12 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
             ),
           )
         : null,
-    React.createElement(
-      "div",
-      {
-        className: "mlo-my-day-timeline-actions",
-      },
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "mlo-my-day-action-link",
-          onClick: () => props.onOpenTask(props.item.blockId),
-        },
-        t("Open"),
-      ),
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "mlo-my-day-action-link",
-          disabled: props.disabled,
-          onClick: () => {
-            void props.onClearSchedule(props.item.blockId)
-          },
-        },
-        t("Clear time"),
-      ),
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "mlo-my-day-action-danger",
-          disabled: props.disabled,
-          onClick: () => {
-            void props.onRemoveTask(props.item.blockId)
-          },
-        },
-        t("Remove"),
-      ),
-    ),
     React.createElement("div", {
       className: "mlo-my-day-timeline-resize-handle mlo-my-day-timeline-resize-handle-end",
       onPointerDown: (event: PointerEvent) => {
         props.onResizeEndPointerDown(event)
       },
     }),
-  )
-}
-
-interface ScheduleTimeEditorProps {
-  taskId: DbId
-  scheduleStartMinute: number | null
-  scheduleEndMinute: number | null
-  disabled: boolean
-  onApplySchedule: (taskId: DbId, startMinute: number, endMinute: number) => void | Promise<void>
-  onClearSchedule: (taskId: DbId) => void | Promise<void>
-}
-
-function ScheduleTimeEditor(props: ScheduleTimeEditorProps) {
-  const React = window.React
-  const [startText, setStartText] = React.useState(() => minuteToInputTime(props.scheduleStartMinute))
-  const [endText, setEndText] = React.useState(() => minuteToInputTime(props.scheduleEndMinute))
-
-  React.useEffect(() => {
-    setStartText(minuteToInputTime(props.scheduleStartMinute))
-    setEndText(minuteToInputTime(props.scheduleEndMinute))
-  }, [props.scheduleEndMinute, props.scheduleStartMinute])
-
-  const parsedStart = parseInputTime(startText)
-  const parsedEnd = parseInputTime(endText)
-  const canApply = parsedStart != null && parsedEnd != null && parsedEnd > parsedStart
-
-  return React.createElement(
-    "div",
-    {
-      className: "mlo-my-day-time-editor",
-    },
-    React.createElement(
-      "label",
-      {
-        className: "mlo-my-day-time-field",
-      },
-      React.createElement(
-        "span",
-        null,
-        t("Start"),
-      ),
-      React.createElement("input", {
-        type: "time",
-        value: startText,
-        disabled: props.disabled,
-        step: 300,
-        onChange: (event: Event) => {
-          const target = event.target as HTMLInputElement | null
-          setStartText(target?.value ?? "")
-        },
-      }),
-    ),
-    React.createElement(
-      "label",
-      {
-        className: "mlo-my-day-time-field",
-      },
-      React.createElement(
-        "span",
-        null,
-        t("End"),
-      ),
-      React.createElement("input", {
-        type: "time",
-        value: endText,
-        disabled: props.disabled,
-        step: 300,
-        onChange: (event: Event) => {
-          const target = event.target as HTMLInputElement | null
-          setEndText(target?.value ?? "")
-        },
-      }),
-    ),
-    React.createElement(
-      "div",
-      {
-        className: "mlo-my-day-time-buttons",
-      },
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "mlo-my-day-action-link",
-          disabled: props.disabled || !canApply,
-          onClick: () => {
-            if (parsedStart == null || parsedEnd == null || parsedEnd <= parsedStart) {
-              return
-            }
-            void props.onApplySchedule(props.taskId, parsedStart, parsedEnd)
-          },
-        },
-        t("Apply"),
-      ),
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "mlo-my-day-action-link",
-          disabled: props.disabled,
-          onClick: () => {
-            void props.onClearSchedule(props.taskId)
-          },
-        },
-        t("Clear time"),
-      ),
-    ),
   )
 }
 
@@ -1551,42 +1438,22 @@ function minuteToTimeLabel(minute: number): string {
   return `${String(hour).padStart(2, "0")}:${String(minutePart).padStart(2, "0")}`
 }
 
-function minuteToInputTime(minute: number | null): string {
-  if (minute == null) {
-    return ""
-  }
-
-  return minuteToTimeLabel(minute)
-}
-
-function parseInputTime(value: string): number | null {
-  if (typeof value !== "string" || value.trim() === "") {
-    return null
-  }
-
-  const match = value.match(/^(\d{1,2}):(\d{2})$/)
-  if (match == null) {
-    return null
-  }
-
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  if (
-    Number.isNaN(hour) ||
-    Number.isNaN(minute) ||
-    hour < 0 ||
-    hour > 23 ||
-    minute < 0 ||
-    minute > 59
-  ) {
-    return null
-  }
-
-  return hour * 60 + minute
-}
-
 function clampNumber(value: number, minValue: number, maxValue: number): number {
   return Math.max(minValue, Math.min(maxValue, value))
+}
+
+function computeCardHue(blockId: DbId, starred: boolean): number {
+  if (starred) {
+    return 34
+  }
+
+  const numericId = Number(blockId)
+  if (!Number.isFinite(numericId)) {
+    return 214
+  }
+
+  const normalizedId = Math.abs(Math.round(numericId))
+  return 202 + (normalizedId % 6) * 9
 }
 
 function ensureMyDayScheduleStyles() {
@@ -1606,6 +1473,32 @@ function ensureMyDayScheduleStyles() {
   100% {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes mloMyDayDropPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px rgba(11, 95, 255, 0.14);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(11, 95, 255, 0.24);
+  }
+}
+
+@keyframes mloMyDayDropTargetGlow {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.84),
+      0 0 0 3px rgba(11, 95, 255, 0.2),
+      0 14px 28px rgba(15, 23, 42, 0.1);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      0 0 0 6px rgba(11, 95, 255, 0.26),
+      0 16px 32px rgba(15, 23, 42, 0.13);
   }
 }
 
@@ -1668,65 +1561,206 @@ function ensureMyDayScheduleStyles() {
 .mlo-my-day-unscheduled-panel,
 .mlo-my-day-timeline-panel {
   min-height: 0;
-  border-radius: 12px;
-  border: 1px solid rgba(16, 44, 84, 0.13);
-  background: linear-gradient(165deg, rgba(255, 255, 255, 0.68), rgba(244, 248, 255, 0.6));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  border-radius: 14px;
+  border: 1px solid rgba(16, 44, 84, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.76),
+    0 12px 26px rgba(15, 23, 42, 0.08);
   padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.mlo-my-day-unscheduled-panel::before,
+.mlo-my-day-timeline-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.mlo-my-day-unscheduled-panel {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(0, 123, 255, 0.2), transparent 52%),
+    linear-gradient(176deg, rgba(255, 255, 255, 0.92), rgba(240, 247, 255, 0.9));
+}
+
+.mlo-my-day-unscheduled-panel::before {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, transparent 45%),
+    radial-gradient(circle at 100% 100%, rgba(0, 123, 255, 0.11), transparent 42%);
+}
+
+.mlo-my-day-unscheduled-panel-drop-target {
+  border-color: rgba(11, 95, 255, 0.44);
+  animation: mloMyDayDropTargetGlow 940ms ease-in-out infinite;
+}
+
+.mlo-my-day-unscheduled-panel-drop-target .mlo-my-day-card-stack {
+  border-color: rgba(11, 95, 255, 0.36);
+  background:
+    linear-gradient(180deg, rgba(11, 95, 255, 0.12), rgba(255, 255, 255, 0.24)),
+    repeating-linear-gradient(
+      180deg,
+      rgba(15, 23, 42, 0.018) 0px,
+      rgba(15, 23, 42, 0.018) 1px,
+      transparent 1px,
+      transparent 12px
+    );
+  opacity: 0.26;
+}
+
+.mlo-my-day-unscheduled-panel-drop-target .mlo-my-day-empty-hint {
+  opacity: 0.24;
+}
+
+.mlo-my-day-unscheduled-drop-cta {
+  position: absolute;
+  top: 44px;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 4;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 14px;
+  border-radius: 12px;
+  border: 2px dashed rgba(11, 95, 255, 0.46);
+  background:
+    linear-gradient(180deg, rgba(11, 95, 255, 0.18), rgba(11, 95, 255, 0.09)),
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.72), transparent 58%);
+  color: #0f4fb5;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  animation: mloMyDayDropPulse 880ms ease-in-out infinite;
+  font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.mlo-my-day-timeline-panel {
+  background:
+    radial-gradient(circle at 0% 100%, rgba(28, 125, 255, 0.17), transparent 45%),
+    linear-gradient(176deg, rgba(252, 254, 255, 0.94), rgba(237, 245, 255, 0.9));
+}
+
+.mlo-my-day-timeline-panel::before {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.48), transparent 44%),
+    radial-gradient(circle at 100% 0%, rgba(88, 28, 255, 0.08), transparent 46%);
 }
 
 .mlo-my-day-panel-title {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 44, 84, 0.16);
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.82), rgba(245, 250, 255, 0.86));
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: #21425d;
+  box-shadow: 0 5px 12px rgba(15, 23, 42, 0.08);
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .mlo-my-day-empty-hint {
+  position: relative;
+  z-index: 1;
   font-size: 12px;
   color: var(--mlo-myday-muted);
-  background: rgba(11, 95, 255, 0.08);
-  border: 1px dashed rgba(11, 95, 255, 0.22);
-  border-radius: 9px;
-  padding: 8px 9px;
+  background: linear-gradient(150deg, rgba(11, 95, 255, 0.09), rgba(11, 95, 255, 0.03));
+  border: 1px dashed rgba(11, 95, 255, 0.28);
+  border-radius: 10px;
+  padding: 10px 11px;
 }
 
 .mlo-my-day-card-stack {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-height: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-right: 2px;
+  gap: 10px;
+  padding: 6px 4px 6px 2px;
+  border-radius: 12px;
+  border: 1px dashed rgba(16, 44, 84, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.54), rgba(255, 255, 255, 0.14)),
+    repeating-linear-gradient(
+      180deg,
+      rgba(15, 23, 42, 0.018) 0px,
+      rgba(15, 23, 42, 0.018) 1px,
+      transparent 1px,
+      transparent 12px
+    );
+}
+
+.mlo-my-day-card-stack::-webkit-scrollbar,
+.mlo-my-day-timeline-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.mlo-my-day-card-stack::-webkit-scrollbar-thumb,
+.mlo-my-day-timeline-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background: rgba(36, 84, 148, 0.34);
 }
 
 .mlo-my-day-card {
+  --mlo-myday-card-hue: 214;
   border-radius: 10px;
-  border: 1px solid rgba(16, 44, 84, 0.18);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08);
-  padding: 10px 10px 9px;
+  border: 1px solid hsla(var(--mlo-myday-card-hue), 54%, 40%, 0.2);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   animation: mloMyDayCardIn 280ms cubic-bezier(.2,.8,.2,1) backwards;
   cursor: grab;
   transition: box-shadow 120ms ease, border-color 120ms ease;
 }
 
+.mlo-my-day-card-starred {
+  --mlo-myday-card-hue: 34;
+}
+
+.mlo-my-day-card-disabled {
+  cursor: default;
+  filter: saturate(0.86);
+}
+
 .mlo-my-day-card:hover {
-  border-color: rgba(11, 95, 255, 0.28);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+  border-color: hsla(var(--mlo-myday-card-hue), 70%, 44%, 0.34);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.1);
 }
 
 .mlo-my-day-card:active {
   cursor: grabbing;
+}
+
+.mlo-my-day-card-disabled:active {
+  cursor: default;
 }
 
 .mlo-my-day-card-title,
@@ -1737,7 +1771,7 @@ function ensureMyDayScheduleStyles() {
   color: var(--mlo-myday-ink);
   text-align: left;
   cursor: pointer;
-  font-size: 12.8px;
+  font-size: 13px;
   line-height: 1.35;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -1764,88 +1798,41 @@ function ensureMyDayScheduleStyles() {
   padding: 0 7px;
   height: 18px;
   border-radius: 999px;
-  border: 1px solid rgba(11, 95, 255, 0.18);
-  background: rgba(11, 95, 255, 0.08);
-  color: #26538f;
+  border: 1px solid hsla(var(--mlo-myday-card-hue), 52%, 46%, 0.22);
+  background: hsla(var(--mlo-myday-card-hue), 72%, 54%, 0.09);
+  color: hsl(var(--mlo-myday-card-hue), 50%, 34%);
   font-size: 10px;
   white-space: nowrap;
-  max-width: 95px;
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.mlo-my-day-time-editor {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 6px;
-}
-
-.mlo-my-day-time-field {
+.mlo-my-day-card-foot {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 10px;
-  color: #334155;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  justify-content: flex-end;
+  margin-top: 1px;
 }
 
-.mlo-my-day-time-field input {
-  height: 24px;
-  border-radius: 7px;
-  border: 1px solid rgba(16, 44, 84, 0.22);
-  background: rgba(255, 255, 255, 0.84);
-  padding: 0 6px;
-  color: #0f172a;
-  font-size: 11px;
-  font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
-}
-
-.mlo-my-day-time-buttons {
-  grid-column: span 2;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mlo-my-day-card-actions,
-.mlo-my-day-timeline-actions {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
-}
-
-.mlo-my-day-action-link,
 .mlo-my-day-action-danger {
   border: 1px solid rgba(16, 44, 84, 0.18);
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.92);
   cursor: pointer;
   font-size: 10px;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 999px;
   line-height: 1.4;
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-.mlo-my-day-action-link {
-  color: #1a4d95;
-}
-
-.mlo-my-day-action-link:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+  transition: background 120ms ease, border-color 120ms ease;
 }
 
 .mlo-my-day-action-danger {
   color: var(--mlo-myday-danger);
 }
 
-.mlo-my-day-action-link:hover:not(:disabled),
 .mlo-my-day-action-danger:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.96);
-  border-color: rgba(11, 95, 255, 0.24);
+  background: #fff;
+  border-color: rgba(180, 35, 24, 0.36);
 }
 
 .mlo-my-day-action-danger:disabled {
@@ -1857,38 +1844,63 @@ function ensureMyDayScheduleStyles() {
   flex: 1;
   min-height: 220px;
   overflow: auto;
-  border-radius: 10px;
-  border: 1px solid rgba(16, 44, 84, 0.14);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(244, 248, 255, 0.84));
+  border-radius: 12px;
+  border: 1px solid rgba(16, 44, 84, 0.2);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(244, 248, 255, 0.9)),
+    repeating-linear-gradient(
+      180deg,
+      rgba(15, 23, 42, 0.015) 0px,
+      rgba(15, 23, 42, 0.015) 1px,
+      transparent 1px,
+      transparent 12px
+    );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .mlo-my-day-timeline {
   position: relative;
   min-height: 220px;
-  padding-left: 66px;
+  padding-left: 68px;
   overflow: hidden;
+}
+
+.mlo-my-day-timeline::before {
+  content: "";
+  position: absolute;
+  left: 57px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(16, 44, 84, 0.36),
+    rgba(16, 44, 84, 0.12)
+  );
 }
 
 .mlo-my-day-slot {
   position: absolute;
   left: 0;
   right: 0;
-  border-top: 1px dashed rgba(16, 44, 84, 0.12);
+  border-top: 1px dashed rgba(16, 44, 84, 0.14);
 }
 
 .mlo-my-day-slot-major {
   border-top-style: solid;
-  border-top-color: rgba(16, 44, 84, 0.24);
+  border-top-color: rgba(16, 44, 84, 0.3);
 }
 
 .mlo-my-day-slot-label {
   position: absolute;
   left: 8px;
-  top: -9px;
+  top: -10px;
   width: 48px;
   text-align: right;
   font-size: 10px;
-  color: #4c5f78;
+  color: #35506f;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
@@ -1899,10 +1911,12 @@ function ensureMyDayScheduleStyles() {
   height: 0;
   border-top: 2px solid var(--mlo-myday-accent);
   box-shadow: 0 0 0 4px var(--mlo-myday-accent-soft);
+  animation: mloMyDayDropPulse 880ms ease-in-out infinite;
   z-index: 6;
 }
 
 .mlo-my-day-timeline-card {
+  --mlo-myday-card-hue: 214;
   --mlo-timeline-track-left: 70px;
   --mlo-timeline-track-right: 10px;
   --mlo-timeline-lane-count: 1;
@@ -1914,22 +1928,39 @@ function ensureMyDayScheduleStyles() {
   position: absolute;
   left: calc(var(--mlo-timeline-track-left) + (var(--mlo-timeline-lane-index) * (var(--mlo-timeline-column-width) + var(--mlo-timeline-lane-gap))));
   width: var(--mlo-timeline-column-width);
-  border-radius: 12px;
-  border: 1px solid rgba(16, 44, 84, 0.22);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.1);
+  border-radius: 10px;
+  border: 1px solid hsla(var(--mlo-myday-card-hue), 54%, 42%, 0.25);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 5px 14px rgba(15, 23, 42, 0.1);
   padding: 8px 9px;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 6px;
   animation: mloMyDayCardIn 260ms cubic-bezier(.2,.8,.2,1) backwards;
   cursor: grab;
   z-index: 5;
   user-select: none;
   touch-action: none;
-  overflow: visible;
+  overflow: hidden;
   transition: box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.mlo-my-day-timeline-card::before {
+  content: none;
+}
+
+.mlo-my-day-timeline-card::after {
+  content: none;
+}
+
+.mlo-my-day-timeline-card-starred {
+  --mlo-myday-card-hue: 34;
+}
+
+.mlo-my-day-timeline-card-disabled {
+  cursor: default;
+  filter: saturate(0.84);
 }
 
 .mlo-my-day-timeline-card:active {
@@ -1937,8 +1968,12 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-timeline-card:hover {
-  border-color: rgba(11, 95, 255, 0.32);
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+  border-color: hsla(var(--mlo-myday-card-hue), 70%, 44%, 0.35);
+  box-shadow: 0 7px 16px rgba(15, 23, 42, 0.12);
+}
+
+.mlo-my-day-timeline-card-disabled:active {
+  cursor: default;
 }
 
 .mlo-my-day-timeline-card-head {
@@ -1953,6 +1988,7 @@ function ensureMyDayScheduleStyles() {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  color: hsl(var(--mlo-myday-card-hue), 36%, 23%);
 }
 
 .mlo-my-day-timeline-meta {
@@ -1967,12 +2003,12 @@ function ensureMyDayScheduleStyles() {
   align-items: center;
   height: 17px;
   border-radius: 999px;
-  border: 1px solid rgba(11, 95, 255, 0.2);
-  background: rgba(11, 95, 255, 0.08);
-  color: #2c568f;
+  border: 1px solid hsla(var(--mlo-myday-card-hue), 52%, 46%, 0.22);
+  background: hsla(var(--mlo-myday-card-hue), 72%, 54%, 0.09);
+  color: hsl(var(--mlo-myday-card-hue), 50%, 34%);
   font-size: 10px;
   padding: 0 6px;
-  max-width: 108px;
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1982,12 +2018,12 @@ function ensureMyDayScheduleStyles() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 17px;
-  min-width: 17px;
+  height: 18px;
+  min-width: 18px;
   border-radius: 999px;
-  border: 1px solid rgba(212, 162, 18, 0.28);
-  background: rgba(212, 162, 18, 0.1);
-  color: #9a6b00;
+  border: 1px solid rgba(212, 162, 18, 0.34);
+  background: linear-gradient(145deg, rgba(248, 219, 145, 0.26), rgba(212, 162, 18, 0.16));
+  color: #8f6200;
   font-size: 10px;
 }
 
@@ -1999,10 +2035,41 @@ function ensureMyDayScheduleStyles() {
   border-radius: 8px;
   cursor: ns-resize;
   z-index: 9;
+  background: transparent;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
 }
 
 .mlo-my-day-timeline-resize-handle::before {
-  content: none;
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 2px;
+  border-radius: 999px;
+  background: hsla(var(--mlo-myday-card-hue), 48%, 38%, 0.38);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.mlo-my-day-timeline-card:hover .mlo-my-day-timeline-resize-handle,
+.mlo-my-day-timeline-card:hover .mlo-my-day-timeline-resize-handle::before,
+.mlo-my-day-timeline-resize-handle:hover,
+.mlo-my-day-timeline-resize-handle:hover::before {
+  opacity: 1;
+}
+
+.mlo-my-day-timeline-resize-handle:hover {
+  background: hsla(var(--mlo-myday-card-hue), 58%, 44%, 0.1);
+}
+
+@media (hover: none) {
+  .mlo-my-day-timeline-resize-handle,
+  .mlo-my-day-timeline-resize-handle::before {
+    opacity: 1;
+  }
 }
 
 .mlo-my-day-timeline-resize-handle-start {
@@ -2017,12 +2084,12 @@ function ensureMyDayScheduleStyles() {
   flex-shrink: 0;
   height: 19px;
   border-radius: 999px;
-  padding: 0 8px;
+  padding: 0 7px;
   display: inline-flex;
   align-items: center;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(11, 95, 255, 0.34);
-  color: #134282;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid hsla(var(--mlo-myday-card-hue), 60%, 44%, 0.3);
+  color: hsl(var(--mlo-myday-card-hue), 50%, 31%);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -2051,6 +2118,10 @@ function ensureMyDayScheduleStyles() {
   .mlo-my-day-timeline {
     min-height: 320px;
     padding-left: 58px;
+  }
+
+  .mlo-my-day-timeline::before {
+    left: 49px;
   }
 
   .mlo-my-day-slot-label {
