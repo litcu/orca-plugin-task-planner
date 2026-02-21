@@ -39,11 +39,8 @@ type PluginSettingsSchemaVisibility = Pick<
 
 export async function ensurePluginSettingsSchema(
   pluginName: string,
-  visibility?: Partial<PluginSettingsSchemaVisibility>,
+  _visibility?: Partial<PluginSettingsSchemaVisibility>,
 ): Promise<void> {
-  const showMyDaySettings = visibility?.myDayEnabled === true
-  const showTaskTimerSettings = visibility?.taskTimerEnabled === true
-
   const schema: PluginSettingsSchema = {
     [TASK_TAG_NAME_SETTING]: {
       label: t("Task tag name"),
@@ -99,15 +96,12 @@ export async function ensurePluginSettingsSchema(
       type: "boolean",
       defaultValue: false,
     },
-  }
-
-  if (showMyDaySettings) {
-    schema[MY_DAY_RESET_HOUR_SETTING] = {
+    [MY_DAY_RESET_HOUR_SETTING]: {
       label: t("My Day start hour"),
       description: t("My Day starts at this local hour (0-23), and the schedule timeline follows this start."),
       type: "number",
       defaultValue: DEFAULT_MY_DAY_RESET_HOUR,
-    }
+    },
   }
 
   schema[DUE_SOON_DAYS_SETTING] = {
@@ -128,30 +122,27 @@ export async function ensurePluginSettingsSchema(
     type: "boolean",
     defaultValue: false,
   }
-
-  if (showTaskTimerSettings) {
-    schema[TASK_TIMER_AUTO_START_ON_DOING_SETTING] = {
-      label: t("Auto start timer when status becomes Doing"),
-      description: t("Automatically start timer when task status changes to Doing."),
-      type: "boolean",
-      defaultValue: false,
-    }
-    schema[TASK_TIMER_MODE_SETTING] = {
-      label: t("Task timer mode"),
-      description: t("Choose how task timer is displayed."),
-      type: "singleChoice",
-      choices: [
-        {
-          label: t("Direct timer"),
-          value: "direct",
-        },
-        {
-          label: t("Pomodoro timer"),
-          value: "pomodoro",
-        },
-      ],
-      defaultValue: DEFAULT_TASK_TIMER_MODE,
-    }
+  schema[TASK_TIMER_AUTO_START_ON_DOING_SETTING] = {
+    label: t("Auto start timer when status becomes Doing"),
+    description: t("Automatically start timer when task status changes to Doing."),
+    type: "boolean",
+    defaultValue: false,
+  }
+  schema[TASK_TIMER_MODE_SETTING] = {
+    label: t("Task timer mode"),
+    description: t("Choose how task timer is displayed."),
+    type: "singleChoice",
+    choices: [
+      {
+        label: t("Direct timer"),
+        value: "direct",
+      },
+      {
+        label: t("Pomodoro timer"),
+        value: "pomodoro",
+      },
+    ],
+    defaultValue: DEFAULT_TASK_TIMER_MODE,
   }
 
   await orca.plugins.setSettingsSchema(pluginName, schema)

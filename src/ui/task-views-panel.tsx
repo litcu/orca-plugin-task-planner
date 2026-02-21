@@ -263,6 +263,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   if (myDayStateRef.current !== myDayState) {
     myDayStateRef.current = myDayState
   }
+  const myDayMutationChainRef = React.useRef<Promise<void>>(Promise.resolve())
   const activeCustomViewId = React.useMemo(() => {
     return getCustomTaskViewIdFromTab(tab)
   }, [tab])
@@ -415,23 +416,51 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     })
   }, [props.pluginName])
 
-  const persistMyDayState = React.useCallback(
-    async (nextState: MyDayState): Promise<MyDayState | null> => {
-      setMyDaySaving(true)
-      try {
-        const savedState = await saveMyDayState(props.pluginName, nextState)
-        setMyDayState(savedState)
-        myDayStateRef.current = savedState
-        return savedState
-      } catch (error) {
-        console.error(error)
-        setErrorText(t("Failed to update My Day"))
-        return null
-      } finally {
-        setMyDaySaving(false)
-      }
+  const runMyDayStateMutation = React.useCallback(
+    async (
+      mutate: (baseState: MyDayState) => Promise<MyDayState | null> | MyDayState | null,
+      options?: {
+        silentError?: boolean
+      },
+    ): Promise<MyDayState | null> => {
+      let result: MyDayState | null = null
+
+      myDayMutationChainRef.current = myDayMutationChainRef.current.then(async () => {
+        setMyDaySaving(true)
+        try {
+          const baseState =
+            myDayStateRef.current ??
+            await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
+          if (myDayStateRef.current == null) {
+            setMyDayState(baseState)
+            myDayStateRef.current = baseState
+          }
+
+          const nextState = await mutate(baseState)
+          if (nextState == null || nextState === baseState) {
+            result = baseState
+            return
+          }
+
+          const savedState = await saveMyDayState(props.pluginName, nextState)
+          setMyDayState(savedState)
+          myDayStateRef.current = savedState
+          result = savedState
+        } catch (error) {
+          console.error(error)
+          if (options?.silentError !== true) {
+            setErrorText(t("Failed to update My Day"))
+          }
+          result = null
+        } finally {
+          setMyDaySaving(false)
+        }
+      })
+
+      await myDayMutationChainRef.current
+      return result
     },
-    [props.pluginName],
+    [panelSettings.myDayResetHour, props.pluginName],
   )
 
   React.useEffect(() => {
@@ -533,53 +562,57 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     let cancelled = false
     const run = async () => {
       try {
-        let nextState = myDayStateRef.current ?? myDayState
-        let changed = false
+        const savedState = await runMyDayStateMutation(
+          async (baseState: MyDayState) => {
+            if (baseState.tasks.length === 0) {
+              return baseState
+            }
 
-        for (const entry of nextState.tasks) {
-          if (cancelled) {
-            return
-          }
+            let nextState = baseState
+            let changed = false
+            for (const entry of baseState.tasks) {
+              if (cancelled) {
+                return baseState
+              }
 
-          const mirrorResult = await ensureMyDayMirrorInTodayJournal({
-            taskId: entry.taskId,
-            dayKey: nextState.dayKey,
-            sectionTitle: t("My Day"),
-            existingSectionBlockId: nextState.journalSectionBlockId,
-          })
+              const mirrorResult = await ensureMyDayMirrorInTodayJournal({
+                taskId: entry.taskId,
+                dayKey: nextState.dayKey,
+                sectionTitle: t("My Day"),
+                existingSectionBlockId: nextState.journalSectionBlockId,
+              })
 
-          if (
-            mirrorResult.journalSectionBlockId != null &&
-            mirrorResult.journalSectionBlockId !== nextState.journalSectionBlockId
-          ) {
-            nextState = setMyDayJournalSectionBlockId(
-              nextState,
-              mirrorResult.journalSectionBlockId,
-            )
-            changed = true
-          }
+              if (
+                mirrorResult.journalSectionBlockId != null &&
+                mirrorResult.journalSectionBlockId !== nextState.journalSectionBlockId
+              ) {
+                nextState = setMyDayJournalSectionBlockId(
+                  nextState,
+                  mirrorResult.journalSectionBlockId,
+                )
+                changed = true
+              }
 
-          const currentEntry = nextState.tasks.find((item: MyDayTaskEntry) => {
-            return item.taskId === getMirrorId(entry.taskId)
-          }) ?? null
-          if (
-            mirrorResult.mirrorBlockId != null &&
-            mirrorResult.mirrorBlockId !== currentEntry?.mirrorBlockId
-          ) {
-            nextState = setMyDayTaskMirrorBlockId(
-              nextState,
-              entry.taskId,
-              mirrorResult.mirrorBlockId,
-            )
-            changed = true
-          }
-        }
+              const currentEntry = nextState.tasks.find((item: MyDayTaskEntry) => {
+                return item.taskId === getMirrorId(entry.taskId)
+              }) ?? null
+              if (
+                mirrorResult.mirrorBlockId != null &&
+                mirrorResult.mirrorBlockId !== currentEntry?.mirrorBlockId
+              ) {
+                nextState = setMyDayTaskMirrorBlockId(
+                  nextState,
+                  entry.taskId,
+                  mirrorResult.mirrorBlockId,
+                )
+                changed = true
+              }
+            }
 
-        if (!changed || cancelled) {
-          return
-        }
-
-        const savedState = await persistMyDayState(nextState)
+            return changed ? nextState : baseState
+          },
+          { silentError: true },
+        )
         if (savedState != null && !cancelled) {
           setErrorText("")
         }
@@ -597,7 +630,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     myDayLoaded,
     myDayState,
     panelSettings.myDayEnabled,
-    persistMyDayState,
+    runMyDayStateMutation,
   ])
 
   React.useEffect(() => {
@@ -1141,37 +1174,36 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       })
 
       try {
-        const baseState =
-          myDayStateRef.current ??
-          await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
-        let nextState = addTaskToMyDayState(baseState, {
-          taskId: item.blockId,
-          sourceBlockId: item.sourceBlockId,
-        }).state
-        const mirrorResult = await ensureMyDayMirrorInTodayJournal({
-          taskId: item.blockId,
-          dayKey: nextState.dayKey,
-          sectionTitle: t("My Day"),
-          existingSectionBlockId: nextState.journalSectionBlockId,
+        const savedState = await runMyDayStateMutation(async (baseState: MyDayState) => {
+          let nextState = addTaskToMyDayState(baseState, {
+            taskId: item.blockId,
+            sourceBlockId: item.sourceBlockId,
+          }).state
+          const mirrorResult = await ensureMyDayMirrorInTodayJournal({
+            taskId: item.blockId,
+            dayKey: nextState.dayKey,
+            sectionTitle: t("My Day"),
+            existingSectionBlockId: nextState.journalSectionBlockId,
+          })
+
+          if (mirrorResult.journalSectionBlockId != null) {
+            nextState = setMyDayJournalSectionBlockId(
+              nextState,
+              mirrorResult.journalSectionBlockId,
+            )
+          }
+          if (mirrorResult.mirrorBlockId != null) {
+            nextState = setMyDayTaskMirrorBlockId(
+              nextState,
+              item.blockId,
+              mirrorResult.mirrorBlockId,
+            )
+          } else {
+            orca.notify("warn", t("Failed to sync My Day journal"))
+          }
+
+          return nextState
         })
-
-        if (mirrorResult.journalSectionBlockId != null) {
-          nextState = setMyDayJournalSectionBlockId(
-            nextState,
-            mirrorResult.journalSectionBlockId,
-          )
-        }
-        if (mirrorResult.mirrorBlockId != null) {
-          nextState = setMyDayTaskMirrorBlockId(
-            nextState,
-            item.blockId,
-            mirrorResult.mirrorBlockId,
-          )
-        } else {
-          orca.notify("warn", t("Failed to sync My Day journal"))
-        }
-
-        const savedState = await persistMyDayState(nextState)
         if (savedState != null) {
           setErrorText("")
         }
@@ -1188,9 +1220,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     },
     [
       panelSettings.myDayEnabled,
-      panelSettings.myDayResetHour,
-      persistMyDayState,
-      props.pluginName,
+      runMyDayStateMutation,
     ],
   )
 
@@ -1203,16 +1233,15 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       })
 
       try {
-        const baseState =
-          myDayStateRef.current ??
-          await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
-        const removeResult = removeTaskFromMyDayState(baseState, item.blockId)
-        if (!removeResult.removed) {
-          return
-        }
+        const savedState = await runMyDayStateMutation(async (baseState: MyDayState) => {
+          const removeResult = removeTaskFromMyDayState(baseState, item.blockId)
+          if (!removeResult.removed) {
+            return baseState
+          }
 
-        await removeMyDayMirrorBlock(removeResult.removedEntry?.mirrorBlockId)
-        const savedState = await persistMyDayState(removeResult.state)
+          await removeMyDayMirrorBlock(removeResult.removedEntry?.mirrorBlockId)
+          return removeResult.state
+        })
         if (savedState != null) {
           setErrorText("")
         }
@@ -1227,7 +1256,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         })
       }
     },
-    [panelSettings.myDayResetHour, persistMyDayState, props.pluginName],
+    [runMyDayStateMutation],
   )
 
   const applyMyDaySchedule = React.useCallback(
@@ -1239,16 +1268,14 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       })
 
       try {
-        const baseState =
-          myDayStateRef.current ??
-          await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
-        const nextState = updateMyDayTaskSchedule(
-          baseState,
-          taskId,
-          startMinute,
-          endMinute,
-        )
-        const savedState = await persistMyDayState(nextState)
+        const savedState = await runMyDayStateMutation((baseState: MyDayState) => {
+          return updateMyDayTaskSchedule(
+            baseState,
+            taskId,
+            startMinute,
+            endMinute,
+          )
+        })
         if (savedState != null) {
           setErrorText("")
         }
@@ -1263,7 +1290,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         })
       }
     },
-    [panelSettings.myDayResetHour, persistMyDayState, props.pluginName],
+    [runMyDayStateMutation],
   )
 
   const clearMyDaySchedule = React.useCallback(
@@ -1275,11 +1302,9 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       })
 
       try {
-        const baseState =
-          myDayStateRef.current ??
-          await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
-        const nextState = updateMyDayTaskSchedule(baseState, taskId, null, null)
-        const savedState = await persistMyDayState(nextState)
+        const savedState = await runMyDayStateMutation((baseState: MyDayState) => {
+          return updateMyDayTaskSchedule(baseState, taskId, null, null)
+        })
         if (savedState != null) {
           setErrorText("")
         }
@@ -1294,22 +1319,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         })
       }
     },
-    [panelSettings.myDayResetHour, persistMyDayState, props.pluginName],
+    [runMyDayStateMutation],
   )
 
   const updateMyDayDisplayMode = React.useCallback(
     async (mode: MyDayDisplayMode) => {
-      const baseState =
-        myDayStateRef.current ??
-        await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
-      const nextState = setMyDayDisplayMode(baseState, mode)
-      if (nextState === baseState) {
-        return
-      }
-
-      await persistMyDayState(nextState)
+      await runMyDayStateMutation((baseState: MyDayState) => {
+        return setMyDayDisplayMode(baseState, mode)
+      })
     },
-    [panelSettings.myDayResetHour, persistMyDayState, props.pluginName],
+    [runMyDayStateMutation],
   )
 
   const addTask = React.useCallback(() => {
@@ -1946,19 +1965,23 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       return
     }
 
-    const validTaskIds = new Set<DbId>(allTaskItems.map((item: AllTaskItem) => item.blockId))
-    const pruneResult = pruneMissingMyDayTasks(myDayState, validTaskIds)
-    if (pruneResult.removedEntries.length === 0) {
-      return
-    }
-
     let cancelled = false
     const run = async () => {
-      for (const removedEntry of pruneResult.removedEntries) {
-        await removeMyDayMirrorBlock(removedEntry.mirrorBlockId)
-      }
+      const validTaskIds = new Set<DbId>(allTaskItems.map((item: AllTaskItem) => item.blockId))
+      const savedState = await runMyDayStateMutation(
+        async (baseState: MyDayState) => {
+          const pruneResult = pruneMissingMyDayTasks(baseState, validTaskIds)
+          if (pruneResult.removedEntries.length === 0) {
+            return baseState
+          }
 
-      const savedState = await persistMyDayState(pruneResult.state)
+          for (const removedEntry of pruneResult.removedEntries) {
+            await removeMyDayMirrorBlock(removedEntry.mirrorBlockId)
+          }
+          return pruneResult.state
+        },
+        { silentError: true },
+      )
       if (cancelled || savedState == null) {
         return
       }
@@ -1970,7 +1993,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     return () => {
       cancelled = true
     }
-  }, [allTaskItems, allTaskItemsLoaded, myDayLoaded, myDayState, persistMyDayState])
+  }, [allTaskItems, allTaskItemsLoaded, myDayLoaded, myDayState, runMyDayStateMutation])
 
   const isDescendantTask = React.useCallback(
     (taskId: DbId, ancestorTaskId: DbId): boolean => {

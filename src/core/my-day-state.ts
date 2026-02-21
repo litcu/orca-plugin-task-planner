@@ -418,8 +418,8 @@ export async function ensureMyDayMirrorInTodayJournal(options: {
   }
 
   const journalBlock =
-    (await resolveTodayJournalBlock()) ??
-    (await resolveJournalBlockByDayKey(options.dayKey))
+    (await resolveJournalBlockByDayKey(options.dayKey)) ??
+    (await resolveTodayJournalBlock())
   if (journalBlock == null) {
     return {
       mirrorBlockId: null,
