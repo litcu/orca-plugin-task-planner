@@ -47,6 +47,25 @@ interface TimelinePointerDragState {
   previewEndMinute: number
 }
 
+interface TimelineRenderItem {
+  item: MyDayScheduleTaskItem
+  baseStartMinute: number
+  baseEndMinute: number
+  startMinute: number
+  endMinute: number
+  pointerInteracting: boolean
+  top: number
+  height: number
+  updating: boolean
+}
+
+interface TimelineLaneLayout {
+  laneIndex: number
+  laneCount: number
+}
+
+const TIMELINE_LANE_GAP_PX = 8
+
 export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   const React = window.React
   const timelineRef = React.useRef<HTMLDivElement | null>(null)
@@ -146,6 +165,53 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
     }
     return result
   }, [timelineEndMinute, timelineStartMinute])
+
+  const timelineRenderItems = React.useMemo((): TimelineRenderItem[] => {
+    return scheduledItems.map((item: MyDayScheduleTaskItem) => {
+      const baseStartMinute = item.scheduleStartMinute ?? timelineStartMinute
+      const baseEndMinute =
+        item.scheduleEndMinute ?? (baseStartMinute + DEFAULT_SCHEDULE_DURATION_MINUTES)
+      const pointerInteracting = timelinePointerDragState?.taskId === item.blockId
+      const startMinute = pointerInteracting
+        ? timelinePointerDragState.previewStartMinute
+        : baseStartMinute
+      const endMinute = pointerInteracting
+        ? timelinePointerDragState.previewEndMinute
+        : baseEndMinute
+      const duration = Math.max(MIN_DURATION_MINUTES, endMinute - startMinute)
+      const top = (startMinute - timelineStartMinute) * PIXELS_PER_MINUTE + 2
+      const height = Math.max(48, duration * PIXELS_PER_MINUTE - 4)
+
+      return {
+        item,
+        baseStartMinute,
+        baseEndMinute,
+        startMinute,
+        endMinute,
+        pointerInteracting,
+        top,
+        height,
+        updating: props.updatingTaskIds.has(item.blockId),
+      }
+    })
+  }, [
+    props.updatingTaskIds,
+    scheduledItems,
+    timelinePointerDragState,
+    timelineStartMinute,
+  ])
+
+  const timelineLaneByTaskId = React.useMemo(() => {
+    return computeTimelineLaneLayouts(
+      timelineRenderItems.map((item: TimelineRenderItem) => {
+        return {
+          blockId: item.item.blockId,
+          startMinute: item.startMinute,
+          endMinute: item.endMinute,
+        }
+      }),
+    )
+  }, [timelineRenderItems])
 
   React.useEffect(() => {
     timelineBoundsRef.current = {
@@ -609,67 +675,58 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                   },
                 })
               : null,
-            scheduledItems.map((item: MyDayScheduleTaskItem, index: number) => {
-              const baseStartMinute = item.scheduleStartMinute ?? timelineStartMinute
-              const baseEndMinute =
-                item.scheduleEndMinute ?? (baseStartMinute + DEFAULT_SCHEDULE_DURATION_MINUTES)
-              const pointerInteracting = timelinePointerDragState?.taskId === item.blockId
-              const startMinute = pointerInteracting
-                ? timelinePointerDragState.previewStartMinute
-                : baseStartMinute
-              const endMinute = pointerInteracting
-                ? timelinePointerDragState.previewEndMinute
-                : baseEndMinute
-              const duration = Math.max(MIN_DURATION_MINUTES, endMinute - startMinute)
-              const top = (startMinute - timelineStartMinute) * PIXELS_PER_MINUTE + 2
-              const height = Math.max(48, duration * PIXELS_PER_MINUTE - 4)
-              const updating = props.updatingTaskIds.has(item.blockId)
-
+            timelineRenderItems.map((renderItem: TimelineRenderItem, index: number) => {
+              const laneLayout = timelineLaneByTaskId.get(renderItem.item.blockId) ?? {
+                laneIndex: 0,
+                laneCount: 1,
+              }
               return React.createElement(MyDayTimelineCard, {
-                key: item.blockId,
-                item,
-                startMinute,
-                endMinute,
-                top,
-                height,
+                key: renderItem.item.blockId,
+                item: renderItem.item,
+                startMinute: renderItem.startMinute,
+                endMinute: renderItem.endMinute,
+                top: renderItem.top,
+                height: renderItem.height,
                 index,
-                dragging: draggingTaskId === item.blockId || pointerInteracting,
-                pointerDragging: pointerInteracting,
-                disabled: props.disabled || updating,
+                laneIndex: laneLayout.laneIndex,
+                laneCount: laneLayout.laneCount,
+                dragging: draggingTaskId === renderItem.item.blockId || renderItem.pointerInteracting,
+                pointerDragging: renderItem.pointerInteracting,
+                disabled: props.disabled || renderItem.updating,
                 onPointerDown: (event: PointerEvent) => {
-                  if (props.disabled || updating) {
+                  if (props.disabled || renderItem.updating) {
                     return
                   }
                   beginTimelinePointerDrag(
                     event,
-                    item.blockId,
-                    baseStartMinute,
-                    baseEndMinute,
+                    renderItem.item.blockId,
+                    renderItem.baseStartMinute,
+                    renderItem.baseEndMinute,
                   )
                 },
                 onResizeStartPointerDown: (event: PointerEvent) => {
-                  if (props.disabled || updating) {
+                  if (props.disabled || renderItem.updating) {
                     return
                   }
 
                   beginTimelinePointerResize(
                     event,
-                    item.blockId,
-                    baseStartMinute,
-                    baseEndMinute,
+                    renderItem.item.blockId,
+                    renderItem.baseStartMinute,
+                    renderItem.baseEndMinute,
                     "resize-start",
                   )
                 },
                 onResizeEndPointerDown: (event: PointerEvent) => {
-                  if (props.disabled || updating) {
+                  if (props.disabled || renderItem.updating) {
                     return
                   }
 
                   beginTimelinePointerResize(
                     event,
-                    item.blockId,
-                    baseStartMinute,
-                    baseEndMinute,
+                    renderItem.item.blockId,
+                    renderItem.baseStartMinute,
+                    renderItem.baseEndMinute,
                     "resize-end",
                   )
                 },
@@ -785,6 +842,8 @@ interface MyDayTimelineCardProps {
   top: number
   height: number
   index: number
+  laneIndex: number
+  laneCount: number
   dragging: boolean
   pointerDragging: boolean
   disabled: boolean
@@ -800,6 +859,9 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
   const React = window.React
   const startMinute = props.startMinute
   const endMinute = props.endMinute
+  const laneCount = Math.max(1, props.laneCount)
+  const laneIndex = clampNumber(props.laneIndex, 0, laneCount - 1)
+  const laneGapPx = laneCount > 1 ? TIMELINE_LANE_GAP_PX : 0
 
   return React.createElement(
     "div",
@@ -812,9 +874,12 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
         height: `${props.height}px`,
         opacity: props.dragging ? 0.5 : 1,
         cursor: props.pointerDragging ? "grabbing" : "grab",
-        zIndex: props.pointerDragging ? 8 : 5,
+        zIndex: props.pointerDragging ? 12 : 5 + laneIndex,
         transition: props.pointerDragging ? "none" : undefined,
         animationDelay: `${Math.min(props.index, 8) * 28}ms`,
+        "--mlo-timeline-lane-index": laneIndex,
+        "--mlo-timeline-lane-count": laneCount,
+        "--mlo-timeline-lane-gap": `${laneGapPx}px`,
       },
     },
     React.createElement("div", {
@@ -845,6 +910,46 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
         `${minuteToTimeLabel(startMinute)} - ${minuteToTimeLabel(endMinute)}`,
       ),
     ),
+    props.item.labels.length > 0
+      ? React.createElement(
+          "div",
+          {
+            className: "mlo-my-day-timeline-meta",
+          },
+          props.item.labels.slice(0, 2).map((label: string) =>
+            React.createElement(
+              "span",
+              {
+                key: `${props.item.blockId}-${label}`,
+                className: "mlo-my-day-timeline-chip",
+              },
+              label,
+            )),
+          props.item.star
+            ? React.createElement(
+                "span",
+                {
+                  className: "mlo-my-day-timeline-star",
+                },
+                "★",
+              )
+            : null,
+        )
+      : props.item.star
+        ? React.createElement(
+            "div",
+            {
+              className: "mlo-my-day-timeline-meta",
+            },
+            React.createElement(
+              "span",
+              {
+                className: "mlo-my-day-timeline-star",
+              },
+              "★",
+            ),
+          )
+        : null,
     React.createElement(
       "div",
       {
@@ -1064,6 +1169,96 @@ function resolvePointerInteractionPreviewMinutes(
   }
 }
 
+function computeTimelineLaneLayouts(
+  items: Array<{
+    blockId: DbId
+    startMinute: number
+    endMinute: number
+  }>,
+): Map<DbId, TimelineLaneLayout> {
+  const sortedItems = items
+    .filter((item) => item.endMinute > item.startMinute)
+    .slice()
+    .sort((left, right) => {
+      if (left.startMinute !== right.startMinute) {
+        return left.startMinute - right.startMinute
+      }
+      if (left.endMinute !== right.endMinute) {
+        return left.endMinute - right.endMinute
+      }
+      return left.blockId - right.blockId
+    })
+
+  const result = new Map<DbId, TimelineLaneLayout>()
+  if (sortedItems.length === 0) {
+    return result
+  }
+
+  let cluster: typeof sortedItems = []
+  let clusterMaxEndMinute = -1
+
+  const flushCluster = () => {
+    if (cluster.length === 0) {
+      return
+    }
+
+    const laneEnds: number[] = []
+    const laneByTaskId = new Map<DbId, number>()
+
+    for (const item of cluster) {
+      let laneIndex = -1
+      for (let index = 0; index < laneEnds.length; index += 1) {
+        if (laneEnds[index] <= item.startMinute) {
+          laneIndex = index
+          break
+        }
+      }
+
+      if (laneIndex < 0) {
+        laneIndex = laneEnds.length
+        laneEnds.push(item.endMinute)
+      } else {
+        laneEnds[laneIndex] = item.endMinute
+      }
+
+      laneByTaskId.set(item.blockId, laneIndex)
+    }
+
+    const laneCount = Math.max(1, laneEnds.length)
+    for (const item of cluster) {
+      const laneIndex = laneByTaskId.get(item.blockId) ?? 0
+      result.set(item.blockId, {
+        laneIndex,
+        laneCount,
+      })
+    }
+
+    cluster = []
+    clusterMaxEndMinute = -1
+  }
+
+  for (const item of sortedItems) {
+    if (cluster.length === 0) {
+      cluster.push(item)
+      clusterMaxEndMinute = item.endMinute
+      continue
+    }
+
+    if (item.startMinute < clusterMaxEndMinute) {
+      cluster.push(item)
+      clusterMaxEndMinute = Math.max(clusterMaxEndMinute, item.endMinute)
+      continue
+    }
+
+    flushCluster()
+    cluster.push(item)
+    clusterMaxEndMinute = item.endMinute
+  }
+
+  flushCluster()
+  return result
+}
+
 function isScheduledTaskItem(item: MyDayScheduleTaskItem): boolean {
   if (typeof item.scheduleStartMinute !== "number" || typeof item.scheduleEndMinute !== "number") {
     return false
@@ -1248,15 +1443,21 @@ function ensureMyDayScheduleStyles() {
 
 .mlo-my-day-card {
   border-radius: 10px;
-  border: 1px solid var(--mlo-myday-card-border);
-  background: var(--mlo-myday-card-bg);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
-  padding: 8px 9px;
+  border: 1px solid rgba(16, 44, 84, 0.18);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08);
+  padding: 10px 10px 9px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   animation: mloMyDayCardIn 280ms cubic-bezier(.2,.8,.2,1) backwards;
   cursor: grab;
+  transition: box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.mlo-my-day-card:hover {
+  border-color: rgba(11, 95, 255, 0.28);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
 }
 
 .mlo-my-day-card:active {
@@ -1295,12 +1496,12 @@ function ensureMyDayScheduleStyles() {
 .mlo-my-day-card-label {
   display: inline-flex;
   align-items: center;
-  padding: 0 6px;
-  height: 17px;
+  padding: 0 7px;
+  height: 18px;
   border-radius: 999px;
-  border: 1px solid rgba(11, 95, 255, 0.23);
-  background: rgba(11, 95, 255, 0.1);
-  color: #1d4f97;
+  border: 1px solid rgba(11, 95, 255, 0.18);
+  background: rgba(11, 95, 255, 0.08);
+  color: #26538f;
   font-size: 10px;
   white-space: nowrap;
   max-width: 95px;
@@ -1346,22 +1547,25 @@ function ensureMyDayScheduleStyles() {
 .mlo-my-day-timeline-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   flex-wrap: wrap;
 }
 
 .mlo-my-day-action-link,
 .mlo-my-day-action-danger {
-  border: none;
-  background: transparent;
+  border: 1px solid rgba(16, 44, 84, 0.18);
+  background: rgba(255, 255, 255, 0.86);
   cursor: pointer;
-  font-size: 11px;
-  padding: 0;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  line-height: 1.4;
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .mlo-my-day-action-link {
-  color: #1d4f97;
+  color: #1a4d95;
 }
 
 .mlo-my-day-action-link:disabled {
@@ -1371,6 +1575,12 @@ function ensureMyDayScheduleStyles() {
 
 .mlo-my-day-action-danger {
   color: var(--mlo-myday-danger);
+}
+
+.mlo-my-day-action-link:hover:not(:disabled),
+.mlo-my-day-action-danger:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(11, 95, 255, 0.24);
 }
 
 .mlo-my-day-action-danger:disabled {
@@ -1428,79 +1638,129 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-timeline-card {
+  --mlo-timeline-track-left: 70px;
+  --mlo-timeline-track-right: 10px;
+  --mlo-timeline-lane-count: 1;
+  --mlo-timeline-lane-index: 0;
+  --mlo-timeline-lane-gap: 0px;
+  --mlo-timeline-track-width: calc(100% - var(--mlo-timeline-track-left) - var(--mlo-timeline-track-right));
+  --mlo-timeline-gap-total: calc((var(--mlo-timeline-lane-count) - 1) * var(--mlo-timeline-lane-gap));
+  --mlo-timeline-column-width: calc((var(--mlo-timeline-track-width) - var(--mlo-timeline-gap-total)) / var(--mlo-timeline-lane-count));
   position: absolute;
-  left: 70px;
-  right: 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(11, 95, 255, 0.26);
-  background: linear-gradient(155deg, rgba(11, 95, 255, 0.16), rgba(11, 95, 255, 0.08));
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.15);
-  padding: 6px 8px;
+  left: calc(var(--mlo-timeline-track-left) + (var(--mlo-timeline-lane-index) * (var(--mlo-timeline-column-width) + var(--mlo-timeline-lane-gap))));
+  width: var(--mlo-timeline-column-width);
+  border-radius: 12px;
+  border: 1px solid rgba(16, 44, 84, 0.22);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.1);
+  padding: 8px 9px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
   animation: mloMyDayCardIn 260ms cubic-bezier(.2,.8,.2,1) backwards;
   cursor: grab;
   z-index: 5;
   user-select: none;
   touch-action: none;
   overflow: visible;
+  transition: box-shadow 120ms ease, border-color 120ms ease;
 }
 
 .mlo-my-day-timeline-card:active {
   cursor: grabbing;
 }
 
+.mlo-my-day-timeline-card:hover {
+  border-color: rgba(11, 95, 255, 0.32);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
 .mlo-my-day-timeline-card-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+}
+
+.mlo-my-day-timeline-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mlo-my-day-timeline-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.mlo-my-day-timeline-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  border-radius: 999px;
+  border: 1px solid rgba(11, 95, 255, 0.2);
+  background: rgba(11, 95, 255, 0.08);
+  color: #2c568f;
+  font-size: 10px;
+  padding: 0 6px;
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mlo-my-day-timeline-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 17px;
+  min-width: 17px;
+  border-radius: 999px;
+  border: 1px solid rgba(212, 162, 18, 0.28);
+  background: rgba(212, 162, 18, 0.1);
+  color: #9a6b00;
+  font-size: 10px;
 }
 
 .mlo-my-day-timeline-resize-handle {
   position: absolute;
   left: 8px;
   right: 8px;
-  height: 9px;
-  border-radius: 999px;
+  height: 10px;
+  border-radius: 8px;
   cursor: ns-resize;
   z-index: 9;
 }
 
 .mlo-my-day-timeline-resize-handle::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 3px;
-  height: 3px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(11, 95, 255, 0.42);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.15);
+  content: none;
 }
 
 .mlo-my-day-timeline-resize-handle-start {
-  top: -5px;
+  top: 0;
 }
 
 .mlo-my-day-timeline-resize-handle-end {
-  bottom: -5px;
+  bottom: 0;
 }
 
 .mlo-my-day-time-pill {
   flex-shrink: 0;
-  height: 18px;
+  height: 19px;
   border-radius: 999px;
-  padding: 0 7px;
+  padding: 0 8px;
   display: inline-flex;
   align-items: center;
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid rgba(11, 95, 255, 0.28);
-  color: #1d4f97;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(11, 95, 255, 0.34);
+  color: #134282;
   font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
@@ -1534,7 +1794,9 @@ function ensureMyDayScheduleStyles() {
   }
 
   .mlo-my-day-timeline-card {
-    left: 62px;
+    --mlo-timeline-track-left: 62px;
+    --mlo-timeline-track-right: 8px;
+    --mlo-timeline-lane-gap: 6px;
   }
 
   .mlo-my-day-drop-line {
