@@ -3,12 +3,15 @@ import { t } from "../libs/l10n"
 import { DEFAULT_TASK_SCORE, type TaskSchemaDefinition } from "./task-schema"
 import { getMirrorId, isValidDbId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
+import { getPluginSettings } from "./plugin-settings"
 import {
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
   toTaskMetaPropertyForSave,
 } from "./task-properties"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
+import { setupTaskTimerInlineWidgets } from "./task-timer-inline"
+import { applyTaskTimerForStatusChange } from "./task-timer"
 
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
@@ -37,7 +40,7 @@ export async function setupTaskQuickActions(
   }
 
   // 命令用于 Alt+Enter 和左侧状态图标点击，共享同一条状态流转逻辑。
-  registerCycleTaskStatusCommand(commandId, schema)
+  registerCycleTaskStatusCommand(commandId, schema, pluginName)
 
   // 统一将 Alt+Enter 绑定到任务状态循环。
   if (orca.state.shortcuts[TASK_STATUS_SHORTCUT] !== commandId) {
@@ -48,10 +51,12 @@ export async function setupTaskQuickActions(
   injectTaskStatusStyles(pluginName, schema)
   const clickListener = createStatusIconClickListener(commandId, schema)
   document.body.addEventListener("click", clickListener)
+  const timerInlineHandle = setupTaskTimerInlineWidgets(pluginName, schema)
 
   return {
     commandId,
     dispose: async () => {
+      timerInlineHandle.dispose()
       document.body.removeEventListener("click", clickListener)
       removeTaskStatusStyles(pluginName)
       await orca.shortcuts.reset(commandId)
@@ -69,6 +74,7 @@ export async function setupTaskQuickActions(
 function registerCycleTaskStatusCommand(
   commandId: string,
   schema: TaskSchemaDefinition,
+  pluginName: string,
 ) {
   if (orca.state.commands[commandId] != null) {
     return
@@ -99,7 +105,7 @@ function registerCycleTaskStatusCommand(
         return null
       }
 
-      await cycleTaskTagStatus(blockId, cursor, block, taskTagRef, schema)
+      await cycleTaskTagStatus(blockId, cursor, block, taskTagRef, schema, pluginName)
       return null
     },
     () => {},
@@ -190,6 +196,7 @@ async function cycleTaskTagStatus(
   block: Block,
   taskTagRef: { data?: BlockProperty[] },
   schema: TaskSchemaDefinition,
+  pluginName: string,
 ) {
   const propertyNames = schema.propertyNames
   const currentValues = getTaskPropertiesFromRef(taskTagRef.data, schema, block)
@@ -238,6 +245,20 @@ async function cycleTaskTagStatus(
     [blockId],
     [toTaskMetaPropertyForSave(nextValues, block)],
   )
+
+  const settings = getPluginSettings(pluginName)
+  try {
+    await applyTaskTimerForStatusChange({
+      blockId,
+      sourceBlockId: block.id,
+      schema,
+      previousStatus: currentValues.status,
+      nextStatus: nextValues.status,
+      autoStartOnDoing: settings.taskTimerEnabled && settings.taskTimerAutoStartOnDoing,
+    })
+  } catch (error) {
+    console.error(error)
+  }
 
   await createRecurringTaskInTodayJournal(
     currentValues.status,

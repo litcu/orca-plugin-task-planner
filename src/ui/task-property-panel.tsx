@@ -15,6 +15,8 @@ import {
 } from "../core/task-properties"
 import { invalidateNextActionEvaluationCache } from "../core/dependency-engine"
 import { createRecurringTaskInTodayJournal } from "../core/task-recurrence"
+import { getPluginSettings } from "../core/plugin-settings"
+import { applyTaskTimerForStatusChange } from "../core/task-timer"
 
 import { t } from "../libs/l10n"
 import {
@@ -49,6 +51,7 @@ interface PopupState {
 }
 
 interface OpenTaskPropertyPopupOptions {
+  pluginName?: string
   blockId?: DbId
   parentBlockId?: DbId
   parentSourceBlockId?: DbId
@@ -160,6 +163,7 @@ function renderCurrent() {
 }
 
 function TaskPropertyPopupView(props: {
+  pluginName?: string
   blockId?: DbId
   parentBlockId?: DbId
   parentSourceBlockId?: DbId
@@ -715,6 +719,12 @@ function TaskPropertyPopupView(props: {
     },
   ) => {
     const closeOnSuccess = options?.closeOnSuccess === true
+    const timerSettings = props.pluginName != null
+      ? getPluginSettings(props.pluginName)
+      : null
+    const timerAutoStartOnDoing = timerSettings != null &&
+      timerSettings.taskTimerEnabled &&
+      timerSettings.taskTimerAutoStartOnDoing
 
     const importance = validateNumericField(labels.importance, importanceText)
     if (importance.error != null) {
@@ -790,6 +800,7 @@ function TaskPropertyPopupView(props: {
         }
 
         let createdTaskId: DbId | null = null
+        let createdTaskStatus: string | null = null
         await orca.commands.invokeGroup(async () => {
           const insertedTaskId = (await orca.commands.invokeEditorCommand(
             "core.editor.insertBlock",
@@ -860,6 +871,7 @@ function TaskPropertyPopupView(props: {
             dependsMode: hasDependencies ? dependsModeValue : "ALL",
             dependencyDelay: hasDependencies ? dependencyDelay.value : null,
           }, props.schema)
+          createdTaskStatus = valuesToSave.status
           const payload = toRefDataForSave(valuesToSave, props.schema)
           await orca.commands.invokeEditorCommand(
             "core.editor.insertTag",
@@ -878,6 +890,20 @@ function TaskPropertyPopupView(props: {
 
         if (createdTaskId == null) {
           throw new Error(t("Failed to add task"))
+        }
+
+        if (createdTaskStatus != null) {
+          try {
+            await applyTaskTimerForStatusChange({
+              blockId: createdTaskId,
+              schema: props.schema,
+              previousStatus: props.schema.statusChoices[0],
+              nextStatus: createdTaskStatus,
+              autoStartOnDoing: timerAutoStartOnDoing,
+            })
+          } catch (error) {
+            console.error(error)
+          }
         }
 
         invalidateNextActionEvaluationCache()
@@ -979,6 +1005,17 @@ function TaskPropertyPopupView(props: {
         sourceBlockId,
         props.schema,
       )
+      try {
+        await applyTaskTimerForStatusChange({
+          blockId: sourceBlockId,
+          schema: props.schema,
+          previousStatus: previousValuesWithMeta.status,
+          nextStatus: valuesToSave.status,
+          autoStartOnDoing: timerAutoStartOnDoing,
+        })
+      } catch (error) {
+        console.error(error)
+      }
       invalidateNextActionEvaluationCache()
       setLastSavedSnapshot(snapshot)
       setLastFailedSnapshot(null)

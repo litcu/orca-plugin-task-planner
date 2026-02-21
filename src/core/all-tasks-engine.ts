@@ -24,6 +24,7 @@ import {
   resolveNextReviewAfterMarkReviewed,
   type TaskReviewType,
 } from "./task-review"
+import { applyTaskTimerForStatusChange } from "./task-timer"
 
 const TAG_REF_TYPE = 2
 const REF_DATA_TYPE = 3
@@ -345,6 +346,9 @@ export async function cycleTaskStatusInView(
   schema: TaskSchemaDefinition,
   taskTagRef?: BlockRef | null,
   sourceBlockId?: DbId | null,
+  options?: {
+    timerAutoStartOnDoing?: boolean
+  },
 ): Promise<void> {
   const targetIds = collectCandidateIds(
     sourceBlockId ?? null,
@@ -414,6 +418,18 @@ export async function cycleTaskStatusInView(
         sourceBlockId ?? blockId,
         schema,
       )
+      try {
+        await applyTaskTimerForStatusChange({
+          blockId,
+          sourceBlockId: sourceBlockId ?? blockId,
+          schema,
+          previousStatus: values.status,
+          nextStatus: nextValues.status,
+          autoStartOnDoing: options?.timerAutoStartOnDoing === true,
+        })
+      } catch (error) {
+        console.error(error)
+      }
       invalidateNextActionEvaluationCache()
       return
     } catch (error) {
@@ -443,6 +459,18 @@ export async function cycleTaskStatusInView(
         sourceBlockId ?? blockId,
         schema,
       )
+      try {
+        await applyTaskTimerForStatusChange({
+          blockId,
+          sourceBlockId: sourceBlockId ?? blockId,
+          schema,
+          previousStatus: values.status,
+          nextStatus: nextValues.status,
+          autoStartOnDoing: options?.timerAutoStartOnDoing === true,
+        })
+      } catch (error) {
+        console.error(error)
+      }
       invalidateNextActionEvaluationCache()
       return
     } catch (error) {

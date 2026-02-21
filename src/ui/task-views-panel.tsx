@@ -58,6 +58,11 @@ import {
 import { getMirrorId } from "../core/block-utils"
 import { TASK_META_PROPERTY_NAME } from "../core/task-meta"
 import { parseReviewRule, type ReviewUnit } from "../core/task-review"
+import {
+  readTaskTimerFromProperties,
+  startTaskTimer,
+  stopTaskTimer,
+} from "../core/task-timer"
 import { t } from "../libs/l10n"
 import {
   TaskDashboard,
@@ -202,6 +207,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   )
   const [showCompletedInAllTasks, setShowCompletedInAllTasks] = React.useState(true)
   const [updatingIds, setUpdatingIds] = React.useState<Set<DbId>>(new Set())
+  const [timingIds, setTimingIds] = React.useState<Set<DbId>>(new Set())
   const [starringIds, setStarringIds] = React.useState<Set<DbId>>(new Set())
   const [reviewingIds, setReviewingIds] = React.useState<Set<DbId>>(new Set())
   const [selectedReviewIds, setSelectedReviewIds] = React.useState<Set<DbId>>(new Set())
@@ -221,6 +227,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     null,
   )
   const [dashboardGeneratedAt, setDashboardGeneratedAt] = React.useState<Date>(() => new Date())
+  const [timerNowMs, setTimerNowMs] = React.useState<number>(() => Date.now())
   const [panelSettings, setPanelSettings] = React.useState<TaskPlannerSettings>(() =>
     getPluginSettings(props.pluginName)
   )
@@ -368,6 +375,21 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
       setPanelSettings(getPluginSettings(props.pluginName))
     })
   }, [props.pluginName])
+
+  React.useEffect(() => {
+    if (!panelSettings.taskTimerEnabled) {
+      return
+    }
+
+    setTimerNowMs(Date.now())
+    const timerId = window.setInterval(() => {
+      setTimerNowMs(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(timerId)
+    }
+  }, [panelSettings.taskTimerEnabled])
 
   React.useEffect(() => {
     let cancelled = false
@@ -618,6 +640,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           props.schema,
           item.taskTagRef ?? null,
           item.sourceBlockId,
+          {
+            timerAutoStartOnDoing:
+              panelSettings.taskTimerEnabled && panelSettings.taskTimerAutoStartOnDoing,
+          },
         )
         setErrorText("")
         await loadByTab(tab, { silent: true })
@@ -632,24 +658,77 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         })
       }
     },
+    [
+      loadByTab,
+      panelSettings.taskTimerAutoStartOnDoing,
+      panelSettings.taskTimerEnabled,
+      props.schema,
+      tab,
+    ],
+  )
+
+  const toggleTaskTimer = React.useCallback(
+    async (item: TaskListRowItem) => {
+      setTimingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(item.blockId)
+        return next
+      })
+
+      const currentTimer = readTaskTimerFromProperties(item.blockProperties)
+      const action = currentTimer.running ? "stop" : "start"
+
+      try {
+        if (action === "stop") {
+          await stopTaskTimer({
+            blockId: item.blockId,
+            sourceBlockId: item.sourceBlockId,
+            schema: props.schema,
+          })
+        } else {
+          await startTaskTimer({
+            blockId: item.blockId,
+            sourceBlockId: item.sourceBlockId,
+            schema: props.schema,
+          })
+        }
+
+        setErrorText("")
+        await loadByTab(tab, { silent: true })
+      } catch (error) {
+        console.error(error)
+        const fallbackMessage = action === "stop"
+          ? t("Failed to stop timer")
+          : t("Failed to start timer")
+        setErrorText(error instanceof Error ? error.message : fallbackMessage)
+      } finally {
+        setTimingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(item.blockId)
+          return next
+        })
+      }
+    },
     [loadByTab, props.schema, tab],
   )
 
   const openTaskProperty = React.useCallback(
     (blockId: DbId) => {
       openTaskPropertyPopup({
+        pluginName: props.pluginName,
         blockId,
         schema: props.schema,
         triggerSource: "panel-view",
         mountContainer: panelRootRef.current,
       })
     },
-    [props.schema],
+    [props.pluginName, props.schema],
   )
 
   const addSubtask = React.useCallback(
     (item: TaskListRowItem) => {
       openTaskPropertyPopup({
+        pluginName: props.pluginName,
         schema: props.schema,
         triggerSource: "panel-view",
         mountContainer: panelRootRef.current,
@@ -662,7 +741,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         },
       })
     },
-    [loadByTab, props.schema, tab],
+    [loadByTab, props.pluginName, props.schema, tab],
   )
 
   const toggleTaskStar = React.useCallback(
@@ -827,6 +906,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
   const addTask = React.useCallback(() => {
     openTaskPropertyPopup({
+      pluginName: props.pluginName,
       schema: props.schema,
       triggerSource: "panel-view",
       mountContainer: panelRootRef.current,
@@ -3256,6 +3336,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                           showReviewSelection: false,
                           reviewSelected: false,
                           starUpdating: starringIds.has(row.node.item.blockId),
+                          timerEnabled: panelSettings.taskTimerEnabled,
+                          timerMode: panelSettings.taskTimerMode,
+                          timerNowMs,
+                          timerUpdating: timingIds.has(row.node.item.blockId),
                           reviewUpdating: reviewingIds.has(row.node.item.blockId),
                           onToggleCollapse: row.hasChildren
                             ? () => toggleCollapsed(row.node.item.blockId)
@@ -3264,6 +3348,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                           onToggleStatus: () => toggleTaskStatus(row.node.item),
                           onNavigate: () => navigateToTask(row.node.item),
                           onToggleStar: () => toggleTaskStar(row.node.item),
+                          onToggleTimer: () => toggleTaskTimer(row.node.item),
                           onMarkReviewed: () => markTaskReviewed(row.node.item),
                           onAddSubtask: () => addSubtask(row.node.item),
                           onDeleteTaskTag: () => removeTaskTag(row.node.item),
@@ -3292,6 +3377,10 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       showReviewSelection: reviewSelectionEnabled,
                       reviewSelected: reviewSelectionEnabled && selectedReviewIds.has(item.blockId),
                       starUpdating: starringIds.has(item.blockId),
+                      timerEnabled: panelSettings.taskTimerEnabled,
+                      timerMode: panelSettings.taskTimerMode,
+                      timerNowMs,
+                      timerUpdating: timingIds.has(item.blockId),
                       reviewUpdating: reviewingIds.has(item.blockId),
                       onToggleReviewSelected: reviewSelectionEnabled
                         ? () => toggleReviewSelection(item.blockId)
@@ -3299,6 +3388,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       onToggleStatus: () => toggleTaskStatus(item),
                       onNavigate: () => navigateToTask(item),
                       onToggleStar: () => toggleTaskStar(item),
+                      onToggleTimer: () => toggleTaskTimer(item),
                       onMarkReviewed: () => markTaskReviewed(item),
                       onAddSubtask: () => addSubtask(item),
                       onDeleteTaskTag: () => removeTaskTag(item),

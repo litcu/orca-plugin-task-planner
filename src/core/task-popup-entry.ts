@@ -62,6 +62,7 @@ export function setupTaskPopupEntry(
     event.stopPropagation()
 
     openTaskPropertyPopup({
+      pluginName,
       blockId,
       schema,
       triggerSource: "tag-click",
@@ -94,6 +95,7 @@ export function setupTaskPopupEntry(
       }
 
       openTaskPropertyPopup({
+        pluginName,
         blockId: targetBlockId,
         schema,
         triggerSource: "tag-menu",

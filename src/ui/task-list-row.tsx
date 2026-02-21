@@ -1,6 +1,16 @@
-import type { BlockRef, DbId } from "../orca.d.ts"
+import type { BlockProperty, BlockRef, DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import type { TaskSchemaDefinition } from "../core/task-schema"
+import {
+  formatTaskTimerDuration,
+  hasTaskTimerRecord,
+  readTaskTimerFromProperties,
+  resolveTaskPomodoroProgress,
+  resolveTaskTimerElapsedMs,
+  type TaskTimerMode,
+} from "../core/task-timer"
+
+const POMODORO_DURATION_MS = 25 * 60 * 1000
 
 export interface TaskListRowItem {
   blockId: DbId
@@ -14,6 +24,7 @@ export interface TaskListRowItem {
   lastReviewed: Date | null
   labels: string[]
   star: boolean
+  blockProperties?: BlockProperty[]
   parentTaskName?: string | null
   taskTagRef?: BlockRef | null
 }
@@ -34,12 +45,17 @@ interface TaskListRowProps {
   showReviewSelection?: boolean
   reviewSelected?: boolean
   starUpdating: boolean
+  timerEnabled: boolean
+  timerMode: TaskTimerMode
+  timerNowMs: number
+  timerUpdating: boolean
   reviewUpdating: boolean
   onToggleCollapse?: () => void
   onToggleReviewSelected?: () => void
   onToggleStatus: () => void | Promise<void>
   onNavigate: () => void
   onToggleStar: () => void | Promise<void>
+  onToggleTimer: () => void | Promise<void>
   onMarkReviewed: () => void | Promise<void>
   onAddSubtask: () => void | Promise<void>
   onDeleteTaskTag: () => void | Promise<void>
@@ -80,8 +96,46 @@ export function TaskListRow(props: TaskListRowProps) {
   const visibleLabels = taskLabels.slice(0, hasParentContext ? 2 : 3)
   const hiddenLabelCount = Math.max(0, taskLabels.length - visibleLabels.length)
   const hasMetaLine = visibleLabels.length > 0 || hiddenLabelCount > 0 || hasParentContext
+  const timerData = readTaskTimerFromProperties(props.item.blockProperties)
+  const timerElapsedMs = resolveTaskTimerElapsedMs(timerData, props.timerNowMs)
+  const hasTimerRecord = hasTaskTimerRecord(timerData)
+  const timerDurationText = formatTaskTimerDuration(timerElapsedMs)
+  const timerProgress = resolveTaskPomodoroProgress(timerElapsedMs)
+  const timerButtonDisabled =
+    props.loading ||
+    props.updating ||
+    props.timerUpdating ||
+    (!timerData.running && isCompleted)
+  const timerButtonTitle =
+    !timerData.running && isCompleted
+      ? t("Completed task cannot start timer")
+      : timerData.running
+        ? t("Stop timer")
+        : t("Start timer")
+  const timerDisplayText =
+    hasTimerRecord && props.timerMode === "pomodoro"
+      ? t("Pomodoro ${cycle} ${elapsed}/${duration}", {
+          cycle: String(timerProgress.cycle),
+          elapsed: formatTaskTimerDuration(timerProgress.cycleElapsedMs),
+          duration: formatTaskTimerDuration(POMODORO_DURATION_MS),
+        })
+      : hasTimerRecord
+        ? t("Elapsed ${time}", { time: timerDurationText })
+        : t("Start timer")
+  const timerButtonTone =
+    timerData.running
+      ? "running"
+      : props.timerMode === "pomodoro"
+        ? "pomodoro"
+        : hasTimerRecord
+          ? "direct"
+          : "idle"
   const mutationDisabled =
-    props.loading || props.updating || props.starUpdating || props.reviewUpdating
+    props.loading ||
+    props.updating ||
+    props.starUpdating ||
+    props.timerUpdating ||
+    props.reviewUpdating
 
   React.useEffect(() => {
     ensureTaskRowStyles()
@@ -528,6 +582,83 @@ export function TaskListRow(props: TaskListRowProps) {
             className: "ti ti-checks",
             style: { fontSize: "14px", lineHeight: 1 },
           }),
+        )
+      : null,
+    props.timerEnabled
+      ? React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation()
+              if (timerButtonDisabled) {
+                return
+              }
+              void props.onToggleTimer()
+            },
+            disabled: timerButtonDisabled,
+            title: timerButtonTitle,
+            style: {
+              maxWidth: "180px",
+              height: "22px",
+              padding: "0 8px",
+              border: timerButtonTone === "running"
+                ? "1px solid rgba(197, 48, 48, 0.35)"
+                : timerButtonTone === "pomodoro"
+                  ? "1px solid rgba(183, 121, 31, 0.34)"
+                  : timerButtonTone === "direct"
+                    ? "1px solid rgba(37, 99, 235, 0.34)"
+                    : "1px solid rgba(148, 163, 184, 0.34)",
+              borderRadius: "999px",
+              background: timerButtonTone === "running"
+                ? "rgba(197, 48, 48, 0.1)"
+                : timerButtonTone === "pomodoro"
+                  ? hovered || focused
+                    ? "rgba(183, 121, 31, 0.17)"
+                    : "rgba(183, 121, 31, 0.1)"
+                  : timerButtonTone === "direct"
+                    ? hovered || focused
+                      ? "rgba(37, 99, 235, 0.14)"
+                      : "rgba(37, 99, 235, 0.08)"
+                    : hovered || focused
+                      ? "rgba(148, 163, 184, 0.2)"
+                      : "rgba(148, 163, 184, 0.12)",
+              color: timerButtonTone === "running"
+                ? "var(--orca-color-text-red, #c53030)"
+                : timerButtonTone === "pomodoro"
+                  ? "var(--orca-color-text-yellow, #b7791f)"
+                  : timerButtonTone === "idle"
+                    ? "var(--orca-color-text-2)"
+                    : "var(--orca-color-text-blue, #2563eb)",
+              cursor: timerButtonDisabled ? "not-allowed" : "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "5px",
+              flexShrink: 0,
+              fontSize: "9.5px",
+              fontWeight: timerData.running ? 600 : 500,
+              letterSpacing: "0.02em",
+              fontVariantNumeric: "tabular-nums",
+              opacity: timerButtonDisabled ? 0.56 : 1,
+            },
+          },
+          React.createElement("i", {
+            className: timerData.running ? "ti ti-player-stop-filled" : "ti ti-player-play-filled",
+            style: { fontSize: "12px", lineHeight: 1, flexShrink: 0 },
+          }),
+          React.createElement(
+            "span",
+            {
+              style: {
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                minWidth: 0,
+              },
+            },
+            timerDisplayText,
+          ),
         )
       : null,
     React.createElement(
