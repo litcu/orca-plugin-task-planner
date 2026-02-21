@@ -10,7 +10,10 @@ import {
   toTaskMetaPropertyForSave,
 } from "./task-properties"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
-import { setupTaskTimerInlineWidgets } from "./task-timer-inline"
+import {
+  setupTaskTimerInlineWidgets,
+  type TaskTimerInlineHandle,
+} from "./task-timer-inline"
 import { applyTaskTimerForStatusChange } from "./task-timer"
 
 const TAG_REF_TYPE = 2
@@ -51,12 +54,59 @@ export async function setupTaskQuickActions(
   injectTaskStatusStyles(pluginName, schema)
   const clickListener = createStatusIconClickListener(commandId, schema)
   document.body.addEventListener("click", clickListener)
-  const timerInlineHandle = setupTaskTimerInlineWidgets(pluginName, schema)
+  const { subscribe } = window.Valtio
+  let disposed = false
+  let timerInlineHandle: TaskTimerInlineHandle | null = null
+  let timerInlineEnabled = getPluginSettings(pluginName).taskTimerEnabled
+  let settingsUnsubscribe: (() => void) | null = null
+
+  const mountTimerInlineWidgets = () => {
+    if (disposed || !timerInlineEnabled || timerInlineHandle != null) {
+      return
+    }
+
+    timerInlineHandle = setupTaskTimerInlineWidgets(pluginName, schema)
+  }
+
+  const unmountTimerInlineWidgets = () => {
+    if (timerInlineHandle == null) {
+      return
+    }
+
+    timerInlineHandle.dispose()
+    timerInlineHandle = null
+  }
+
+  mountTimerInlineWidgets()
+
+  const pluginState = orca.state.plugins[pluginName]
+  if (pluginState != null) {
+    settingsUnsubscribe = subscribe(pluginState, () => {
+      if (disposed) {
+        return
+      }
+
+      const nextTimerInlineEnabled = getPluginSettings(pluginName).taskTimerEnabled
+      if (nextTimerInlineEnabled === timerInlineEnabled) {
+        return
+      }
+
+      timerInlineEnabled = nextTimerInlineEnabled
+      if (timerInlineEnabled) {
+        mountTimerInlineWidgets()
+      } else {
+        unmountTimerInlineWidgets()
+      }
+    })
+  }
 
   return {
     commandId,
     dispose: async () => {
-      timerInlineHandle.dispose()
+      disposed = true
+      settingsUnsubscribe?.()
+      settingsUnsubscribe = null
+      unmountTimerInlineWidgets()
       document.body.removeEventListener("click", clickListener)
       removeTaskStatusStyles(pluginName)
       await orca.shortcuts.reset(commandId)

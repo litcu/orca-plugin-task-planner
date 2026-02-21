@@ -705,22 +705,59 @@ function normalizeScheduleRange(
     return [null, null]
   }
 
-  if (endMinute <= startMinute) {
-    const nextEnd = Math.min(startMinute + DEFAULT_SCHEDULE_DURATION_MINUTES, MINUTE_PER_DAY)
-    if (nextEnd <= startMinute) {
-      return [null, null]
-    }
-
-    return [startMinute, nextEnd]
+  const normalizedDuration = resolveScheduleDurationMinutes(startMinute, endMinute)
+  if (normalizedDuration != null) {
+    return [
+      startMinute,
+      normalizeScheduleEndMinute(startMinute, normalizedDuration),
+    ]
   }
 
-  const duration = endMinute - startMinute
-  const clampedDuration = clampNumber(
-    duration,
+  const fallbackDuration = clampNumber(
+    DEFAULT_SCHEDULE_DURATION_MINUTES,
     MIN_SCHEDULE_DURATION_MINUTES,
     MAX_SCHEDULE_DURATION_MINUTES,
   )
-  return [startMinute, Math.min(startMinute + clampedDuration, MINUTE_PER_DAY)]
+  const fallbackEndMinute = normalizeScheduleEndMinute(startMinute, fallbackDuration)
+  if (resolveScheduleDurationMinutes(startMinute, fallbackEndMinute) == null) {
+    return [null, null]
+  }
+
+  return [startMinute, fallbackEndMinute]
+}
+
+function resolveScheduleDurationMinutes(startMinute: number, endMinute: number): number | null {
+  if (!Number.isFinite(startMinute) || !Number.isFinite(endMinute)) {
+    return null
+  }
+
+  const normalizedStartMinute = clampNumber(Math.round(startMinute), 0, MINUTE_PER_DAY)
+  const normalizedEndMinute = clampNumber(Math.round(endMinute), 0, MINUTE_PER_DAY)
+  let duration = normalizedEndMinute - normalizedStartMinute
+  if (duration <= 0) {
+    duration += MINUTE_PER_DAY
+  }
+
+  if (duration < MIN_SCHEDULE_DURATION_MINUTES || duration > MAX_SCHEDULE_DURATION_MINUTES) {
+    return null
+  }
+
+  return duration
+}
+
+function normalizeScheduleEndMinute(startMinute: number, durationMinutes: number): number {
+  const normalizedStartMinute = clampNumber(Math.round(startMinute), 0, MINUTE_PER_DAY)
+  const normalizedDuration = clampNumber(
+    Math.round(durationMinutes),
+    MIN_SCHEDULE_DURATION_MINUTES,
+    MAX_SCHEDULE_DURATION_MINUTES,
+  )
+  const rawEndMinute = normalizedStartMinute + normalizedDuration
+  if (rawEndMinute > MINUTE_PER_DAY) {
+    return rawEndMinute - MINUTE_PER_DAY
+  }
+
+  return rawEndMinute
 }
 
 function normalizeMinute(value: unknown): number | null {

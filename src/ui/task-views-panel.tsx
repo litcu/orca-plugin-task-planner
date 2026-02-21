@@ -543,7 +543,12 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     if (myDayState == null) {
       return ""
     }
-    return `${myDayState.dayKey}:${myDayState.tasks.length}`
+    const taskIdSignature = myDayState.tasks
+      .map((item: MyDayTaskEntry) => Number(item.taskId))
+      .filter((taskId: number) => Number.isFinite(taskId))
+      .sort((left: number, right: number) => left - right)
+      .join(",")
+    return `${myDayState.dayKey}:${taskIdSignature}`
   }, [myDayState])
   const myDayJournalSyncKeyRef = React.useRef<string>("")
 
