@@ -46,8 +46,8 @@ export async function ensurePluginSettingsSchema(pluginName: string): Promise<vo
       defaultValue: false,
     },
     [MY_DAY_RESET_HOUR_SETTING]: {
-      label: t("My Day reset hour"),
-      description: t("My Day clears after this local hour each day (0-23)."),
+      label: t("My Day start hour"),
+      description: t("My Day starts at this local hour (0-23), and the schedule timeline follows this start."),
       type: "number",
       defaultValue: DEFAULT_MY_DAY_RESET_HOUR,
     },

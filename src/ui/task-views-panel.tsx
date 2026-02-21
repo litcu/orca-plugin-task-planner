@@ -3823,6 +3823,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               },
               React.createElement(MyDayScheduleBoard, {
                 items: myDayScheduleItems,
+                dayStartHour: panelSettings.myDayResetHour,
                 disabled: loading || myDaySaving,
                 updatingTaskIds: myDayUpdatingIds,
                 onOpenTask: (blockId: DbId) => {

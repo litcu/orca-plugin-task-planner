@@ -3,12 +3,15 @@ import { t } from "../libs/l10n"
 
 const DAY_MINUTES = 24 * 60
 const TIMELINE_SLOT_MINUTES = 30
+const DRAG_SNAP_MINUTES = 15
 const DEFAULT_SCHEDULE_DURATION_MINUTES = 60
 const MIN_DURATION_MINUTES = 15
 const MAX_DURATION_MINUTES = 12 * 60
-const DEFAULT_TIMELINE_START_MINUTE = 6 * 60
-const DEFAULT_TIMELINE_END_MINUTE = 22 * 60
+const DEFAULT_TIMELINE_START_MINUTE = 0
+const DEFAULT_TIMELINE_END_MINUTE = DAY_MINUTES
 const PIXELS_PER_MINUTE = 1.04
+const TIMELINE_AUTO_SCROLL_EDGE_PX = 52
+const TIMELINE_AUTO_SCROLL_MAX_STEP_PX = 22
 const DRAG_DATA_TYPE = "application/x-mlo-my-day-task"
 
 export interface MyDayScheduleTaskItem {
@@ -23,6 +26,7 @@ export interface MyDayScheduleTaskItem {
 
 interface MyDayScheduleBoardProps {
   items: MyDayScheduleTaskItem[]
+  dayStartHour: number
   disabled: boolean
   updatingTaskIds: Set<DbId>
   onOpenTask: (blockId: DbId) => void
@@ -69,6 +73,7 @@ const TIMELINE_LANE_GAP_PX = 8
 export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   const React = window.React
   const timelineRef = React.useRef<HTMLDivElement | null>(null)
+  const timelineScrollRef = React.useRef<HTMLDivElement | null>(null)
   const [draggingTaskId, setDraggingTaskId] = React.useState<DbId | null>(null)
   const [dropMinute, setDropMinute] = React.useState<number | null>(null)
   const [timelinePointerDragState, setTimelinePointerDragState] =
@@ -83,6 +88,37 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   })
   const disabledRef = React.useRef(props.disabled)
   const onApplyScheduleRef = React.useRef(props.onApplySchedule)
+  const timelineStartHour = normalizeTimelineStartHour(props.dayStartHour)
+  const timelineStartOffsetMinute = timelineStartHour * 60
+
+  const maybeAutoScrollTimeline = React.useCallback((pointerClientY: number) => {
+    const scrollElement = timelineScrollRef.current
+    if (scrollElement == null) {
+      return
+    }
+
+    const rect = scrollElement.getBoundingClientRect()
+    const threshold = Math.max(
+      1,
+      Math.min(TIMELINE_AUTO_SCROLL_EDGE_PX, Math.floor(rect.height / 2)),
+    )
+
+    if (pointerClientY < rect.top + threshold) {
+      const distance = rect.top + threshold - pointerClientY
+      const ratio = clampNumber(distance / threshold, 0, 1)
+      const delta = Math.max(4, Math.round(ratio * TIMELINE_AUTO_SCROLL_MAX_STEP_PX))
+      scrollElement.scrollTop = Math.max(0, scrollElement.scrollTop - delta)
+      return
+    }
+
+    if (pointerClientY > rect.bottom - threshold) {
+      const distance = pointerClientY - (rect.bottom - threshold)
+      const ratio = clampNumber(distance / threshold, 0, 1)
+      const delta = Math.max(4, Math.round(ratio * TIMELINE_AUTO_SCROLL_MAX_STEP_PX))
+      const maxScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight)
+      scrollElement.scrollTop = Math.min(maxScrollTop, scrollElement.scrollTop + delta)
+    }
+  }, [])
 
   React.useEffect(() => {
     ensureMyDayScheduleStyles()
@@ -122,36 +158,8 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       })
   }, [props.items])
 
-  const [timelineStartMinute, timelineEndMinute] = React.useMemo(() => {
-    const starts = scheduledItems
-      .map((item: MyDayScheduleTaskItem) => item.scheduleStartMinute)
-      .filter((item: number | null): item is number => typeof item === "number")
-    const ends = scheduledItems
-      .map((item: MyDayScheduleTaskItem) => item.scheduleEndMinute)
-      .filter((item: number | null): item is number => typeof item === "number")
-
-    const earliestStart = starts.length > 0 ? Math.min(...starts) : DEFAULT_TIMELINE_START_MINUTE
-    const latestEnd = ends.length > 0 ? Math.max(...ends) : DEFAULT_TIMELINE_END_MINUTE
-    const paddedStart = Math.max(0, earliestStart - 60)
-    const paddedEnd = Math.min(DAY_MINUTES, latestEnd + 60)
-
-    const resolvedStart = Math.max(
-      0,
-      Math.min(
-        floorToSlot(Math.min(DEFAULT_TIMELINE_START_MINUTE, paddedStart)),
-        DAY_MINUTES - TIMELINE_SLOT_MINUTES,
-      ),
-    )
-    const resolvedEnd = Math.min(
-      DAY_MINUTES,
-      Math.max(
-        ceilToSlot(Math.max(DEFAULT_TIMELINE_END_MINUTE, paddedEnd)),
-        resolvedStart + 8 * 60,
-      ),
-    )
-
-    return [resolvedStart, resolvedEnd]
-  }, [scheduledItems])
+  const timelineStartMinute = DEFAULT_TIMELINE_START_MINUTE
+  const timelineEndMinute = DEFAULT_TIMELINE_END_MINUTE
 
   const timelineHeight = Math.max(
     420,
@@ -168,9 +176,22 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
 
   const timelineRenderItems = React.useMemo((): TimelineRenderItem[] => {
     return scheduledItems.map((item: MyDayScheduleTaskItem) => {
-      const baseStartMinute = item.scheduleStartMinute ?? timelineStartMinute
-      const baseEndMinute =
-        item.scheduleEndMinute ?? (baseStartMinute + DEFAULT_SCHEDULE_DURATION_MINUTES)
+      const scheduleStartMinute = clampNumber(item.scheduleStartMinute ?? 0, 0, DAY_MINUTES)
+      const scheduleEndMinute = clampNumber(
+        item.scheduleEndMinute ?? (scheduleStartMinute + DEFAULT_SCHEDULE_DURATION_MINUTES),
+        scheduleStartMinute + MIN_DURATION_MINUTES,
+        DAY_MINUTES,
+      )
+      const normalizedDuration = clampNumber(
+        scheduleEndMinute - scheduleStartMinute,
+        MIN_DURATION_MINUTES,
+        MAX_DURATION_MINUTES,
+      )
+      const baseStartMinute = scheduleMinuteToTimelineMinute(
+        scheduleStartMinute,
+        timelineStartOffsetMinute,
+      )
+      const baseEndMinute = Math.min(timelineEndMinute, baseStartMinute + normalizedDuration)
       const pointerInteracting = timelinePointerDragState?.taskId === item.blockId
       const startMinute = pointerInteracting
         ? timelinePointerDragState.previewStartMinute
@@ -197,6 +218,8 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   }, [
     props.updatingTaskIds,
     scheduledItems,
+    timelineEndMinute,
+    timelineStartOffsetMinute,
     timelinePointerDragState,
     timelineStartMinute,
   ])
@@ -254,10 +277,19 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
         return
       }
 
-      void onApplyScheduleRef.current(
-        dragging.taskId,
+      const scheduleRange = resolveScheduleRangeFromTimelineRange(
         dragging.previewStartMinute,
         dragging.previewEndMinute,
+        timelineStartOffsetMinute,
+      )
+      if (scheduleRange == null) {
+        return
+      }
+
+      void onApplyScheduleRef.current(
+        dragging.taskId,
+        scheduleRange.startMinute,
+        scheduleRange.endMinute,
       )
     }
 
@@ -268,11 +300,13 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       }
 
       event.preventDefault()
+      maybeAutoScrollTimeline(event.clientY)
       const preview = resolvePointerInteractionPreviewMinutes(
         dragging,
         event.clientY,
         timelineBoundsRef.current.startMinute,
         timelineBoundsRef.current.endMinute,
+        timelineStartOffsetMinute,
       )
       if (preview == null) {
         return
@@ -310,7 +344,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       window.removeEventListener("pointerup", onPointerUp)
       window.removeEventListener("pointercancel", onPointerCancel)
     }
-  }, [])
+  }, [maybeAutoScrollTimeline, timelineStartOffsetMinute])
 
   const beginTimelinePointerDrag = React.useCallback(
     (
@@ -425,7 +459,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   }, [])
 
   const resolveDropMinuteFromEvent = React.useCallback(
-    (event: DragEvent): number | null => {
+    (event: DragEvent, durationMinutes: number): number | null => {
       const timelineElement = timelineRef.current
       if (timelineElement == null) {
         return null
@@ -434,17 +468,33 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       const rect = timelineElement.getBoundingClientRect()
       const relativeY = event.clientY - rect.top
       const clampedY = clampNumber(relativeY, 0, rect.height)
-      const minuteOffset = Math.round(clampedY / PIXELS_PER_MINUTE)
+      const minuteOffset = clampedY / PIXELS_PER_MINUTE
       const rawMinute = timelineStartMinute + minuteOffset
-      const slotMinute = floorToSlot(rawMinute)
+      const slotMinute = roundToSlot(rawMinute, DRAG_SNAP_MINUTES)
+      const safeDuration = Number.isFinite(durationMinutes)
+        ? durationMinutes
+        : DEFAULT_SCHEDULE_DURATION_MINUTES
+      const normalizedDuration = clampNumber(
+        Math.round(safeDuration),
+        MIN_DURATION_MINUTES,
+        MAX_DURATION_MINUTES,
+      )
 
-      return clampNumber(
-        slotMinute,
+      const maxStartMinute = Math.max(
         timelineStartMinute,
-        Math.max(timelineStartMinute, timelineEndMinute - MIN_DURATION_MINUTES),
+        timelineEndMinute - normalizedDuration,
+      )
+
+      const clampedMinute = clampNumber(slotMinute, timelineStartMinute, maxStartMinute)
+      return resolveNearestValidTimelineStartMinute(
+        clampedMinute,
+        normalizedDuration,
+        timelineStartMinute,
+        timelineEndMinute,
+        timelineStartOffsetMinute,
       )
     },
-    [timelineEndMinute, timelineStartMinute],
+    [timelineEndMinute, timelineStartMinute, timelineStartOffsetMinute],
   )
 
   const parseDropPayload = React.useCallback((event: DragEvent): DragPayload | null => {
@@ -503,10 +553,19 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
         event.dataTransfer.dropEffect = "move"
       }
 
-      const minute = resolveDropMinuteFromEvent(event)
+      maybeAutoScrollTimeline(event.clientY)
+      const payload = parseDropPayload(event)
+      const durationMinutes = payload?.durationMinutes ?? DEFAULT_SCHEDULE_DURATION_MINUTES
+      const minute = resolveDropMinuteFromEvent(event, durationMinutes)
       setDropMinute(minute)
     },
-    [draggingTaskId, props.disabled, resolveDropMinuteFromEvent],
+    [
+      draggingTaskId,
+      maybeAutoScrollTimeline,
+      parseDropPayload,
+      props.disabled,
+      resolveDropMinuteFromEvent,
+    ],
   )
 
   const onTimelineDrop = React.useCallback(
@@ -517,23 +576,54 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
 
       event.preventDefault()
       const payload = parseDropPayload(event)
-      const nextStart = resolveDropMinuteFromEvent(event)
-      if (payload == null || nextStart == null) {
+      if (payload == null) {
         setDropMinute(null)
         return
       }
 
-      const nextEnd = Math.min(DAY_MINUTES, nextStart + payload.durationMinutes)
-      if (nextEnd <= nextStart) {
+      const nextStart = resolveDropMinuteFromEvent(event, payload.durationMinutes)
+      if (nextStart == null) {
+        setDropMinute(null)
+        return
+      }
+
+      const nextEnd = nextStart + payload.durationMinutes
+      const scheduleRange = resolveScheduleRangeFromTimelineRange(
+        nextStart,
+        nextEnd,
+        timelineStartOffsetMinute,
+      )
+      if (scheduleRange == null) {
         setDropMinute(null)
         return
       }
 
       setDropMinute(null)
-      void props.onApplySchedule(payload.taskId, nextStart, nextEnd)
+      void props.onApplySchedule(
+        payload.taskId,
+        scheduleRange.startMinute,
+        scheduleRange.endMinute,
+      )
     },
-    [parseDropPayload, props, resolveDropMinuteFromEvent],
+    [parseDropPayload, props, resolveDropMinuteFromEvent, timelineStartOffsetMinute],
   )
+
+  const onTimelineDragLeave = React.useCallback((event: DragEvent) => {
+    const target = event.currentTarget as HTMLElement | null
+    if (target != null) {
+      const rect = target.getBoundingClientRect()
+      if (
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom
+      ) {
+        return
+      }
+    }
+
+    setDropMinute(null)
+  }, [])
 
   return React.createElement(
     "div",
@@ -626,6 +716,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
         React.createElement(
           "div",
           {
+            ref: timelineScrollRef,
             className: "mlo-my-day-timeline-scroll",
           },
           React.createElement(
@@ -638,9 +729,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
               },
               onDragOver: onTimelineDragOver,
               onDrop: onTimelineDrop,
-              onDragLeave: () => {
-                setDropMinute(null)
-              },
+              onDragLeave: onTimelineDragLeave,
             },
             timelineSlots.map((minute: number) => {
               const major = minute % 60 === 0
@@ -662,7 +751,9 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                       {
                         className: "mlo-my-day-slot-label",
                       },
-                      minuteToTimeLabel(minute),
+                      minuteToTimeLabel(
+                        timelineMinuteToLabelMinute(minute, timelineStartOffsetMinute),
+                      ),
                     )
                   : null,
               )
@@ -690,6 +781,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                 index,
                 laneIndex: laneLayout.laneIndex,
                 laneCount: laneLayout.laneCount,
+                timelineStartOffsetMinute,
                 dragging: draggingTaskId === renderItem.item.blockId || renderItem.pointerInteracting,
                 pointerDragging: renderItem.pointerInteracting,
                 disabled: props.disabled || renderItem.updating,
@@ -844,6 +936,7 @@ interface MyDayTimelineCardProps {
   index: number
   laneIndex: number
   laneCount: number
+  timelineStartOffsetMinute: number
   dragging: boolean
   pointerDragging: boolean
   disabled: boolean
@@ -907,7 +1000,11 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
         {
           className: "mlo-my-day-time-pill",
         },
-        `${minuteToTimeLabel(startMinute)} - ${minuteToTimeLabel(endMinute)}`,
+        `${minuteToTimeLabel(
+          timelineMinuteToLabelMinute(startMinute, props.timelineStartOffsetMinute),
+        )} - ${minuteToTimeLabel(
+          timelineMinuteToLabelMinute(endMinute, props.timelineStartOffsetMinute),
+        )}`,
       ),
     ),
     props.item.labels.length > 0
@@ -1117,13 +1214,13 @@ function resolvePointerInteractionPreviewMinutes(
   pointerClientY: number,
   timelineStartMinute: number,
   timelineEndMinute: number,
+  timelineStartOffsetMinute: number,
 ): {
   startMinute: number
   endMinute: number
 } | null {
   const minuteOffset = (pointerClientY - dragState.originClientY) / PIXELS_PER_MINUTE
-  const snappedOffset =
-    Math.round(minuteOffset / TIMELINE_SLOT_MINUTES) * TIMELINE_SLOT_MINUTES
+  const snappedOffset = Math.round(minuteOffset / DRAG_SNAP_MINUTES) * DRAG_SNAP_MINUTES
 
   let nextStartMinute = dragState.originStartMinute
   let nextEndMinute = dragState.originEndMinute
@@ -1135,12 +1232,19 @@ function resolvePointerInteractionPreviewMinutes(
     }
 
     const maxStartMinute = Math.max(timelineStartMinute, timelineEndMinute - duration)
-    nextStartMinute = clampNumber(
+    const clampedStartMinute = clampNumber(
       dragState.originStartMinute + snappedOffset,
       timelineStartMinute,
       maxStartMinute,
     )
-    nextEndMinute = Math.min(DAY_MINUTES, nextStartMinute + duration)
+    nextStartMinute = resolveNearestValidTimelineStartMinute(
+      clampedStartMinute,
+      duration,
+      timelineStartMinute,
+      timelineEndMinute,
+      timelineStartOffsetMinute,
+    )
+    nextEndMinute = Math.min(timelineEndMinute, nextStartMinute + duration)
   } else if (dragState.mode === "resize-start") {
     const maxStartMinute = dragState.originEndMinute - MIN_DURATION_MINUTES
     nextStartMinute = clampNumber(
@@ -1160,6 +1264,16 @@ function resolvePointerInteractionPreviewMinutes(
   }
 
   if (nextEndMinute <= nextStartMinute) {
+    return null
+  }
+
+  if (
+    resolveScheduleRangeFromTimelineRange(
+      nextStartMinute,
+      nextEndMinute,
+      timelineStartOffsetMinute,
+    ) == null
+  ) {
     return null
   }
 
@@ -1271,12 +1385,163 @@ function isScheduledTaskItem(item: MyDayScheduleTaskItem): boolean {
   return item.scheduleEndMinute > item.scheduleStartMinute
 }
 
-function floorToSlot(minute: number): number {
-  return Math.floor(minute / TIMELINE_SLOT_MINUTES) * TIMELINE_SLOT_MINUTES
+function normalizeTimelineStartHour(rawValue: unknown): number {
+  if (typeof rawValue !== "number" || Number.isNaN(rawValue) || !Number.isFinite(rawValue)) {
+    return 0
+  }
+
+  const rounded = Math.round(rawValue)
+  if (rounded < 0) {
+    return 0
+  }
+
+  if (rounded > 23) {
+    return 23
+  }
+
+  return rounded
 }
 
-function ceilToSlot(minute: number): number {
-  return Math.ceil(minute / TIMELINE_SLOT_MINUTES) * TIMELINE_SLOT_MINUTES
+function scheduleMinuteToTimelineMinute(
+  scheduleMinute: number,
+  timelineStartOffsetMinute: number,
+): number {
+  const normalizedScheduleMinute = clampNumber(Math.round(scheduleMinute), 0, DAY_MINUTES)
+  const normalizedOffsetMinute = clampNumber(
+    Math.round(timelineStartOffsetMinute),
+    0,
+    DAY_MINUTES - 1,
+  )
+  const rawTimelineMinute = normalizedScheduleMinute - normalizedOffsetMinute
+  if (rawTimelineMinute < 0) {
+    return rawTimelineMinute + DAY_MINUTES
+  }
+
+  return rawTimelineMinute
+}
+
+function timelineMinuteToScheduleMinute(
+  timelineMinute: number,
+  timelineStartOffsetMinute: number,
+): number {
+  const normalizedTimelineMinute = clampNumber(Math.round(timelineMinute), 0, DAY_MINUTES)
+  const normalizedOffsetMinute = clampNumber(
+    Math.round(timelineStartOffsetMinute),
+    0,
+    DAY_MINUTES - 1,
+  )
+  const rawScheduleMinute = normalizedTimelineMinute + normalizedOffsetMinute
+  if (rawScheduleMinute >= DAY_MINUTES) {
+    return rawScheduleMinute - DAY_MINUTES
+  }
+
+  return rawScheduleMinute
+}
+
+function timelineMinuteToLabelMinute(
+  timelineMinute: number,
+  timelineStartOffsetMinute: number,
+): number {
+  const normalizedTimelineMinute = clampNumber(Math.round(timelineMinute), 0, DAY_MINUTES)
+  const normalizedOffsetMinute = clampNumber(
+    Math.round(timelineStartOffsetMinute),
+    0,
+    DAY_MINUTES - 1,
+  )
+  if (normalizedTimelineMinute === DAY_MINUTES && normalizedOffsetMinute === 0) {
+    return DAY_MINUTES
+  }
+
+  return timelineMinuteToScheduleMinute(normalizedTimelineMinute, normalizedOffsetMinute)
+}
+
+function resolveScheduleRangeFromTimelineRange(
+  timelineStartMinute: number,
+  timelineEndMinute: number,
+  timelineStartOffsetMinute: number,
+): {
+  startMinute: number
+  endMinute: number
+} | null {
+  const normalizedTimelineStartMinute = clampNumber(Math.round(timelineStartMinute), 0, DAY_MINUTES)
+  const normalizedTimelineEndMinute = clampNumber(Math.round(timelineEndMinute), 0, DAY_MINUTES)
+  if (normalizedTimelineEndMinute <= normalizedTimelineStartMinute) {
+    return null
+  }
+
+  const duration = normalizedTimelineEndMinute - normalizedTimelineStartMinute
+  if (duration < MIN_DURATION_MINUTES || duration > MAX_DURATION_MINUTES) {
+    return null
+  }
+
+  const scheduleStartMinute = timelineMinuteToScheduleMinute(
+    normalizedTimelineStartMinute,
+    timelineStartOffsetMinute,
+  )
+  const scheduleEndMinute = scheduleStartMinute + duration
+  if (scheduleEndMinute <= scheduleStartMinute || scheduleEndMinute > DAY_MINUTES) {
+    return null
+  }
+
+  return {
+    startMinute: scheduleStartMinute,
+    endMinute: scheduleEndMinute,
+  }
+}
+
+function resolveNearestValidTimelineStartMinute(
+  rawStartMinute: number,
+  durationMinutes: number,
+  timelineStartMinute: number,
+  timelineEndMinute: number,
+  timelineStartOffsetMinute: number,
+): number {
+  const normalizedDuration = clampNumber(
+    Math.round(durationMinutes),
+    MIN_DURATION_MINUTES,
+    MAX_DURATION_MINUTES,
+  )
+  const minStartMinute = timelineStartMinute
+  const maxStartMinute = Math.max(minStartMinute, timelineEndMinute - normalizedDuration)
+  const snappedStartMinute = roundToSlot(rawStartMinute, DRAG_SNAP_MINUTES)
+  const clampedStartMinute = clampNumber(snappedStartMinute, minStartMinute, maxStartMinute)
+
+  const isValidStartMinute = (candidateStartMinute: number): boolean => {
+    return (
+      resolveScheduleRangeFromTimelineRange(
+        candidateStartMinute,
+        candidateStartMinute + normalizedDuration,
+        timelineStartOffsetMinute,
+      ) != null
+    )
+  }
+
+  if (isValidStartMinute(clampedStartMinute)) {
+    return clampedStartMinute
+  }
+
+  const searchLimit = timelineEndMinute - timelineStartMinute
+  for (let delta = DRAG_SNAP_MINUTES; delta <= searchLimit; delta += DRAG_SNAP_MINUTES) {
+    const leftStartMinute = clampedStartMinute - delta
+    if (leftStartMinute >= minStartMinute && isValidStartMinute(leftStartMinute)) {
+      return leftStartMinute
+    }
+
+    const rightStartMinute = clampedStartMinute + delta
+    if (rightStartMinute <= maxStartMinute && isValidStartMinute(rightStartMinute)) {
+      return rightStartMinute
+    }
+  }
+
+  return clampedStartMinute
+}
+
+function roundToSlot(minute: number, slotMinutes: number): number {
+  if (!Number.isFinite(minute) || !Number.isFinite(slotMinutes) || slotMinutes <= 0) {
+    return 0
+  }
+
+  return Math.round(minute / slotMinutes) * slotMinutes
 }
 
 function minuteToTimeLabel(minute: number): string {
