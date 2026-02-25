@@ -438,6 +438,24 @@ export async function ensureMyDayMirrorInTodayJournal(options: {
 
   await cleanupMyDayTokenArtifactsInJournal(journalSectionBlockId)
 
+  const existingTaskBlockId = await findExistingTaskBlockInJournal(
+    journalSectionBlockId,
+    normalizedTaskId,
+    options.dayKey,
+  )
+  if (existingTaskBlockId != null) {
+    await cleanupDuplicateMyDayJournalEntries(
+      journalSectionBlockId,
+      normalizedTaskId,
+      options.dayKey,
+      existingTaskBlockId,
+    )
+    return {
+      mirrorBlockId: existingTaskBlockId,
+      journalSectionBlockId,
+    }
+  }
+
   const mirrorBlockId = await insertMyDayMirrorBlock(
     journalSectionBlockId,
     normalizedTaskId,
@@ -1924,6 +1942,53 @@ async function listMyDayJournalEntryBlockIds(
   }
 
   return dedupeDbIds(matches)
+}
+
+async function findExistingTaskBlockInJournal(
+  journalBlockId: DbId,
+  taskId: DbId,
+  dayKey: string,
+): Promise<DbId | null> {
+  const journalBlock = await getBlockById(journalBlockId)
+  if (journalBlock == null) {
+    return null
+  }
+
+  const queue = dedupeDbIds(journalBlock.children)
+  const visited = new Set<DbId>()
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()
+    if (!isValidDbId(currentId)) {
+      continue
+    }
+
+    const normalizedCurrentId = getMirrorId(currentId)
+    if (visited.has(normalizedCurrentId)) {
+      continue
+    }
+    visited.add(normalizedCurrentId)
+
+    const currentBlock = await getBlockById(currentId)
+    if (currentBlock == null) {
+      continue
+    }
+
+    if (
+      isMirrorBlockForTask(currentBlock, taskId) ||
+      isMyDayJournalEntryBlock(currentBlock, taskId, dayKey)
+    ) {
+      return currentBlock.id
+    }
+
+    for (const childId of currentBlock.children) {
+      if (isValidDbId(childId)) {
+        queue.push(childId)
+      }
+    }
+  }
+
+  return null
 }
 
 async function cleanupDuplicateMyDayJournalEntries(

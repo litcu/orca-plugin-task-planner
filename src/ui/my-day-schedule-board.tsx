@@ -10,6 +10,7 @@ const MAX_DURATION_MINUTES = 12 * 60
 const DEFAULT_TIMELINE_START_MINUTE = 0
 const DEFAULT_TIMELINE_END_MINUTE = DAY_MINUTES
 const PIXELS_PER_MINUTE = 1.04
+const MIN_TIMELINE_CARD_HEIGHT_PX = 18
 const TIMELINE_AUTO_SCROLL_EDGE_PX = 52
 const TIMELINE_AUTO_SCROLL_MAX_STEP_PX = 22
 const DRAG_DATA_TYPE = "application/x-mlo-my-day-task"
@@ -240,7 +241,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
         : baseEndMinute
       const duration = Math.max(MIN_DURATION_MINUTES, endMinute - startMinute)
       const top = (startMinute - timelineStartMinute) * PIXELS_PER_MINUTE + 2
-      const height = Math.max(48, duration * PIXELS_PER_MINUTE - 4)
+      const height = Math.max(MIN_TIMELINE_CARD_HEIGHT_PX, duration * PIXELS_PER_MINUTE - 4)
 
       return {
         item,
