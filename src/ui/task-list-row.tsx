@@ -381,9 +381,10 @@ export function TaskListRow(props: TaskListRowProps) {
         "div",
         {
           style: {
-            display: "inline-flex",
+            display: "flex",
             alignItems: "center",
             gap: "4px",
+            width: "100%",
             minWidth: 0,
             maxWidth: "100%",
             flexWrap: "nowrap",
@@ -394,7 +395,7 @@ export function TaskListRow(props: TaskListRowProps) {
           {
             style: {
               display: "block",
-              flex: "0 1 auto",
+              flex: "1 1 auto",
               maxWidth: "100%",
               minWidth: 0,
               overflow: "hidden",

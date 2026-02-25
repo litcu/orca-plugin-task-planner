@@ -2218,7 +2218,7 @@ function ensureMyDayScheduleStyles() {
 .mlo-my-day-card-title,
 .mlo-my-day-timeline-title {
   display: block;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   max-width: 100%;
   min-width: 0;
   border: none;
