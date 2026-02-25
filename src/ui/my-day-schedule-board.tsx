@@ -28,6 +28,7 @@ export interface MyDayScheduleTaskItem {
 interface MyDayScheduleBoardProps {
   items: MyDayScheduleTaskItem[]
   dayStartHour: number
+  doneStatus: string
   disabled: boolean
   updatingTaskIds: Set<DbId>
   onOpenTask: (blockId: DbId) => void
@@ -793,6 +794,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                   key: item.blockId,
                   item,
                   rowIndex: index,
+                  doneStatus: props.doneStatus,
                   draggable: !props.disabled && !updating,
                   disabled: props.disabled || updating,
                   dragging: draggingTaskId === item.blockId,
@@ -892,6 +894,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                 laneIndex: laneLayout.laneIndex,
                 laneCount: laneLayout.laneCount,
                 timelineStartOffsetMinute,
+                doneStatus: props.doneStatus,
                 dragging: draggingTaskId === renderItem.item.blockId || renderItem.pointerInteracting,
                 pointerDragging: renderItem.pointerInteracting,
                 disabled: props.disabled || renderItem.updating,
@@ -952,6 +955,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
 interface MyDayScheduleCardProps {
   item: MyDayScheduleTaskItem
   rowIndex: number
+  doneStatus: string
   dragging: boolean
   draggable: boolean
   disabled: boolean
@@ -971,6 +975,9 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
   const [contextMenuVisible, setContextMenuVisible] = React.useState(false)
   const [contextMenuRect, setContextMenuRect] = React.useState<DOMRect | null>(null)
   const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
+  const visibleLabels = props.item.labels.slice(0, 2)
+  const hiddenLabelCount = Math.max(0, props.item.labels.length - visibleLabels.length)
+  const isCompleted = props.item.status === props.doneStatus
   if (contextMenuContainerRef.current == null) {
     contextMenuContainerRef.current = document.body
   }
@@ -981,7 +988,7 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
     React.createElement(
       "div",
       {
-        className: `mlo-my-day-card${props.item.star ? " mlo-my-day-card-starred" : ""}${props.disabled ? " mlo-my-day-card-disabled" : ""}`,
+        className: `mlo-my-day-card${props.item.star ? " mlo-my-day-card-starred" : ""}${isCompleted ? " mlo-my-day-card-completed" : ""}${props.disabled ? " mlo-my-day-card-disabled" : ""}`,
         draggable: props.draggable,
         onDragStart: props.onDragStart,
         onDragEnd: props.onDragEnd,
@@ -1007,31 +1014,39 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
         },
       },
       React.createElement(
-        "button",
+        "div",
         {
-          type: "button",
-          className: "mlo-my-day-card-title",
-          onClick: () => props.onOpenTask(props.item.blockId),
+          className: "mlo-my-day-card-title-row",
         },
-        props.item.text,
-      ),
-      props.item.labels.length > 0
-        ? React.createElement(
-            "div",
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "mlo-my-day-card-title",
+            onClick: () => props.onOpenTask(props.item.blockId),
+          },
+          props.item.text,
+        ),
+        ...visibleLabels.map((label: string) =>
+          React.createElement(
+            "span",
             {
-              className: "mlo-my-day-card-labels",
+              key: `${props.item.blockId}-${label}`,
+              className: "mlo-my-day-card-label",
             },
-            props.item.labels.slice(0, 3).map((label: string) =>
-              React.createElement(
-                "span",
-                {
-                  key: `${props.item.blockId}-${label}`,
-                  className: "mlo-my-day-card-label",
-                },
-                label,
-              )),
-          )
-        : null,
+            label,
+          )),
+        hiddenLabelCount > 0
+          ? React.createElement(
+              "span",
+              {
+                className: "mlo-my-day-inline-more-labels",
+                title: `+${hiddenLabelCount}`,
+              },
+              `+${hiddenLabelCount}`,
+            )
+          : null,
+      ),
       React.createElement(
         "div",
         {
@@ -1083,6 +1098,7 @@ interface MyDayTimelineCardProps {
   laneIndex: number
   laneCount: number
   timelineStartOffsetMinute: number
+  doneStatus: string
   dragging: boolean
   pointerDragging: boolean
   disabled: boolean
@@ -1104,6 +1120,9 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
   const [contextMenuVisible, setContextMenuVisible] = React.useState(false)
   const [contextMenuRect, setContextMenuRect] = React.useState<DOMRect | null>(null)
   const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
+  const visibleLabels = props.item.labels.slice(0, 2)
+  const hiddenLabelCount = Math.max(0, props.item.labels.length - visibleLabels.length)
+  const isCompleted = props.item.status === props.doneStatus
   if (contextMenuContainerRef.current == null) {
     contextMenuContainerRef.current = document.body
   }
@@ -1119,7 +1138,7 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
     React.createElement(
       "div",
       {
-        className: `mlo-my-day-timeline-card${props.item.star ? " mlo-my-day-timeline-card-starred" : ""}${props.disabled ? " mlo-my-day-timeline-card-disabled" : ""}`,
+        className: `mlo-my-day-timeline-card${props.item.star ? " mlo-my-day-timeline-card-starred" : ""}${isCompleted ? " mlo-my-day-timeline-card-completed" : ""}${props.disabled ? " mlo-my-day-timeline-card-disabled" : ""}`,
         draggable: false,
         onPointerDown: props.onPointerDown,
         onContextMenu: (event: MouseEvent) => {
@@ -1163,13 +1182,47 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
           className: "mlo-my-day-timeline-card-head",
         },
         React.createElement(
-          "button",
+          "div",
           {
-            type: "button",
-            className: "mlo-my-day-timeline-title",
-            onClick: () => props.onOpenTask(props.item.blockId),
+            className: "mlo-my-day-timeline-title-wrap",
           },
-          props.item.text,
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "mlo-my-day-timeline-title",
+              onClick: () => props.onOpenTask(props.item.blockId),
+            },
+            props.item.text,
+          ),
+          ...visibleLabels.map((label: string) =>
+            React.createElement(
+              "span",
+              {
+                key: `${props.item.blockId}-${label}`,
+                className: "mlo-my-day-timeline-chip",
+              },
+              label,
+            )),
+          hiddenLabelCount > 0
+            ? React.createElement(
+                "span",
+                {
+                  className: "mlo-my-day-inline-more-labels",
+                  title: `+${hiddenLabelCount}`,
+                },
+                `+${hiddenLabelCount}`,
+              )
+            : null,
+          props.item.star
+            ? React.createElement(
+                "span",
+                {
+                  className: "mlo-my-day-timeline-star",
+                },
+                "★",
+              )
+            : null,
         ),
         React.createElement(
           "span",
@@ -1183,46 +1236,6 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
           )}`,
         ),
       ),
-      props.item.labels.length > 0
-        ? React.createElement(
-            "div",
-            {
-              className: "mlo-my-day-timeline-meta",
-            },
-            props.item.labels.slice(0, 2).map((label: string) =>
-              React.createElement(
-                "span",
-                {
-                  key: `${props.item.blockId}-${label}`,
-                  className: "mlo-my-day-timeline-chip",
-                },
-                label,
-              )),
-            props.item.star
-              ? React.createElement(
-                  "span",
-                  {
-                    className: "mlo-my-day-timeline-star",
-                  },
-                  "★",
-                )
-              : null,
-          )
-        : props.item.star
-          ? React.createElement(
-              "div",
-              {
-                className: "mlo-my-day-timeline-meta",
-              },
-              React.createElement(
-                "span",
-                {
-                  className: "mlo-my-day-timeline-star",
-                },
-                "★",
-              ),
-            )
-          : null,
       React.createElement("div", {
         className: "mlo-my-day-timeline-resize-handle mlo-my-day-timeline-resize-handle-end",
         onPointerDown: (event: PointerEvent) => {
@@ -2172,6 +2185,18 @@ function ensureMyDayScheduleStyles() {
   --mlo-myday-card-hue: 34;
 }
 
+.mlo-my-day-card-completed {
+  --mlo-myday-card-hue: 142;
+  border-color: rgba(34, 197, 94, 0.32);
+  background: linear-gradient(150deg, rgba(240, 253, 244, 0.95), rgba(220, 252, 231, 0.9));
+}
+
+.mlo-my-day-card-completed .mlo-my-day-card-title {
+  color: #1f5f3b;
+  text-decoration: line-through;
+  text-decoration-color: rgba(22, 101, 52, 0.55);
+}
+
 .mlo-my-day-card-disabled {
   cursor: default;
   filter: saturate(0.86);
@@ -2192,6 +2217,9 @@ function ensureMyDayScheduleStyles() {
 
 .mlo-my-day-card-title,
 .mlo-my-day-timeline-title {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
   border: none;
   background: transparent;
   padding: 0;
@@ -2199,24 +2227,26 @@ function ensureMyDayScheduleStyles() {
   text-align: left;
   cursor: pointer;
   font-size: 13px;
-  line-height: 1.35;
+  line-height: 1.3;
   font-weight: 600;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
-.mlo-my-day-card-title {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.mlo-my-day-card-labels {
+.mlo-my-day-card-title-row,
+.mlo-my-day-timeline-title-wrap {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+
+.mlo-my-day-card-title-row {
+  margin-bottom: 2px;
 }
 
 .mlo-my-day-card-label {
@@ -2233,6 +2263,20 @@ function ensureMyDayScheduleStyles() {
   max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mlo-my-day-inline-more-labels {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--orca-color-text-2);
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 6px;
+  flex-shrink: 0;
 }
 
 .mlo-my-day-card-foot {
@@ -2385,6 +2429,18 @@ function ensureMyDayScheduleStyles() {
   --mlo-myday-card-hue: 34;
 }
 
+.mlo-my-day-timeline-card-completed {
+  --mlo-myday-card-hue: 142;
+  border-color: rgba(34, 197, 94, 0.34);
+  background: linear-gradient(155deg, rgba(240, 253, 244, 0.97), rgba(220, 252, 231, 0.92));
+}
+
+.mlo-my-day-timeline-card-completed .mlo-my-day-timeline-title {
+  color: #1f5f3b;
+  text-decoration: line-through;
+  text-decoration-color: rgba(22, 101, 52, 0.55);
+}
+
 .mlo-my-day-timeline-card-disabled {
   cursor: default;
   filter: saturate(0.84);
@@ -2405,24 +2461,18 @@ function ensureMyDayScheduleStyles() {
 
 .mlo-my-day-timeline-card-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
 .mlo-my-day-timeline-title {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
   color: hsl(var(--mlo-myday-card-hue), 36%, 23%);
 }
 
-.mlo-my-day-timeline-meta {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
+.mlo-my-day-timeline-title-wrap {
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .mlo-my-day-timeline-chip {

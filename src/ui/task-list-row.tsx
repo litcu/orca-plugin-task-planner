@@ -100,7 +100,6 @@ export function TaskListRow(props: TaskListRowProps) {
   const hasParentContext = props.showParentTaskContext && props.item.parentTaskName != null
   const visibleLabels = taskLabels.slice(0, hasParentContext ? 2 : 3)
   const hiddenLabelCount = Math.max(0, taskLabels.length - visibleLabels.length)
-  const hasMetaLine = visibleLabels.length > 0 || hiddenLabelCount > 0 || hasParentContext
   const timerData = readTaskTimerFromProperties(props.item.blockProperties)
   const timerElapsedMs = resolveTaskTimerElapsedMs(timerData, props.timerNowMs)
   const hasTimerRecord = hasTaskTimerRecord(timerData)
@@ -379,142 +378,151 @@ export function TaskListRow(props: TaskListRowProps) {
         },
       },
       React.createElement(
-        "span",
+        "div",
         {
           style: {
-            display: "block",
+            display: "flex",
+            alignItems: "center",
+            gap: "4px",
             width: "100%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            lineHeight: 1.25,
-            fontWeight: props.contextOnly ? 470 : 560,
-            letterSpacing: "0.01em",
-            color: props.contextOnly
-              ? "var(--orca-color-text-2)"
-              : isCompleted
-                ? "var(--orca-color-text-2)"
-                : "var(--orca-color-text)",
-            textDecoration: isCompleted ? "line-through" : "none",
+            minWidth: 0,
+            flexWrap: "nowrap",
           },
         },
-        props.item.text,
+        React.createElement(
+          "span",
+          {
+            style: {
+              display: "block",
+              flex: "1 1 auto",
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              lineHeight: 1.25,
+              fontWeight: props.contextOnly ? 470 : 560,
+              letterSpacing: "0.01em",
+              color: props.contextOnly
+                ? "var(--orca-color-text-2)"
+                : isCompleted
+                  ? "var(--orca-color-text-2)"
+                  : "var(--orca-color-text)",
+              textDecoration: isCompleted ? "line-through" : "none",
+            },
+          },
+          props.item.text,
+        ),
+        ...visibleLabels.map((label: string) =>
+          React.createElement(
+            "span",
+            {
+              key: `${props.item.blockId}-${label}`,
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                maxWidth: "86px",
+                padding: "0 6px",
+                height: "16px",
+                borderRadius: "999px",
+                border: isCompleted
+                  ? "1px solid rgba(148, 163, 184, 0.3)"
+                  : "1px solid rgba(37, 99, 235, 0.24)",
+                background: isCompleted
+                  ? "rgba(148, 163, 184, 0.09)"
+                  : "rgba(37, 99, 235, 0.12)",
+                color: isCompleted
+                  ? "var(--orca-color-text-2)"
+                  : "var(--orca-color-text-blue, #2563eb)",
+                fontSize: "10px",
+                lineHeight: 1,
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              },
+            },
+            label,
+          )),
+        hiddenLabelCount > 0
+          ? React.createElement(
+              "span",
+              {
+                key: `${props.item.blockId}-more-labels`,
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "0 6px",
+                  height: "16px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(148, 163, 184, 0.3)",
+                  background: "rgba(148, 163, 184, 0.08)",
+                  color: "var(--orca-color-text-2)",
+                  fontSize: "10px",
+                  lineHeight: 1,
+                  flexShrink: 0,
+                },
+              },
+              `+${hiddenLabelCount}`,
+            )
+          : null,
       ),
-      hasMetaLine
+      hasParentContext
         ? React.createElement(
             "div",
             {
               style: {
                 display: "flex",
                 alignItems: "center",
-                flexWrap: "nowrap",
-                gap: "4px",
                 width: "100%",
                 minWidth: 0,
-                overflow: "hidden",
               },
             },
-            ...visibleLabels.map((label: string) =>
+            React.createElement(
+              "span",
+              {
+                key: `${props.item.blockId}-parent`,
+                title: t("Parent: ${name}", { name: parentTaskName }),
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "3px",
+                  minWidth: 0,
+                  maxWidth: "100%",
+                  flex: "1 1 auto",
+                  padding: "0 6px",
+                  height: "16px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(148, 163, 184, 0.3)",
+                  background: "rgba(148, 163, 184, 0.08)",
+                  color: "var(--orca-color-text-2)",
+                  fontSize: "10px",
+                  lineHeight: 1,
+                },
+              },
               React.createElement(
                 "span",
                 {
-                  key: `${props.item.blockId}-${label}`,
                   style: {
-                    display: "inline-flex",
-                    alignItems: "center",
-                    maxWidth: "86px",
-                    padding: "0 6px",
-                    height: "16px",
-                    borderRadius: "999px",
-                    border: isCompleted
-                      ? "1px solid rgba(148, 163, 184, 0.3)"
-                      : "1px solid rgba(37, 99, 235, 0.24)",
-                    background: isCompleted
-                      ? "rgba(148, 163, 184, 0.09)"
-                      : "rgba(37, 99, 235, 0.12)",
-                    color: isCompleted
-                      ? "var(--orca-color-text-2)"
-                      : "var(--orca-color-text-blue, #2563eb)",
-                    fontSize: "10px",
+                    fontSize: "9px",
+                    opacity: 0.75,
                     lineHeight: 1,
                     flexShrink: 0,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
                   },
                 },
-                label,
-              )),
-            hiddenLabelCount > 0
-              ? React.createElement(
-                  "span",
-                  {
-                    key: `${props.item.blockId}-more-labels`,
-                    style: {
-                      display: "inline-flex",
-                      alignItems: "center",
-                      padding: "0 6px",
-                      height: "16px",
-                      borderRadius: "999px",
-                      border: "1px solid rgba(148, 163, 184, 0.3)",
-                      background: "rgba(148, 163, 184, 0.08)",
-                      color: "var(--orca-color-text-2)",
-                      fontSize: "10px",
-                      lineHeight: 1,
-                      flexShrink: 0,
-                    },
+                "\u21B3",
+              ),
+              React.createElement(
+                "span",
+                {
+                  style: {
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
                   },
-                  `+${hiddenLabelCount}`,
-                )
-              : null,
-            hasParentContext
-              ? React.createElement(
-                  "span",
-                  {
-                    key: `${props.item.blockId}-parent`,
-                    title: t("Parent: ${name}", { name: parentTaskName }),
-                    style: {
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "3px",
-                      minWidth: 0,
-                      maxWidth: "100%",
-                      flex: "1 1 auto",
-                      padding: "0 6px",
-                      height: "16px",
-                      borderRadius: "999px",
-                      border: "1px solid rgba(148, 163, 184, 0.3)",
-                      background: "rgba(148, 163, 184, 0.08)",
-                      color: "var(--orca-color-text-2)",
-                      fontSize: "10px",
-                      lineHeight: 1,
-                    },
-                  },
-                  React.createElement(
-                    "span",
-                    {
-                      style: {
-                        fontSize: "9px",
-                        opacity: 0.75,
-                        lineHeight: 1,
-                        flexShrink: 0,
-                      },
-                    },
-                    "\u21B3",
-                  ),
-                  React.createElement(
-                    "span",
-                    {
-                      style: {
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      },
-                    },
-                    parentTaskName,
-                  ),
-                )
-              : null,
+                },
+                parentTaskName,
+              ),
+            ),
           )
         : null,
     ),
