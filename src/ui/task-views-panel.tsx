@@ -3005,47 +3005,45 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                   },
                 }),
               ),
-          !isDashboardTab && !isMyDayTab
-            ? React.createElement(
-                "div",
-                {
-                  ref: customViewsButtonAnchorRef,
-                  style: {
-                    display: "inline-flex",
-                    alignItems: "center",
-                  },
+          React.createElement(
+            "div",
+            {
+              ref: customViewsButtonAnchorRef,
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+              },
+            },
+            React.createElement(
+              Button,
+              {
+                variant: isCustomViewTab ? "soft" : "outline",
+                onClick: () => {
+                  setCustomViewsPanelVisible((prev: boolean) => !prev)
                 },
-                React.createElement(
-                  Button,
-                  {
-                    variant: isCustomViewTab ? "soft" : "outline",
-                    onClick: () => {
-                      setCustomViewsPanelVisible((prev: boolean) => !prev)
-                    },
-                    title: t("Custom views"),
-                    style: {
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      whiteSpace: "nowrap",
-                      borderRadius: "8px",
-                    },
-                  },
-                  React.createElement("i", {
-                    className: "ti ti-layout-grid-add",
-                    style: {
-                      fontSize: "14px",
-                      lineHeight: 1,
-                    },
-                  }),
-                  React.createElement(
-                    "span",
-                    null,
-                    t("Custom views"),
-                  ),
-                ),
-              )
-            : null,
+                title: t("Custom views"),
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  whiteSpace: "nowrap",
+                  borderRadius: "8px",
+                },
+              },
+              React.createElement("i", {
+                className: "ti ti-layout-grid-add",
+                style: {
+                  fontSize: "14px",
+                  lineHeight: 1,
+                },
+              }),
+              React.createElement(
+                "span",
+                null,
+                t("Custom views"),
+              ),
+            ),
+          ),
         ),
       ),
     ),
@@ -3069,11 +3067,11 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         "div",
         {
           style: {
-            display: isDashboardTab ? "none" : "flex",
+            display: "flex",
             alignItems: "center",
             gap: "8px",
             flexWrap: "wrap",
-            flex: "1 1 420px",
+            flex: isDashboardTab ? "0 0 auto" : "1 1 420px",
           },
         },
         React.createElement(
@@ -3283,7 +3281,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           {
             ref: filterButtonAnchorRef,
             style: {
-              display: "inline-flex",
+              display: isDashboardTab ? "none" : "inline-flex",
               alignItems: "center",
             },
           },
@@ -3852,10 +3850,46 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
               React.createElement(MyDayScheduleBoard, {
                 items: myDayScheduleItems,
                 dayStartHour: panelSettings.myDayResetHour,
+                doneStatus,
                 disabled: loading || myDaySaving,
                 updatingTaskIds: myDayUpdatingIds,
                 onOpenTask: (blockId: DbId) => {
                   openTaskProperty(blockId)
+                },
+                onNavigateTask: (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  navigateToTask(matched)
+                },
+                onToggleTaskStar: async (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  await toggleTaskStar(matched)
+                },
+                onAddSubtask: async (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  await addSubtask(matched)
+                },
+                onDeleteTaskTag: async (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  await removeTaskTag(matched)
+                },
+                onDeleteTaskBlock: async (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  await deleteTaskBlock(matched)
                 },
                 onRemoveTask: async (blockId: DbId) => {
                   const matched = taskItemById.get(blockId)

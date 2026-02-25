@@ -10,6 +10,7 @@ const MAX_DURATION_MINUTES = 12 * 60
 const DEFAULT_TIMELINE_START_MINUTE = 0
 const DEFAULT_TIMELINE_END_MINUTE = DAY_MINUTES
 const PIXELS_PER_MINUTE = 1.04
+const MIN_TIMELINE_CARD_HEIGHT_PX = 18
 const TIMELINE_AUTO_SCROLL_EDGE_PX = 52
 const TIMELINE_AUTO_SCROLL_MAX_STEP_PX = 22
 const DRAG_DATA_TYPE = "application/x-mlo-my-day-task"
@@ -27,9 +28,15 @@ export interface MyDayScheduleTaskItem {
 interface MyDayScheduleBoardProps {
   items: MyDayScheduleTaskItem[]
   dayStartHour: number
+  doneStatus: string
   disabled: boolean
   updatingTaskIds: Set<DbId>
   onOpenTask: (blockId: DbId) => void
+  onNavigateTask: (blockId: DbId) => void | Promise<void>
+  onToggleTaskStar: (blockId: DbId) => void | Promise<void>
+  onAddSubtask: (blockId: DbId) => void | Promise<void>
+  onDeleteTaskTag: (blockId: DbId) => void | Promise<void>
+  onDeleteTaskBlock: (blockId: DbId) => void | Promise<void>
   onRemoveTask: (blockId: DbId) => void | Promise<void>
   onApplySchedule: (blockId: DbId, startMinute: number, endMinute: number) => void | Promise<void>
   onClearSchedule: (blockId: DbId) => void | Promise<void>
@@ -235,7 +242,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
         : baseEndMinute
       const duration = Math.max(MIN_DURATION_MINUTES, endMinute - startMinute)
       const top = (startMinute - timelineStartMinute) * PIXELS_PER_MINUTE + 2
-      const height = Math.max(48, duration * PIXELS_PER_MINUTE - 4)
+      const height = Math.max(MIN_TIMELINE_CARD_HEIGHT_PX, duration * PIXELS_PER_MINUTE - 4)
 
       return {
         item,
@@ -423,7 +430,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       startMinute: number,
       endMinute: number,
     ) => {
-      if (props.disabled || isPointerDragIgnoredTarget(event.target)) {
+      if (props.disabled || event.button !== 0 || isPointerDragIgnoredTarget(event.target)) {
         return
       }
 
@@ -463,7 +470,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       endMinute: number,
       mode: "resize-start" | "resize-end",
     ) => {
-      if (props.disabled) {
+      if (props.disabled || event.button !== 0) {
         return
       }
 
@@ -787,6 +794,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                   key: item.blockId,
                   item,
                   rowIndex: index,
+                  doneStatus: props.doneStatus,
                   draggable: !props.disabled && !updating,
                   disabled: props.disabled || updating,
                   dragging: draggingTaskId === item.blockId,
@@ -795,6 +803,11 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                   },
                   onDragEnd: () => endDragTask(),
                   onOpenTask: props.onOpenTask,
+                  onNavigateTask: props.onNavigateTask,
+                  onToggleTaskStar: props.onToggleTaskStar,
+                  onAddSubtask: props.onAddSubtask,
+                  onDeleteTaskTag: props.onDeleteTaskTag,
+                  onDeleteTaskBlock: props.onDeleteTaskBlock,
                   onRemoveTask: props.onRemoveTask,
                 })
               }),
@@ -881,6 +894,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                 laneIndex: laneLayout.laneIndex,
                 laneCount: laneLayout.laneCount,
                 timelineStartOffsetMinute,
+                doneStatus: props.doneStatus,
                 dragging: draggingTaskId === renderItem.item.blockId || renderItem.pointerInteracting,
                 pointerDragging: renderItem.pointerInteracting,
                 disabled: props.disabled || renderItem.updating,
@@ -922,6 +936,13 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                   )
                 },
                 onOpenTask: props.onOpenTask,
+                onNavigateTask: props.onNavigateTask,
+                onToggleTaskStar: props.onToggleTaskStar,
+                onAddSubtask: props.onAddSubtask,
+                onDeleteTaskTag: props.onDeleteTaskTag,
+                onDeleteTaskBlock: props.onDeleteTaskBlock,
+                onRemoveTask: props.onRemoveTask,
+                onClearSchedule: props.onClearSchedule,
               })
             }),
           ),
@@ -934,75 +955,136 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
 interface MyDayScheduleCardProps {
   item: MyDayScheduleTaskItem
   rowIndex: number
+  doneStatus: string
   dragging: boolean
   draggable: boolean
   disabled: boolean
   onDragStart: (event: DragEvent) => void
   onDragEnd: () => void
   onOpenTask: (blockId: DbId) => void
+  onNavigateTask: (blockId: DbId) => void | Promise<void>
+  onToggleTaskStar: (blockId: DbId) => void | Promise<void>
+  onAddSubtask: (blockId: DbId) => void | Promise<void>
+  onDeleteTaskTag: (blockId: DbId) => void | Promise<void>
+  onDeleteTaskBlock: (blockId: DbId) => void | Promise<void>
   onRemoveTask: (blockId: DbId) => void | Promise<void>
 }
 
 function MyDayScheduleCard(props: MyDayScheduleCardProps) {
   const React = window.React
+  const [contextMenuVisible, setContextMenuVisible] = React.useState(false)
+  const [contextMenuRect, setContextMenuRect] = React.useState<DOMRect | null>(null)
+  const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
+  const visibleLabels = props.item.labels.slice(0, 2)
+  const hiddenLabelCount = Math.max(0, props.item.labels.length - visibleLabels.length)
+  const isCompleted = props.item.status === props.doneStatus
+  if (contextMenuContainerRef.current == null) {
+    contextMenuContainerRef.current = document.body
+  }
 
   return React.createElement(
-    "div",
-    {
-      className: `mlo-my-day-card${props.item.star ? " mlo-my-day-card-starred" : ""}${props.disabled ? " mlo-my-day-card-disabled" : ""}`,
-      draggable: props.draggable,
-      onDragStart: props.onDragStart,
-      onDragEnd: props.onDragEnd,
-      style: {
-        opacity: props.dragging ? 0.5 : 1,
-        animationDelay: `${Math.min(props.rowIndex, 8) * 36}ms`,
-        "--mlo-myday-card-hue": computeCardHue(props.item.blockId, props.item.star),
-      },
-    },
-    React.createElement(
-      "button",
-      {
-        type: "button",
-        className: "mlo-my-day-card-title",
-        onClick: () => props.onOpenTask(props.item.blockId),
-      },
-      props.item.text,
-    ),
-    props.item.labels.length > 0
-      ? React.createElement(
-          "div",
-          {
-            className: "mlo-my-day-card-labels",
-          },
-          props.item.labels.slice(0, 3).map((label: string) =>
-            React.createElement(
-              "span",
-              {
-                key: `${props.item.blockId}-${label}`,
-                className: "mlo-my-day-card-label",
-              },
-              label,
-            )),
-        )
-      : null,
+    React.Fragment,
+    null,
     React.createElement(
       "div",
       {
-        className: "mlo-my-day-card-foot",
+        className: `mlo-my-day-card${props.item.star ? " mlo-my-day-card-starred" : ""}${isCompleted ? " mlo-my-day-card-completed" : ""}${props.disabled ? " mlo-my-day-card-disabled" : ""}`,
+        draggable: props.draggable,
+        onDragStart: props.onDragStart,
+        onDragEnd: props.onDragEnd,
+        onContextMenu: (event: MouseEvent) => {
+          event.preventDefault()
+          event.stopPropagation()
+          const nativeEvent =
+            (event as unknown as { nativeEvent?: MouseEvent }).nativeEvent ?? event
+          setContextMenuRect(
+            new DOMRect(
+              nativeEvent.clientX,
+              nativeEvent.clientY,
+              0,
+              0,
+            ),
+          )
+          setContextMenuVisible(true)
+        },
+        style: {
+          opacity: props.dragging ? 0.5 : 1,
+          animationDelay: `${Math.min(props.rowIndex, 8) * 36}ms`,
+          "--mlo-myday-card-hue": computeCardHue(props.item.blockId, props.item.star),
+        },
       },
       React.createElement(
-        "button",
+        "div",
         {
-          type: "button",
-          className: "mlo-my-day-action-danger",
-          disabled: props.disabled,
-          onClick: () => {
-            void props.onRemoveTask(props.item.blockId)
-          },
+          className: "mlo-my-day-card-title-row",
         },
-        t("Remove from My Day"),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "mlo-my-day-card-title",
+            onClick: () => props.onOpenTask(props.item.blockId),
+          },
+          props.item.text,
+        ),
+        ...visibleLabels.map((label: string) =>
+          React.createElement(
+            "span",
+            {
+              key: `${props.item.blockId}-${label}`,
+              className: "mlo-my-day-card-label",
+            },
+            label,
+          )),
+        hiddenLabelCount > 0
+          ? React.createElement(
+              "span",
+              {
+                className: "mlo-my-day-inline-more-labels",
+                title: `+${hiddenLabelCount}`,
+              },
+              `+${hiddenLabelCount}`,
+            )
+          : null,
+      ),
+      React.createElement(
+        "div",
+        {
+          className: "mlo-my-day-card-foot",
+        },
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "mlo-my-day-action-danger",
+            disabled: props.disabled,
+            onClick: () => {
+              void props.onRemoveTask(props.item.blockId)
+            },
+          },
+          t("Remove from My Day"),
+        ),
       ),
     ),
+    React.createElement(MyDayTaskContextMenu, {
+      blockId: props.item.blockId,
+      starred: props.item.star,
+      disabled: props.disabled,
+      visible: contextMenuVisible,
+      rect: contextMenuRect,
+      containerRef: contextMenuContainerRef,
+      showClearScheduleAction: false,
+      onClose: () => setContextMenuVisible(false),
+      onClosed: () => setContextMenuRect(null),
+      onOpenTask: props.onOpenTask,
+      onNavigateTask: props.onNavigateTask,
+      onToggleTaskStar: props.onToggleTaskStar,
+      onAddSubtask: props.onAddSubtask,
+      onRemoveTask: props.onRemoveTask,
+      onDeleteTaskTag: props.onDeleteTaskTag,
+      onDeleteTaskBlock: props.onDeleteTaskBlock,
+      onClearSchedule: undefined,
+    }),
   )
 }
 
@@ -1016,6 +1098,7 @@ interface MyDayTimelineCardProps {
   laneIndex: number
   laneCount: number
   timelineStartOffsetMinute: number
+  doneStatus: string
   dragging: boolean
   pointerDragging: boolean
   disabled: boolean
@@ -1023,10 +1106,26 @@ interface MyDayTimelineCardProps {
   onResizeStartPointerDown: (event: PointerEvent) => void
   onResizeEndPointerDown: (event: PointerEvent) => void
   onOpenTask: (blockId: DbId) => void
+  onNavigateTask: (blockId: DbId) => void | Promise<void>
+  onToggleTaskStar: (blockId: DbId) => void | Promise<void>
+  onAddSubtask: (blockId: DbId) => void | Promise<void>
+  onDeleteTaskTag: (blockId: DbId) => void | Promise<void>
+  onDeleteTaskBlock: (blockId: DbId) => void | Promise<void>
+  onRemoveTask: (blockId: DbId) => void | Promise<void>
+  onClearSchedule: (blockId: DbId) => void | Promise<void>
 }
 
 function MyDayTimelineCard(props: MyDayTimelineCardProps) {
   const React = window.React
+  const [contextMenuVisible, setContextMenuVisible] = React.useState(false)
+  const [contextMenuRect, setContextMenuRect] = React.useState<DOMRect | null>(null)
+  const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
+  const visibleLabels = props.item.labels.slice(0, 2)
+  const hiddenLabelCount = Math.max(0, props.item.labels.length - visibleLabels.length)
+  const isCompleted = props.item.status === props.doneStatus
+  if (contextMenuContainerRef.current == null) {
+    contextMenuContainerRef.current = document.body
+  }
   const startMinute = props.startMinute
   const endMinute = props.endMinute
   const laneCount = Math.max(1, props.laneCount)
@@ -1034,64 +1133,69 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
   const laneGapPx = laneCount > 1 ? TIMELINE_LANE_GAP_PX : 0
 
   return React.createElement(
-    "div",
-    {
-      className: `mlo-my-day-timeline-card${props.item.star ? " mlo-my-day-timeline-card-starred" : ""}${props.disabled ? " mlo-my-day-timeline-card-disabled" : ""}`,
-      draggable: false,
-      onPointerDown: props.onPointerDown,
-      style: {
-        top: `${props.top}px`,
-        height: `${props.height}px`,
-        opacity: props.dragging ? 0.5 : 1,
-        cursor: props.pointerDragging ? "grabbing" : "grab",
-        zIndex: props.pointerDragging ? 12 : 5 + laneIndex,
-        transition: props.pointerDragging ? "none" : undefined,
-        animationDelay: `${Math.min(props.index, 8) * 28}ms`,
-        "--mlo-timeline-lane-index": laneIndex,
-        "--mlo-timeline-lane-count": laneCount,
-        "--mlo-timeline-lane-gap": `${laneGapPx}px`,
-        "--mlo-myday-card-hue": computeCardHue(props.item.blockId, props.item.star),
-      },
-    },
-    React.createElement("div", {
-      className: "mlo-my-day-timeline-resize-handle mlo-my-day-timeline-resize-handle-start",
-      onPointerDown: (event: PointerEvent) => {
-        props.onResizeStartPointerDown(event)
-      },
-    }),
+    React.Fragment,
+    null,
     React.createElement(
       "div",
       {
-        className: "mlo-my-day-timeline-card-head",
+        className: `mlo-my-day-timeline-card${props.item.star ? " mlo-my-day-timeline-card-starred" : ""}${isCompleted ? " mlo-my-day-timeline-card-completed" : ""}${props.disabled ? " mlo-my-day-timeline-card-disabled" : ""}`,
+        draggable: false,
+        onPointerDown: props.onPointerDown,
+        onContextMenu: (event: MouseEvent) => {
+          event.preventDefault()
+          event.stopPropagation()
+          const nativeEvent =
+            (event as unknown as { nativeEvent?: MouseEvent }).nativeEvent ?? event
+          setContextMenuRect(
+            new DOMRect(
+              nativeEvent.clientX,
+              nativeEvent.clientY,
+              0,
+              0,
+            ),
+          )
+          setContextMenuVisible(true)
+        },
+        style: {
+          top: `${props.top}px`,
+          height: `${props.height}px`,
+          opacity: props.dragging ? 0.5 : 1,
+          cursor: props.pointerDragging ? "grabbing" : "grab",
+          zIndex: props.pointerDragging ? 12 : 5 + laneIndex,
+          transition: props.pointerDragging ? "none" : undefined,
+          animationDelay: `${Math.min(props.index, 8) * 28}ms`,
+          "--mlo-timeline-lane-index": laneIndex,
+          "--mlo-timeline-lane-count": laneCount,
+          "--mlo-timeline-lane-gap": `${laneGapPx}px`,
+          "--mlo-myday-card-hue": computeCardHue(props.item.blockId, props.item.star),
+        },
       },
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "mlo-my-day-timeline-title",
-          onClick: () => props.onOpenTask(props.item.blockId),
+      React.createElement("div", {
+        className: "mlo-my-day-timeline-resize-handle mlo-my-day-timeline-resize-handle-start",
+        onPointerDown: (event: PointerEvent) => {
+          props.onResizeStartPointerDown(event)
         },
-        props.item.text,
-      ),
+      }),
       React.createElement(
-        "span",
+        "div",
         {
-          className: "mlo-my-day-time-pill",
+          className: "mlo-my-day-timeline-card-head",
         },
-        `${minuteToTimeLabel(
-          timelineMinuteToLabelMinute(startMinute, props.timelineStartOffsetMinute),
-        )} - ${minuteToTimeLabel(
-          timelineMinuteToLabelMinute(endMinute, props.timelineStartOffsetMinute),
-        )}`,
-      ),
-    ),
-    props.item.labels.length > 0
-      ? React.createElement(
+        React.createElement(
           "div",
           {
-            className: "mlo-my-day-timeline-meta",
+            className: "mlo-my-day-timeline-title-wrap",
           },
-          props.item.labels.slice(0, 2).map((label: string) =>
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "mlo-my-day-timeline-title",
+              onClick: () => props.onOpenTask(props.item.blockId),
+            },
+            props.item.text,
+          ),
+          ...visibleLabels.map((label: string) =>
             React.createElement(
               "span",
               {
@@ -1100,6 +1204,16 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
               },
               label,
             )),
+          hiddenLabelCount > 0
+            ? React.createElement(
+                "span",
+                {
+                  className: "mlo-my-day-inline-more-labels",
+                  title: `+${hiddenLabelCount}`,
+                },
+                `+${hiddenLabelCount}`,
+              )
+            : null,
           props.item.star
             ? React.createElement(
                 "span",
@@ -1109,28 +1223,239 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
                 "★",
               )
             : null,
-        )
-      : props.item.star
-        ? React.createElement(
-            "div",
-            {
-              className: "mlo-my-day-timeline-meta",
-            },
-            React.createElement(
-              "span",
-              {
-                className: "mlo-my-day-timeline-star",
-              },
-              "★",
-            ),
-          )
-        : null,
-    React.createElement("div", {
-      className: "mlo-my-day-timeline-resize-handle mlo-my-day-timeline-resize-handle-end",
-      onPointerDown: (event: PointerEvent) => {
-        props.onResizeEndPointerDown(event)
-      },
+        ),
+        React.createElement(
+          "span",
+          {
+            className: "mlo-my-day-time-pill",
+          },
+          `${minuteToTimeLabel(
+            timelineMinuteToLabelMinute(startMinute, props.timelineStartOffsetMinute),
+          )} - ${minuteToTimeLabel(
+            timelineMinuteToLabelMinute(endMinute, props.timelineStartOffsetMinute),
+          )}`,
+        ),
+      ),
+      React.createElement("div", {
+        className: "mlo-my-day-timeline-resize-handle mlo-my-day-timeline-resize-handle-end",
+        onPointerDown: (event: PointerEvent) => {
+          props.onResizeEndPointerDown(event)
+        },
+      }),
+    ),
+    React.createElement(MyDayTaskContextMenu, {
+      blockId: props.item.blockId,
+      starred: props.item.star,
+      disabled: props.disabled,
+      visible: contextMenuVisible,
+      rect: contextMenuRect,
+      containerRef: contextMenuContainerRef,
+      showClearScheduleAction: true,
+      onClose: () => setContextMenuVisible(false),
+      onClosed: () => setContextMenuRect(null),
+      onOpenTask: props.onOpenTask,
+      onNavigateTask: props.onNavigateTask,
+      onToggleTaskStar: props.onToggleTaskStar,
+      onAddSubtask: props.onAddSubtask,
+      onRemoveTask: props.onRemoveTask,
+      onDeleteTaskTag: props.onDeleteTaskTag,
+      onDeleteTaskBlock: props.onDeleteTaskBlock,
+      onClearSchedule: props.onClearSchedule,
     }),
+  )
+}
+
+interface MyDayTaskContextMenuProps {
+  blockId: DbId
+  starred: boolean
+  disabled: boolean
+  visible: boolean
+  rect: DOMRect | null
+  containerRef: { current: HTMLElement | null }
+  showClearScheduleAction: boolean
+  onClose: () => void
+  onClosed: () => void
+  onOpenTask: (blockId: DbId) => void
+  onNavigateTask: (blockId: DbId) => void | Promise<void>
+  onToggleTaskStar: (blockId: DbId) => void | Promise<void>
+  onAddSubtask: (blockId: DbId) => void | Promise<void>
+  onRemoveTask: (blockId: DbId) => void | Promise<void>
+  onDeleteTaskTag: (blockId: DbId) => void | Promise<void>
+  onDeleteTaskBlock: (blockId: DbId) => void | Promise<void>
+  onClearSchedule?: (blockId: DbId) => void | Promise<void>
+}
+
+function MyDayTaskContextMenu(props: MyDayTaskContextMenuProps) {
+  const React = window.React
+  const ConfirmBox = orca.components.ConfirmBox
+  const Popup = orca.components.Popup
+  const Menu = orca.components.Menu
+  const MenuSeparator = orca.components.MenuSeparator
+  const MenuText = orca.components.MenuText
+
+  if (props.rect == null) {
+    return null
+  }
+
+  return React.createElement(
+    Popup,
+    {
+      container: props.containerRef,
+      rect: props.rect,
+      visible: props.visible,
+      onClose: props.onClose,
+      onClosed: props.onClosed,
+      defaultPlacement: "bottom",
+      alignment: "left",
+      offset: 6,
+      allowBeyondContainer: true,
+      noPointerLogic: true,
+      escapeToClose: true,
+    },
+    React.createElement(
+      Menu,
+      {
+        keyboardNav: true,
+        className: "mlo-my-day-context-menu-content",
+      },
+      React.createElement(MenuText, {
+        title: t("Add subtask"),
+        preIcon: "ti ti-list-tree",
+        disabled: props.disabled,
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          props.onClose()
+          if (props.disabled) {
+            return
+          }
+          void props.onAddSubtask(props.blockId)
+        },
+      }),
+      React.createElement(MenuText, {
+        title: props.starred ? t("Unstar task") : t("Star task"),
+        preIcon: props.starred ? "ti ti-star-off" : "ti ti-star",
+        disabled: props.disabled,
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          props.onClose()
+          if (props.disabled) {
+            return
+          }
+          void props.onToggleTaskStar(props.blockId)
+        },
+      }),
+      React.createElement(MenuText, {
+        title: t("Open task properties"),
+        preIcon: "ti ti-edit",
+        disabled: props.disabled,
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          props.onClose()
+          if (props.disabled) {
+            return
+          }
+          props.onOpenTask(props.blockId)
+        },
+      }),
+      React.createElement(MenuText, {
+        title: t("Jump to task location"),
+        preIcon: "ti ti-arrow-up-right",
+        disabled: props.disabled,
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          props.onClose()
+          if (props.disabled) {
+            return
+          }
+          void props.onNavigateTask(props.blockId)
+        },
+      }),
+      props.showClearScheduleAction && props.onClearSchedule != null
+        ? React.createElement(MenuText, {
+            title: t("Unscheduled"),
+            preIcon: "ti ti-calendar-off",
+            disabled: props.disabled,
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation()
+              props.onClose()
+              if (props.disabled) {
+                return
+              }
+              void props.onClearSchedule?.(props.blockId)
+            },
+          })
+        : null,
+      React.createElement(MenuText, {
+        title: t("Remove from My Day"),
+        preIcon: "ti ti-calendar-minus",
+        disabled: props.disabled,
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          props.onClose()
+          if (props.disabled) {
+            return
+          }
+          void props.onRemoveTask(props.blockId)
+        },
+      }),
+      React.createElement(MenuSeparator, {}),
+      React.createElement(
+        ConfirmBox,
+        {
+          text: t("Remove task tag from this block?"),
+          onConfirm: async (_event: unknown, close: () => void) => {
+            close()
+            props.onClose()
+            if (props.disabled) {
+              return
+            }
+            await props.onDeleteTaskTag(props.blockId)
+          },
+        },
+        (openConfirm: (event: MouseEvent) => void) =>
+          React.createElement(MenuText, {
+            title: t("Delete task tag"),
+            preIcon: "ti ti-tag-off",
+            dangerous: true,
+            disabled: props.disabled,
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation()
+              if (props.disabled) {
+                return
+              }
+              openConfirm(event)
+            },
+          }),
+      ),
+      React.createElement(
+        ConfirmBox,
+        {
+          text: t("Delete task block and its subtasks?"),
+          onConfirm: async (_event: unknown, close: () => void) => {
+            close()
+            props.onClose()
+            if (props.disabled) {
+              return
+            }
+            await props.onDeleteTaskBlock(props.blockId)
+          },
+        },
+        (openConfirm: (event: MouseEvent) => void) =>
+          React.createElement(MenuText, {
+            title: t("Delete task block"),
+            preIcon: "ti ti-trash",
+            dangerous: true,
+            disabled: props.disabled,
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation()
+              if (props.disabled) {
+                return
+              }
+              openConfirm(event)
+            },
+          }),
+      ),
+    ),
   )
 }
 
@@ -1860,6 +2185,18 @@ function ensureMyDayScheduleStyles() {
   --mlo-myday-card-hue: 34;
 }
 
+.mlo-my-day-card-completed {
+  --mlo-myday-card-hue: 142;
+  border-color: rgba(34, 197, 94, 0.32);
+  background: linear-gradient(150deg, rgba(240, 253, 244, 0.95), rgba(220, 252, 231, 0.9));
+}
+
+.mlo-my-day-card-completed .mlo-my-day-card-title {
+  color: #1f5f3b;
+  text-decoration: line-through;
+  text-decoration-color: rgba(22, 101, 52, 0.55);
+}
+
 .mlo-my-day-card-disabled {
   cursor: default;
   filter: saturate(0.86);
@@ -1880,6 +2217,10 @@ function ensureMyDayScheduleStyles() {
 
 .mlo-my-day-card-title,
 .mlo-my-day-timeline-title {
+  display: block;
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
   border: none;
   background: transparent;
   padding: 0;
@@ -1887,24 +2228,26 @@ function ensureMyDayScheduleStyles() {
   text-align: left;
   cursor: pointer;
   font-size: 13px;
-  line-height: 1.35;
+  line-height: 1.3;
   font-weight: 600;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
-.mlo-my-day-card-title {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.mlo-my-day-card-labels {
+.mlo-my-day-card-title-row,
+.mlo-my-day-timeline-title-wrap {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+
+.mlo-my-day-card-title-row {
+  margin-bottom: 2px;
 }
 
 .mlo-my-day-card-label {
@@ -1921,6 +2264,20 @@ function ensureMyDayScheduleStyles() {
   max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mlo-my-day-inline-more-labels {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--orca-color-text-2);
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 6px;
+  flex-shrink: 0;
 }
 
 .mlo-my-day-card-foot {
@@ -2073,6 +2430,18 @@ function ensureMyDayScheduleStyles() {
   --mlo-myday-card-hue: 34;
 }
 
+.mlo-my-day-timeline-card-completed {
+  --mlo-myday-card-hue: 142;
+  border-color: rgba(34, 197, 94, 0.34);
+  background: linear-gradient(155deg, rgba(240, 253, 244, 0.97), rgba(220, 252, 231, 0.92));
+}
+
+.mlo-my-day-timeline-card-completed .mlo-my-day-timeline-title {
+  color: #1f5f3b;
+  text-decoration: line-through;
+  text-decoration-color: rgba(22, 101, 52, 0.55);
+}
+
 .mlo-my-day-timeline-card-disabled {
   cursor: default;
   filter: saturate(0.84);
@@ -2093,24 +2462,18 @@ function ensureMyDayScheduleStyles() {
 
 .mlo-my-day-timeline-card-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
 .mlo-my-day-timeline-title {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
   color: hsl(var(--mlo-myday-card-hue), 36%, 23%);
 }
 
-.mlo-my-day-timeline-meta {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
+.mlo-my-day-timeline-title-wrap {
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .mlo-my-day-timeline-chip {
