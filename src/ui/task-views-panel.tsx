@@ -3857,6 +3857,41 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                 onOpenTask: (blockId: DbId) => {
                   openTaskProperty(blockId)
                 },
+                onNavigateTask: (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  navigateToTask(matched)
+                },
+                onToggleTaskStar: async (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  await toggleTaskStar(matched)
+                },
+                onAddSubtask: async (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  await addSubtask(matched)
+                },
+                onDeleteTaskTag: async (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  await removeTaskTag(matched)
+                },
+                onDeleteTaskBlock: async (blockId: DbId) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  await deleteTaskBlock(matched)
+                },
                 onRemoveTask: async (blockId: DbId) => {
                   const matched = taskItemById.get(blockId)
                   if (matched == null) {
