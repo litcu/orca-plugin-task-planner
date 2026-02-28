@@ -33,8 +33,15 @@ export interface TaskSchemaDefinition {
   locale: TaskSchemaLocale
   tagAlias: string
   propertyNames: TaskSchemaPropertyNames
-  statusChoices: [string, string, string]
+  statusChoices: [string, string, string, string]
   dependencyModeChoices: [DependencyMode, DependencyMode]
+}
+
+export interface TaskStatusValues {
+  todo: string
+  doing: string
+  waiting: string
+  done: string
 }
 
 const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
@@ -52,7 +59,7 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
       labels: "Labels",
       remark: "Remark",
     },
-    statusChoices: ["TODO", "Doing", "Done"],
+    statusChoices: ["TODO", "Doing", "Waiting", "Done"],
     dependencyModeChoices: ["ALL", "ANY"],
   },
   "zh-CN": {
@@ -69,7 +76,7 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
       labels: "\u6807\u7b7e",
       remark: "\u5907\u6ce8",
     },
-    statusChoices: ["\u5f85\u5f00\u59cb", "\u8fdb\u884c\u4e2d", "\u5df2\u5b8c\u6210"],
+    statusChoices: ["\u5f85\u5f00\u59cb", "\u8fdb\u884c\u4e2d", "\u7b49\u5f85\u4e2d", "\u5df2\u5b8c\u6210"],
     dependencyModeChoices: ["ALL", "ANY"],
   },
 }
@@ -179,12 +186,66 @@ function withTaskTagAlias(
     ...schema,
     tagAlias: taskTagAlias,
     propertyNames: { ...schema.propertyNames },
-    statusChoices: [...schema.statusChoices] as [string, string, string],
+    statusChoices: [...schema.statusChoices] as [string, string, string, string],
     dependencyModeChoices: [...schema.dependencyModeChoices] as [
       DependencyMode,
       DependencyMode,
     ],
   }
+}
+
+export function getTaskStatusValues(schema: TaskSchemaDefinition): TaskStatusValues {
+  const [todo, doing, waiting, done] = schema.statusChoices
+  return {
+    todo,
+    doing,
+    waiting,
+    done,
+  }
+}
+
+export function getDefaultTaskStatus(schema: TaskSchemaDefinition): string {
+  return schema.statusChoices[0]
+}
+
+export function isTaskDoingStatus(
+  status: string,
+  schema: TaskSchemaDefinition,
+): boolean {
+  return status === getTaskStatusValues(schema).doing
+}
+
+export function isTaskWaitingStatus(
+  status: string,
+  schema: TaskSchemaDefinition,
+): boolean {
+  return status === getTaskStatusValues(schema).waiting
+}
+
+export function isTaskDoneStatus(
+  status: string,
+  schema: TaskSchemaDefinition,
+): boolean {
+  return status === getTaskStatusValues(schema).done
+}
+
+export function getNextTaskStatusInMainCycle(
+  currentStatus: string | null,
+  schema: TaskSchemaDefinition,
+): string {
+  const { todo, doing, done } = getTaskStatusValues(schema)
+
+  if (currentStatus === todo) {
+    return doing
+  }
+  if (currentStatus === doing) {
+    return done
+  }
+  if (currentStatus === done) {
+    return todo
+  }
+
+  return todo
 }
 
 function detectSchemaFromProperties(

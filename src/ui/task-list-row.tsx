@@ -1,6 +1,10 @@
 import type { BlockProperty, BlockRef, DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
-import type { TaskSchemaDefinition } from "../core/task-schema"
+import {
+  getTaskStatusValues,
+  isTaskDoneStatus,
+  type TaskSchemaDefinition,
+} from "../core/task-schema"
 import {
   formatTaskTimerDuration,
   hasTaskTimerRecord,
@@ -87,7 +91,7 @@ export function TaskListRow(props: TaskListRowProps) {
   }
   const statusColor = resolveStatusColor(props.item.status, props.schema)
   const statusVisualState = resolveStatusVisualState(props.item.status, props.schema)
-  const isCompleted = props.item.status === props.schema.statusChoices[2]
+  const isCompleted = isTaskDoneStatus(props.item.status, props.schema)
   const dueInfo = resolveDueInfo(props.item.endTime, props.isChinese)
   const dueBadgeStyle = resolveDueBadgeStyle(dueInfo.tone)
   const reviewInfo = resolveReviewInfo(props.item.nextReview, props.isChinese)
@@ -988,15 +992,19 @@ function StarIcon(props: { filled: boolean }) {
   )
 }
 
-type StatusVisualState = "todo" | "doing" | "done"
+type StatusVisualState = "todo" | "doing" | "waiting" | "done"
 
 function resolveStatusVisualState(
   status: string,
   schema: TaskSchemaDefinition,
 ): StatusVisualState {
-  const [todoStatus, doingStatus, doneStatus] = schema.statusChoices
+  const { todo: todoStatus, doing: doingStatus, waiting: waitingStatus, done: doneStatus } =
+    getTaskStatusValues(schema)
   if (status === doneStatus) {
     return "done"
+  }
+  if (status === waitingStatus) {
+    return "waiting"
   }
   if (status === doingStatus) {
     return "doing"
@@ -1032,6 +1040,10 @@ function StatusIcon(props: { state: StatusVisualState }) {
       ? React.createElement("path", {
           d: "M8.4 12.3l2.1 2.2 5-5.2",
         })
+      : props.state === "waiting"
+        ? React.createElement("path", {
+            d: "M12 8.6v3.8l2.4 1.4",
+          })
       : props.state === "doing"
         ? React.createElement("circle", {
             cx: 12,
@@ -1045,9 +1057,13 @@ function StatusIcon(props: { state: StatusVisualState }) {
 }
 
 function resolveStatusColor(status: string, schema: TaskSchemaDefinition): string {
-  const [, doingStatus, doneStatus] = schema.statusChoices
+  const { doing: doingStatus, waiting: waitingStatus, done: doneStatus } =
+    getTaskStatusValues(schema)
   if (status === doneStatus) {
     return "var(--orca-color-text-2)"
+  }
+  if (status === waitingStatus) {
+    return "var(--orca-color-text-blue, #2563eb)"
   }
   if (status === doingStatus) {
     return "var(--orca-color-text-yellow)"

@@ -1,5 +1,9 @@
 import type { Block, BlockProperty, DbId } from "../orca.d.ts"
-import type { TaskSchemaDefinition } from "./task-schema"
+import {
+  getDefaultTaskStatus,
+  isTaskDoneStatus,
+  type TaskSchemaDefinition,
+} from "./task-schema"
 import {
   type TaskReviewType,
 } from "./task-review"
@@ -45,8 +49,7 @@ export function normalizeTaskValuesForStatus(
   values: TaskPropertyValues,
   schema: TaskSchemaDefinition,
 ): TaskPropertyValues {
-  const [, , doneStatus] = schema.statusChoices
-  if (values.status !== doneStatus) {
+  if (!isTaskDoneStatus(values.status, schema)) {
     return values
   }
 
@@ -128,7 +131,7 @@ export function getTaskPropertiesFromRef(
   const meta = readTaskMetaFromBlock(taskBlock)
 
   return {
-    status: getString(refData, names.status) ?? schema.statusChoices[0],
+    status: getString(refData, names.status) ?? getDefaultTaskStatus(schema),
     startTime: getDate(refData, names.startTime),
     endTime: getDate(refData, names.endTime),
     reviewEnabled: meta.review.enabled,

@@ -16,6 +16,10 @@ import {
 import { TASK_META_PROPERTY_NAME } from "./task-meta"
 import {
   DEFAULT_TASK_SCORE,
+  getDefaultTaskStatus,
+  getNextTaskStatusInMainCycle,
+  isTaskDoneStatus,
+  isTaskDoingStatus,
   type TaskSchemaDefinition,
 } from "./task-schema"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
@@ -135,7 +139,7 @@ function resolveTaskCompletionTime(
   schema: TaskSchemaDefinition,
   modifiedAt: unknown,
 ): Date | null {
-  if (status !== schema.statusChoices[2]) {
+  if (!isTaskDoneStatus(status, schema)) {
     return null
   }
 
@@ -364,8 +368,7 @@ export async function cycleTaskStatusInView(
   const taskRefFromState = resolveTaskRefFromState(blockId, schema)
   const effectiveTaskRef = taskRefFromState ?? taskTagRef
   const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema, taskBlock)
-  const nextStatus = getNextStatus(values.status, schema)
-  const [, doingStatus] = schema.statusChoices
+  const nextStatus = getNextTaskStatusInMainCycle(values.status, schema)
   const dependsMode =
     values.dependsMode === "ALL" || values.dependsMode === "ANY"
       ? values.dependsMode
@@ -374,7 +377,7 @@ export async function cycleTaskStatusInView(
     ...values,
     status: nextStatus,
     startTime:
-      nextStatus === doingStatus && values.startTime == null
+      isTaskDoingStatus(nextStatus, schema) && values.startTime == null
         ? new Date()
         : values.startTime,
     endTime: values.endTime,
@@ -945,7 +948,7 @@ async function createTaskBlockAsLastChild(
 }
 
 function createDefaultTaskValues(schema: TaskSchemaDefinition): TaskPropertyValues {
-  const [todoStatus] = schema.statusChoices
+  const todoStatus = getDefaultTaskStatus(schema)
   const [defaultDependsMode] = schema.dependencyModeChoices
 
   return {
@@ -1317,25 +1320,6 @@ function resolveTaskRefFromState(
   }
 
   return null
-}
-
-function getNextStatus(
-  currentStatus: string,
-  schema: TaskSchemaDefinition,
-): string {
-  const [todoStatus, doingStatus, doneStatus] = schema.statusChoices
-
-  if (currentStatus === todoStatus) {
-    return doingStatus
-  }
-  if (currentStatus === doingStatus) {
-    return doneStatus
-  }
-  if (currentStatus === doneStatus) {
-    return todoStatus
-  }
-
-  return todoStatus
 }
 
 function resolveTaskText(block: Block, tagAlias: string): string {

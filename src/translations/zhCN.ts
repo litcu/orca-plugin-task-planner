@@ -99,7 +99,7 @@
   "Enter a positive integer, e.g. 1": "请输入大于等于 1 的整数，例如 1",
   "e.g. 24 hours": "例如：24（小时）",
   "Hours": "小时",
-  "Current stage of this task (e.g. TODO or DONE).": "任务当前所处阶段（例如 TODO、DOING、DONE）。",
+  "Current stage of this task (e.g. TODO, WAITING, or DONE).": "任务当前所处阶段（例如 TODO、WAITING、DONE）。",
   "When this task becomes active; before this time it may be blocked.": "任务从该时间开始可执行；在此之前会被视为未开始。",
   "Expected deadline or finish time for this task.": "任务预期截止或完成时间。",
   "Automatically create or schedule repeated occurrences of this task.": "为该任务自动安排重复执行规则。",

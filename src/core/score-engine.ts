@@ -29,6 +29,7 @@ const CRITICALITY_BOOST_WEIGHT = 0.3
 const OVERDUE_BOOST_WEIGHT = 0.25
 const START_BY_BOOST_WEIGHT = 0.22
 const AGING_BOOST_WEIGHT = 0.12
+export const WAITING_STATUS_MULTIPLIER = 0.6
 
 export interface TaskScoreInput {
   importance: number | null
@@ -43,6 +44,10 @@ export interface TaskScoreContext {
   dependencyDescendants?: number | null
   dependencyDemand?: number | null
   waitingDays?: number | null
+}
+
+export interface TaskScoreOptions {
+  statusMultiplier?: number
 }
 
 export function calculateTaskScore(
@@ -83,8 +88,9 @@ export function calculateTaskScoreFromValues(
   values: TaskPropertyValues,
   now: Date = new Date(),
   context: TaskScoreContext = {},
+  options: TaskScoreOptions = {},
 ): number {
-  return calculateTaskScore(
+  const baseScore = calculateTaskScore(
     {
       importance: values.importance,
       urgency: values.urgency,
@@ -96,6 +102,9 @@ export function calculateTaskScoreFromValues(
     now,
     context,
   )
+
+  const statusMultiplier = resolveScoreMultiplier(options.statusMultiplier)
+  return roundScore(clampToPercent(baseScore * statusMultiplier))
 }
 
 function resolveDueFactor(
@@ -257,6 +266,14 @@ function clampRatio(value: number | null | undefined): number {
     return 0
   }
   if (value > 1) {
+    return 1
+  }
+
+  return value
+}
+
+function resolveScoreMultiplier(value: number | undefined): number {
+  if (value == null || Number.isNaN(value) || !Number.isFinite(value) || value <= 0) {
     return 1
   }
 

@@ -3,10 +3,16 @@ import {
   getTaskPropertiesFromRef,
   type TaskPropertyValues,
 } from "./task-properties"
-import type { DependencyMode, TaskSchemaDefinition } from "./task-schema"
+import {
+  isTaskDoneStatus,
+  isTaskWaitingStatus,
+  type DependencyMode,
+  type TaskSchemaDefinition,
+} from "./task-schema"
 import { getMirrorId, getMirrorIdFromBlock } from "./block-utils"
 import {
   calculateTaskScoreFromValues,
+  WAITING_STATUS_MULTIPLIER,
   type TaskScoreContext,
 } from "./score-engine"
 import { resolveEffectiveNextReview, type TaskReviewType } from "./task-review"
@@ -180,8 +186,8 @@ export function evaluateNextAction(
   const parentBlockId = liveTaskBlock.parent != null ? getMirrorId(liveTaskBlock.parent) : null
 
   const blockedReason: NextActionEvaluation["blockedReason"] = []
-  if (isDoneStatus(status, schema) || isCanceledStatus(status)) {
-    blockedReason.push(isDoneStatus(status, schema) ? "completed" : "canceled")
+  if (isTaskDoneStatus(status, schema) || isCanceledStatus(status)) {
+    blockedReason.push(isTaskDoneStatus(status, schema) ? "completed" : "canceled")
   }
 
   const values = getTaskPropertiesFromRef(taskRef?.data, schema, liveTaskBlock)
@@ -231,6 +237,11 @@ export function evaluateNextAction(
     values,
     now,
     resolveTaskScoreContext(taskId, scoringContext),
+    {
+      statusMultiplier: isTaskWaitingStatus(status, schema)
+        ? WAITING_STATUS_MULTIPLIER
+        : 1,
+    },
   )
   const forceActiveByReview = values.reviewEnabled
 
@@ -279,7 +290,7 @@ function isCompletedTaskBlock(
 ): boolean {
   const taskRef = resolveTaskRefFromBlock(block, schema.tagAlias)
   const status = getTaskStatus(taskRef?.data, schema)
-  return isDoneStatus(status, schema)
+  return isTaskDoneStatus(status, schema)
 }
 
 function resolveTaskRefFromBlock(
@@ -732,7 +743,7 @@ function evaluateDependencyEligibility(
     const dependencyRef = findTaskTagRef(liveDependencyTask, schema.tagAlias)
     const dependencyStatus = subtaskContext?.statusByTaskId.get(dependencyTaskId) ??
       getTaskStatus(dependencyRef?.data, schema)
-    const completed = isDoneStatus(dependencyStatus, schema) &&
+    const completed = isTaskDoneStatus(dependencyStatus, schema) &&
       !hasOpenSubtaskByTaskId(dependencyTaskId, schema, subtaskContext)
     return [
       {
@@ -859,7 +870,7 @@ function hasOpenSubtaskByTaskId(
     visited.add(childTaskId)
 
     const status = subtaskContext.statusByTaskId.get(childTaskId)
-    if (status != null && !isDoneStatus(status, schema) && !isCanceledStatus(status)) {
+    if (status != null && !isTaskDoneStatus(status, schema) && !isCanceledStatus(status)) {
       return true
     }
 
@@ -1265,10 +1276,6 @@ function getTaskStatus(
   schema: TaskSchemaDefinition,
 ): string {
   return getTaskPropertiesFromRef(refData, schema).status
-}
-
-function isDoneStatus(status: string, schema: TaskSchemaDefinition): boolean {
-  return status === schema.statusChoices[2]
 }
 
 function isCanceledStatus(status: string): boolean {

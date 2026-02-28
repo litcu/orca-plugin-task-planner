@@ -5,7 +5,10 @@
   DbId,
   PanelProps,
 } from "../orca.d.ts"
-import type { TaskSchemaDefinition } from "../core/task-schema"
+import {
+  getTaskStatusValues,
+  type TaskSchemaDefinition,
+} from "../core/task-schema"
 import {
   getCustomTaskViewIdFromTab,
   getPreferredTaskViewsTab,
@@ -1651,7 +1654,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     })
   }, [filterFieldByKey, filterFields])
 
-  const doneStatus = props.schema.statusChoices[2]
+  const { done: doneStatus } = getTaskStatusValues(props.schema)
   const dashboardQuickFilterContext = React.useMemo(() => {
     if (dashboardQuickFilter == null || tab !== "all-tasks") {
       return null
@@ -4399,7 +4402,7 @@ function buildTaskDashboardData(
   } = params
   const now = new Date()
   const nowMs = now.getTime()
-  const doneStatus = schema.statusChoices[2]
+  const { done: doneStatus } = getTaskStatusValues(schema)
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const startOfTodayMs = startOfToday.getTime()
   const endOfTodayMs = startOfTodayMs + DAY_MS

@@ -1,5 +1,9 @@
 import type { TaskPropertyValues } from "./task-properties"
-import type { TaskSchemaDefinition } from "./task-schema"
+import {
+  getDefaultTaskStatus,
+  isTaskDoneStatus,
+  type TaskSchemaDefinition,
+} from "./task-schema"
 
 export type RepeatUnit = "day" | "week" | "month"
 
@@ -122,8 +126,10 @@ export function buildNextRecurringTaskValues(
   schema: TaskSchemaDefinition,
   now: Date = new Date(),
 ): TaskPropertyValues | null {
-  const [, , doneStatus] = schema.statusChoices
-  if (previousStatus === doneStatus || nextValues.status !== doneStatus) {
+  if (
+    isTaskDoneStatus(previousStatus, schema) ||
+    !isTaskDoneStatus(nextValues.status, schema)
+  ) {
     return null
   }
 
@@ -167,7 +173,7 @@ export function buildNextRecurringTaskValues(
 
   return {
     ...nextValues,
-    status: schema.statusChoices[0],
+    status: getDefaultTaskStatus(schema),
     startTime: plannedStartTime,
     endTime: nextEndTime,
     repeatRule: stringifyRepeatRuleConfig(nextRule),

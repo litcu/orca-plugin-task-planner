@@ -1,6 +1,13 @@
 import type { Block, BlockProperty, CursorData, DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
-import { DEFAULT_TASK_SCORE, type TaskSchemaDefinition } from "./task-schema"
+import {
+  DEFAULT_TASK_SCORE,
+  getDefaultTaskStatus,
+  getNextTaskStatusInMainCycle,
+  getTaskStatusValues,
+  isTaskDoingStatus,
+  type TaskSchemaDefinition,
+} from "./task-schema"
 import { getMirrorId, isValidDbId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import { getPluginSettings } from "./plugin-settings"
@@ -193,7 +200,7 @@ async function initializeTaskTag(
   schema: TaskSchemaDefinition,
 ) {
   const propertyNames = schema.propertyNames
-  const [todoStatus] = schema.statusChoices
+  const todoStatus = getDefaultTaskStatus(schema)
   const [defaultDependsMode] = schema.dependencyModeChoices
 
   // 首次转任务时只写入 A-01 约定字段，避免残留旧字段。
@@ -250,14 +257,13 @@ async function cycleTaskTagStatus(
 ) {
   const propertyNames = schema.propertyNames
   const currentValues = getTaskPropertiesFromRef(taskTagRef.data, schema, block)
-  const nextStatus = getNextStatus(currentValues.status, schema)
+  const nextStatus = getNextTaskStatusInMainCycle(currentValues.status, schema)
   const dependsModeValue = getDependencyModeValue(taskTagRef.data, schema)
-  const [, doingStatus] = schema.statusChoices
   const nextValues = normalizeTaskValuesForStatus({
     ...currentValues,
     status: nextStatus,
     startTime:
-      nextStatus === doingStatus && currentValues.startTime == null
+      isTaskDoingStatus(nextStatus, schema) && currentValues.startTime == null
         ? new Date()
         : currentValues.startTime,
     endTime: currentValues.endTime,
@@ -317,25 +323,6 @@ async function cycleTaskTagStatus(
     schema,
   )
   invalidateNextActionEvaluationCache()
-}
-
-function getNextStatus(
-  currentStatus: string | null,
-  schema: TaskSchemaDefinition,
-): string {
-  const [todoStatus, doingStatus, doneStatus] = schema.statusChoices
-
-  if (currentStatus === todoStatus) {
-    return doingStatus
-  }
-  if (currentStatus === doingStatus) {
-    return doneStatus
-  }
-  if (currentStatus === doneStatus) {
-    return todoStatus
-  }
-
-  return todoStatus
 }
 
 function getDependencyModeValue(
@@ -442,7 +429,8 @@ function injectTaskStatusStyles(pluginName: string, schema: TaskSchemaDefinition
 
   const taskTagName = schema.tagAlias.toLowerCase()
   const statusPropertyDataName = toDataAttributeName(schema.propertyNames.status)
-  const [todoStatus, doingStatus, doneStatus] = schema.statusChoices
+  const { todo: todoStatus, doing: doingStatus, waiting: waitingStatus, done: doneStatus } =
+    getTaskStatusValues(schema)
 
   const styles = `
     .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"])::before,
@@ -475,6 +463,13 @@ function injectTaskStatusStyles(pluginName: string, schema: TaskSchemaDefinition
     .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
       content: "\\fedd";
       color: var(--orca-color-text-yellow);
+    }
+
+    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])::before,
+    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])>.orca-repr-main>.orca-repr-main-content::before,
+    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
+      content: "\\ea6b";
+      color: var(--orca-color-text-blue, #2563eb);
     }
 
     .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])::before,
