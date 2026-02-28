@@ -2,6 +2,7 @@ import type { Block, BlockProperty, DbId } from "../orca.d.ts"
 import {
   DEFAULT_TASK_DEPENDENCY_DELAY,
   DEFAULT_TASK_SCORE,
+  getDefaultTaskStatus,
   type TaskSchemaDefinition,
 } from "../core/task-schema"
 import { dedupeDbIds, getMirrorId, isValidDbId } from "../core/block-utils"
@@ -897,7 +898,7 @@ function TaskPropertyPopupView(props: {
             await applyTaskTimerForStatusChange({
               blockId: createdTaskId,
               schema: props.schema,
-              previousStatus: props.schema.statusChoices[0],
+              previousStatus: getDefaultTaskStatus(props.schema),
               nextStatus: createdTaskStatus,
               autoStartOnDoing: timerAutoStartOnDoing,
             })
@@ -1152,7 +1153,7 @@ function TaskPropertyPopupView(props: {
     alignItems: "center",
   }
   const fieldHelpTexts = {
-    status: t("Current stage of this task (e.g. TODO or DONE)."),
+    status: t("Current stage of this task (e.g. TODO, WAITING, or DONE)."),
     startTime: t("When this task becomes active; before this time it may be blocked."),
     endTime: t("Expected deadline or finish time for this task."),
     repeatRule: t("Automatically create or schedule repeated occurrences of this task."),
@@ -1558,7 +1559,7 @@ function TaskPropertyPopupView(props: {
               selected: [statusValue],
               options: statusOptions,
               onChange: (selected: string[]) => {
-                setStatusValue(selected[0] ?? props.schema.statusChoices[0])
+                setStatusValue(selected[0] ?? getDefaultTaskStatus(props.schema))
               },
               menuContainer: popupMenuContainerRef,
               width: "100%",

@@ -2,7 +2,7 @@
 import { t } from "../libs/l10n"
 import { getMirrorId, isValidDbId } from "./block-utils"
 import { getPluginSettings } from "./plugin-settings"
-import type { TaskSchemaDefinition } from "./task-schema"
+import { isTaskDoneStatus, type TaskSchemaDefinition } from "./task-schema"
 import {
   checkpointAllRunningTaskTimers,
   formatTaskTimerDuration,
@@ -197,10 +197,9 @@ export function setupTaskTimerInlineWidgets(
 
       const status = resolveTaskStatusFromBlock(block, schema)
       const timer = readTaskTimerFromBlock(block)
-      const doneStatus = schema.statusChoices[2]
       const taskId = getMirrorId(rawBlockId)
 
-      if (timer.running && status === doneStatus && !autoStoppingTaskIds.has(taskId)) {
+      if (timer.running && isTaskDoneStatus(status, schema) && !autoStoppingTaskIds.has(taskId)) {
         autoStoppingTaskIds.add(taskId)
         void stopTaskTimer({
           blockId: taskId,
@@ -333,11 +332,10 @@ function renderBlockTimerUi(
   const taskId = getMirrorId(rawBlockId)
   const timer = readTaskTimerFromBlock(block)
   const status = resolveTaskStatusFromBlock(block, schema)
-  const doneStatus = schema.statusChoices[2]
   const hasRecord = hasTaskTimerRecord(timer)
   const elapsedMs = resolveTaskTimerElapsedMs(timer)
   const elapsedText = formatTaskTimerDuration(elapsedMs)
-  const startDisabled = !timer.running && status === doneStatus
+  const startDisabled = !timer.running && isTaskDoneStatus(status, schema)
   const action = timer.running ? "stop" : "start"
   const actionLabel = action === "stop" ? t("Stop") : t("Timer")
   const buttonDisabled = pending || startDisabled

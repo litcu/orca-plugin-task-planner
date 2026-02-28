@@ -6,7 +6,13 @@ import {
   getMirrorIdFromBlock,
   isValidDbId,
 } from "./block-utils"
-import type { TaskSchemaDefinition } from "./task-schema"
+import {
+  getDefaultTaskStatus,
+  getTaskStatusValues,
+  isTaskDoneStatus,
+  isTaskWaitingStatus,
+  type TaskSchemaDefinition,
+} from "./task-schema"
 import { getTaskPropertiesFromRef } from "./task-properties"
 
 const PROP_TYPE_JSON = 0
@@ -323,7 +329,16 @@ export async function applyTaskTimerForStatusChange(options: {
     return
   }
 
-  const [, doingStatus] = options.schema.statusChoices
+  if (isTaskWaitingStatus(options.nextStatus, options.schema)) {
+    await stopTaskTimer({
+      blockId: options.blockId,
+      sourceBlockId: options.sourceBlockId,
+      schema: options.schema,
+    })
+    return
+  }
+
+  const { doing: doingStatus } = getTaskStatusValues(options.schema)
   if (
     options.autoStartOnDoing &&
     options.nextStatus === doingStatus &&
@@ -439,8 +454,9 @@ async function promoteTaskStatusToDoingIfNeeded(
   const taskRef = findTaskTagRef(target.liveBlock, schema.tagAlias) ??
     findTaskTagRef(target.sourceBlock, schema.tagAlias)
   const values = getTaskPropertiesFromRef(taskRef?.data, schema, target.liveBlock)
-  const [todoStatus, doingStatus] = schema.statusChoices
-  if (values.status !== todoStatus) {
+  const { todo: todoStatus, waiting: waitingStatus, doing: doingStatus } =
+    getTaskStatusValues(schema)
+  if (values.status !== todoStatus && values.status !== waitingStatus) {
     return
   }
 
@@ -581,12 +597,12 @@ function readTaskStatusFromRefData(
   schema: TaskSchemaDefinition,
 ): string {
   const property = refData?.find((item) => item.name === schema.propertyNames.status)
-  return typeof property?.value === "string" ? property.value : schema.statusChoices[0]
+  return typeof property?.value === "string" ? property.value : getDefaultTaskStatus(schema)
 }
 
 function isTaskCompletedStatus(
   status: string,
   schema: TaskSchemaDefinition,
 ): boolean {
-  return status === schema.statusChoices[2]
+  return isTaskDoneStatus(status, schema)
 }

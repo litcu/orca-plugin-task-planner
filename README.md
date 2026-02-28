@@ -3,60 +3,63 @@
 [![English](https://img.shields.io/badge/README-English-1f6feb)](README.md)
 [![简体中文](https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-2ea44f)](README_zh.md)
 
-`orca-task-planner` is a task management plugin for Orca Note.
+`orca-task-planner` is an all-in-one planning and execution plugin for Orca Note.
 
 ## Plugin Overview
 
-A task management plugin of Orca Note. It helps you: 
+A task command center for Orca Note. It helps you:
 
-- capture tasks quickly from normal blocks
-- handle both simple task lists and structured task systems in one place
-- plan tasks with time, dependencies, review, and recurrence
-- focus on executable work in **Active Tasks**
-- prioritize work using score-based ranking
-- complete planning, execution, and review in one unified panel
+- capture ideas as tasks in seconds
+- run planning, scheduling, execution, and review in one flow
+- focus only on actionable work in **Active Tasks**
+- shape today with **My Day** (list and schedule)
+- track real effort with built-in timer
+- reduce priority decision fatigue with scoring and views
 
 ## Key Features
 
 ### 0) Quick capture (fast task collection)
 
-In GTD-style workflows, capture-first is critical.  
-The plugin supports fast task collection directly in notes:
+The first step of task management is not perfect planning, but not losing input.  
+The plugin supports immediate task capture inside notes:
 
 - convert the current block into a task with `Alt+Enter`
 - create a new task block quickly from the task management panel (`Add task`)
 - fill time/dependency/priority details later in the property panel
 
-This allows you to capture first, then organize and schedule in batches.
+Capture first, refine later, without breaking your writing flow.
 
 ### 1) Fast task status switching
 
-The plugin provides low-friction status switching:
+Status switching is designed as a low-friction editor action:
 
 - press `Alt+Enter` to create a task and cycle status
 - status sequence: `TODO -> Doing -> Done -> TODO`
+- `Waiting` can be set manually in task properties (not included in the `Alt+Enter` cycle)
 - click the left status icon for the same status cycle
 - when switching to `Doing`, start time is recorded automatically
+- if timer auto-start is enabled, switching to `Doing` also starts task timer
 
-This keeps task capture and execution transitions inside the editor flow.
+Progress and execution records stay inside the editor, so workflow stays continuous.
 
 ### 2) Task Property Panel: fast task editing
 
-Click the task tag to open a task property panel and edit key fields in one place:
+Click the task tag to open a single editing surface for "fill in -> save -> continue":
 
 - basic fields: status, start time, due time, labels, notes, star
 - planning fields: importance, urgency, effort
 - dependency fields: dependency targets, dependency mode (`ALL` / `ANY`), dependency delay
 - cycle fields: review rules, recurrence rules
 
-The panel includes validation and quick save behavior. Dependency targets can be selected by block references, which is useful for complex task graphs.
+The panel includes validation and quick save. Dependency targets can be selected by block references, making complex task graphs manageable without context switching.
 
 ### 3) Task Management Panel: one place to manage all tasks
 
-The plugin provides a unified task management panel for viewing, filtering, editing, and maintaining all tasks.  
+The task panel is the plugin's operations hub for viewing, filtering, editing, and executing tasks.  
 Included views:
 
 - **Dashboard**: global snapshot (completion, due pressure, blockers, top priorities)
+- **My Day**: daily focus list and schedule board (list/schedule mode)
 - **Active Tasks**: executable tasks right now (primary execution entry)
 - **All Tasks**: full task tree (hierarchy and drag/drop management)
 - **Starred Tasks**: manually highlighted tasks
@@ -64,12 +67,11 @@ Included views:
 - **Review**: review queue and batch review actions
 - **Custom Views**: scenario-specific saved rule-based views
 
-This panel supports the full loop of **inspect -> adjust -> execute -> review**.
+It supports the full loop of **inspect -> adjust -> execute -> review** in one place.
 
 ### 4) Active Tasks: GTD-oriented execution list
 
-In GTD (Getting Things Done), the key is always knowing the next executable action.  
-`Active Tasks` implements this idea by showing only tasks you can execute now.
+`Active Tasks` is designed to answer one question instantly: "What should I do right now?"
 
 #### Eligibility rules
 
@@ -118,6 +120,8 @@ Sort order:
 3. due time ascending
 4. stable internal ID order
 
+You do not need to manually compare tasks repeatedly. The list keeps attention on what is most worth pushing now.
+
 #### Recommended usage
 
 - start each work session from `Active Tasks`
@@ -126,18 +130,18 @@ Sort order:
 
 ### 5) Recurring tasks
 
-The plugin supports structured recurrence rules for routine and periodic work:
+Recurring rules turn repeated planning into automatic progression:
 
 - daily / weekly / monthly recurrence
 - interval, weekday (weekly), max count, end date
 - automatic roll-forward to next cycle when completed
 - coordinated timeline progression for related subtasks in task hierarchies
 
-This turns recurring-task management from manual copying into rule-driven automation.
+Great for standups, weekly reports, maintenance checks, and other cadence-based work.
 
 ### 6) Task review
 
-The review system helps maintain a stable review cadence so long-lived tasks are not forgotten:
+Review keeps long-running work visible so tasks do not disappear after kickoff:
 
 - single review and cyclic review
 - configurable review interval (e.g., every N days/weeks/months)
@@ -146,25 +150,62 @@ The review system helps maintain a stable review cadence so long-lived tasks are
 
 ### 7) Custom views
 
-Custom views let you persist reusable task slices for different scenarios:
+Custom views save high-frequency filters as reusable entry points:
 
 - create, edit, and delete custom views
 - combine rules with AND/OR logic
 - filter by status, time, dependencies, labels, and more
 - persistent across restarts
 
-Useful for long-term slices such as work/home/project phase/weekly planning.
+Useful for recurring contexts such as work/home/project phase/weekly planning.
 
 ### 8) Task dashboard
 
-`Dashboard` provides macro observability for your task system:
+`Dashboard` gives an operating view of your task system:
 
 - key metrics: total tasks, active tasks, review tasks, overdue tasks
 - structure metrics: status distribution, due pressure
 - risk metrics: major blocker categories
 - execution metrics: top-priority active tasks
 
-Use it to quickly assess task-system health and rebalance your planning rhythm.
+Use it for a quick daily calibration before execution starts.
+
+### 9) My Day view
+
+`My Day` turns "today's plan" into an executable workspace:
+
+- keep a dedicated "today list" of tasks
+- switch between list mode and schedule mode
+- drag and resize task cards on timeline for time blocking
+- use right-click menu on cards for quick actions
+- sync My Day tasks to today journal section automatically
+- avoid duplicate mirror insertion when the task already exists in today's journal
+
+Move directly from priority list to concrete time blocks without duplicating task sources.
+
+### 10) Task timer
+
+The built-in task timer turns "I worked on it for a while" into measurable effort:
+
+- timer modes: `Direct timer` and `Pomodoro timer`
+- start/stop timer from task rows and inline task widgets
+- only one running task timer at a time (starting one stops others)
+- optional auto-start when status switches to `Doing`
+- starting timer from `Waiting` auto-switches task status to `Doing`
+- auto-stop when status switches to `Done` or `Waiting`
+- elapsed time persists across restarts
+
+Useful for effort review and better estimation over time.
+
+### 11) Startup task summary notification
+
+On startup, the plugin can show a quick snapshot of today's workload:
+
+- active task count
+- overdue task count
+- due-soon task count within configured due-soon window
+
+This notification is optional and can be toggled in settings.
 
 ## Installation
 
@@ -196,14 +237,14 @@ Build output: `dist/index.js`.
 
 ## Quick Start
 
-1. Open Command Palette and run `Open Task Views Panel`.
+1. Open Command Palette and run `Open task management panel` (your unified workspace).
 2. Create a task:
    - place cursor on any block
    - press `Alt+Enter`
    - status cycle: `TODO -> Doing -> Done -> TODO`
 3. Open task properties:
    - click the task tag, or
-   - run `Open task properties`
+   - run `Open task property popup`
 4. Set core fields:
    - start time / due time
    - dependency mode (`ALL` or `ANY`)
@@ -211,22 +252,23 @@ Build output: `dist/index.js`.
    - importance / urgency / effort
 5. Switch to **Active Tasks** and execute in order.
 6. Use `All Tasks` for hierarchy and drag/drop structure management.
-7. Use `Review` for periodic review and batch review actions.
-8. Use `Due Soon` and `Dashboard` for planning and global overview.
+7. Use `My Day` for daily focus and schedule planning.
+8. Use `Review` for periodic review and batch review actions.
+9. Use `Due Soon` and `Dashboard` for planning and global overview.
 
 ## Commands and Shortcut
 
 - `Alt+Enter`: create/cycle task status
-- `Open Task Views Panel`: open task management panel
-- `Toggle Task Views Panel`: show/hide task management panel
-- `Open task properties`: open task property panel
+- `Open task management panel`: open task management panel
+- `Open task property popup`: open task property panel
 
 ## Data and Persistence
 
 - task-facing fields are stored in task tag properties
-- extended planning fields are persisted in internal task metadata
-- custom views are persisted in plugin local data
-- no external service is required for core functionality
+- extended planning fields are persisted in block property `_mlo_task_meta`
+- task timer data is persisted in block property `_mlo_task_timer`
+- custom views and My Day state are persisted in plugin local data
+- local-first persistence, with no external service required
 
 ## FAQ
 
@@ -273,7 +315,27 @@ Yes. In plugin settings:
 
 - **Show task panel icon** (enabled by default)
 
-If disabled, you can still open the panel via commands/shortcuts bound to: `Open Task Views Panel` and `Toggle Task Views Panel`.
+### How do I use My Day view?
+
+Enable it in plugin settings via **Enable My Day**, then switch to `My Day` tab in task panel.
+
+### How does My Day day boundary work?
+
+Use **My Day start hour** to define when a new My Day starts (0-23 local hour).
+
+### How does task timer work with status switching?
+
+If **Auto start timer when status becomes Doing** is enabled, switching to `Doing` starts timer automatically.  
+Starting timer from `Waiting` auto-switches the task to `Doing`.  
+Switching to `Done` or `Waiting` stops running timer automatically.
+
+### Why does starting one task timer stop another running timer?
+
+The plugin enforces a single running task timer globally to keep elapsed time records consistent.
+
+### Can I disable startup task summary notification?
+
+Yes. Disable **Notify task summary on startup** in plugin settings.
 
 ## Development
 

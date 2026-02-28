@@ -7,7 +7,10 @@ import {
   toTaskMetaPropertyForSave,
   type TaskPropertyValues,
 } from "./task-properties"
-import type { TaskSchemaDefinition } from "./task-schema"
+import {
+  getDefaultTaskStatus,
+  type TaskSchemaDefinition,
+} from "./task-schema"
 import { buildNextRecurringTaskValues } from "./task-repeat"
 
 const TAG_REF_TYPE = 2
@@ -91,7 +94,7 @@ async function reopenDescendantTasks(
     return
   }
 
-  const [todoStatus] = schema.statusChoices
+  const todoStatus = getDefaultTaskStatus(schema)
   const dateShiftMs = resolveDateShiftMs(previousParentValues, nextParentValues)
 
   for (const descendant of descendants) {

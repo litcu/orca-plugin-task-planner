@@ -5,7 +5,7 @@ import {
   type NextActionBlockedReason,
 } from "../core/dependency-engine"
 import { getTaskPropertiesFromRef } from "../core/task-properties"
-import type { TaskSchemaDefinition } from "../core/task-schema"
+import { isTaskDoneStatus, type TaskSchemaDefinition } from "../core/task-schema"
 import { t } from "../libs/l10n"
 
 export interface TaskActivationInfo {
@@ -54,7 +54,7 @@ export async function loadTaskActivationInfo(
   }
 
   const status = getTaskPropertiesFromRef(taskRef.data, schema).status
-  if (status === schema.statusChoices[2]) {
+  if (isTaskDoneStatus(status, schema)) {
     return {
       isActive: false,
       blockedReason: ["completed"],
