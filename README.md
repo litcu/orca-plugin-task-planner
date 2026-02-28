@@ -35,6 +35,7 @@ Status switching is designed as a low-friction editor action:
 
 - press `Alt+Enter` to create a task and cycle status
 - status sequence: `TODO -> Doing -> Done -> TODO`
+- `Waiting` can be set manually in task properties (not included in the `Alt+Enter` cycle)
 - click the left status icon for the same status cycle
 - when switching to `Doing`, start time is recorded automatically
 - if timer auto-start is enabled, switching to `Doing` also starts task timer
@@ -190,7 +191,8 @@ The built-in task timer turns "I worked on it for a while" into measurable effor
 - start/stop timer from task rows and inline task widgets
 - only one running task timer at a time (starting one stops others)
 - optional auto-start when status switches to `Doing`
-- auto-stop when status switches to `Done`
+- starting timer from `Waiting` auto-switches task status to `Doing`
+- auto-stop when status switches to `Done` or `Waiting`
 - elapsed time persists across restarts
 
 Useful for effort review and better estimation over time.
@@ -324,7 +326,8 @@ Use **My Day start hour** to define when a new My Day starts (0-23 local hour).
 ### How does task timer work with status switching?
 
 If **Auto start timer when status becomes Doing** is enabled, switching to `Doing` starts timer automatically.  
-Switching to `Done` stops running timer automatically.
+Starting timer from `Waiting` auto-switches the task to `Doing`.  
+Switching to `Done` or `Waiting` stops running timer automatically.
 
 ### Why does starting one task timer stop another running timer?
 
