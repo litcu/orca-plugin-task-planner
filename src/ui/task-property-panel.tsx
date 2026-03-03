@@ -264,13 +264,13 @@ function TaskPropertyPopupView(props: {
   const [taskNameText, setTaskNameText] = React.useState(taskName)
   const [statusValue, setStatusValue] = React.useState(editorInitialValues.status)
   const [startTimeValue, setStartTimeValue] = React.useState<Date | null>(
-    editorInitialValues.startTime,
+    normalizeDateToMinute(editorInitialValues.startTime),
   )
   const [endTimeValue, setEndTimeValue] = React.useState<Date | null>(
-    editorInitialValues.endTime,
+    normalizeDateToMinute(editorInitialValues.endTime),
   )
   const [nextReviewValue, setNextReviewValue] = React.useState<Date | null>(
-    editorInitialValues.nextReview,
+    normalizeDateToMinute(editorInitialValues.nextReview),
   )
   const [reviewEnabledValue, setReviewEnabledValue] = React.useState(
     editorInitialValues.reviewEnabled,
@@ -318,7 +318,7 @@ function TaskPropertyPopupView(props: {
     initialRepeatEditor.maxCountText,
   )
   const [repeatEndAtValue, setRepeatEndAtValue] = React.useState<Date | null>(
-    initialRepeatEditor.endAtValue,
+    normalizeDateToMinute(initialRepeatEditor.endAtValue),
   )
   const [repeatOccurrence, setRepeatOccurrence] = React.useState(
     initialRepeatEditor.occurrence,
@@ -518,9 +518,9 @@ function TaskPropertyPopupView(props: {
   React.useEffect(() => {
     setTaskNameText(taskName)
     setStatusValue(editorInitialValues.status)
-    setStartTimeValue(editorInitialValues.startTime)
-    setEndTimeValue(editorInitialValues.endTime)
-    setNextReviewValue(editorInitialValues.nextReview)
+    setStartTimeValue(normalizeDateToMinute(editorInitialValues.startTime))
+    setEndTimeValue(normalizeDateToMinute(editorInitialValues.endTime))
+    setNextReviewValue(normalizeDateToMinute(editorInitialValues.nextReview))
     setReviewEnabledValue(editorInitialValues.reviewEnabled)
     setReviewTypeValue(editorInitialValues.reviewType)
     setImportanceText(
@@ -541,7 +541,7 @@ function TaskPropertyPopupView(props: {
     setRepeatIntervalText(initialRepeatEditor.intervalText)
     setRepeatWeekdayValue(initialRepeatEditor.weekdayValue)
     setRepeatMaxCountText(initialRepeatEditor.maxCountText)
-    setRepeatEndAtValue(initialRepeatEditor.endAtValue)
+    setRepeatEndAtValue(normalizeDateToMinute(initialRepeatEditor.endAtValue))
     setRepeatOccurrence(initialRepeatEditor.occurrence)
     setRepeatRuleParseable(initialRepeatEditor.parseable)
     setReviewModeValue(initialReviewEditor.mode)
@@ -626,7 +626,9 @@ function TaskPropertyPopupView(props: {
     const intervalText = next.intervalText ?? repeatIntervalText
     const weekdayValue = next.weekdayValue ?? repeatWeekdayValue
     const maxCountText = next.maxCountText ?? repeatMaxCountText
-    const endAtValue = next.endAtValue !== undefined ? next.endAtValue : repeatEndAtValue
+    const endAtValue = normalizeDateToMinute(
+      next.endAtValue !== undefined ? next.endAtValue : repeatEndAtValue,
+    )
     const nextRule = buildRepeatRuleFromEditorState({
       mode,
       intervalText,
@@ -1221,7 +1223,7 @@ function TaskPropertyPopupView(props: {
     helpText?: string,
   ) => {
     const hasValue = value != null
-    const displayValue = hasValue ? value.toLocaleString() : ""
+    const displayValue = hasValue ? formatDateTimeToMinute(value) : ""
     return renderFormRow(
       label,
       React.createElement(
@@ -1977,21 +1979,22 @@ function TaskPropertyPopupView(props: {
           ? React.createElement(DatePicker, {
               mode: "datetime",
               visible: true,
-              value: selectedDateValue ?? new Date(),
+              value: selectedDateValue ?? normalizeDateToMinute(new Date()) ?? new Date(),
               refElement: dateAnchorRef,
               menuContainer: popupMenuContainerRef,
               onChange: (next: Date | [Date, Date]) => {
                 if (!(next instanceof Date)) {
                   return
                 }
+                const normalizedNext = normalizeDateToMinute(next) ?? next
                 if (editingDateField === "start") {
-                  setStartTimeValue(next)
+                  setStartTimeValue(normalizedNext)
                 } else if (editingDateField === "end") {
-                  setEndTimeValue(next)
+                  setEndTimeValue(normalizedNext)
                 } else if (editingDateField === "nextReview") {
-                  setNextReviewValue(next)
+                  setNextReviewValue(normalizedNext)
                 } else {
-                  updateRepeatEditor({ endAtValue: next })
+                  updateRepeatEditor({ endAtValue: normalizedNext })
                 }
                 setEditingDateField(null)
               },
@@ -2555,6 +2558,28 @@ async function ensureTaskLabelChoices(
     [taskTagBlock.id],
     nextProperties,
   )
+}
+
+function normalizeDateToMinute(value: Date | null): Date | null {
+  if (value == null || Number.isNaN(value.getTime())) {
+    return value
+  }
+
+  const normalized = new Date(value.getTime())
+  normalized.setSeconds(0, 0)
+  return normalized
+}
+
+function formatDateTimeToMinute(value: Date): string {
+  const locale = orca.state.locale === "zh-CN" ? "zh-CN" : undefined
+  return value.toLocaleString(locale, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
 }
 
 function isRecord(value: unknown): value is Record<string, any> {

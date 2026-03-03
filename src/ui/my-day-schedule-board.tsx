@@ -19,6 +19,7 @@ export interface MyDayScheduleTaskItem {
   blockId: DbId
   text: string
   status: string
+  completed: boolean
   labels: string[]
   star: boolean
   scheduleStartMinute: number | null
@@ -977,7 +978,7 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
   const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
   const visibleLabels = props.item.labels.slice(0, 2)
   const hiddenLabelCount = Math.max(0, props.item.labels.length - visibleLabels.length)
-  const isCompleted = props.item.status === props.doneStatus
+  const isCompleted = props.item.completed || props.item.status === props.doneStatus
   if (contextMenuContainerRef.current == null) {
     contextMenuContainerRef.current = document.body
   }
@@ -1122,7 +1123,7 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
   const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
   const visibleLabels = props.item.labels.slice(0, 2)
   const hiddenLabelCount = Math.max(0, props.item.labels.length - visibleLabels.length)
-  const isCompleted = props.item.status === props.doneStatus
+  const isCompleted = props.item.completed || props.item.status === props.doneStatus
   if (contextMenuContainerRef.current == null) {
     contextMenuContainerRef.current = document.body
   }

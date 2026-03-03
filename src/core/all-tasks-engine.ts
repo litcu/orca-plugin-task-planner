@@ -49,6 +49,7 @@ export interface AllTaskItem {
   reviewType: TaskReviewType
   nextReview: Date | null
   reviewEvery: string
+  repeatRule: string
   lastReviewed: Date | null
   labels: string[]
   star: boolean
@@ -104,6 +105,7 @@ export async function collectAllTasks(
         lastReviewed: values.lastReviewed,
       }),
       reviewEvery: values.reviewEvery,
+      repeatRule: values.repeatRule,
       lastReviewed: values.lastReviewed,
       labels: values.labels,
       star: values.star,
