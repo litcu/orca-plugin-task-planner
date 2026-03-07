@@ -78,6 +78,7 @@ import {
 import { getMirrorId } from "../core/block-utils"
 import { TASK_META_PROPERTY_NAME } from "../core/task-meta"
 import { parseReviewRule, type ReviewUnit } from "../core/task-review"
+import { parseRepeatRuleConfig } from "../core/task-repeat"
 import {
   readTaskTimerFromProperties,
   startTaskTimer,
@@ -112,6 +113,11 @@ interface VisibleTreeRow {
   depth: number
   hasChildren: boolean
   collapsed: boolean
+}
+
+interface MyDayTaskCompletionSnapshot {
+  status: string
+  repeatOccurrence: number | null
 }
 
 type TaskDropPosition = "before" | "child" | "after"
@@ -262,7 +268,13 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const [myDayUpdatingIds, setMyDayUpdatingIds] = React.useState<Set<DbId>>(
     () => new Set(),
   )
+  const [myDayCompletedTaskIds, setMyDayCompletedTaskIds] = React.useState<Set<DbId>>(
+    () => new Set(),
+  )
   const myDayStateRef = React.useRef<MyDayState | null>(null)
+  const myDayCompletionSnapshotRef = React.useRef<Map<DbId, MyDayTaskCompletionSnapshot>>(
+    new Map(),
+  )
   if (myDayStateRef.current !== myDayState) {
     myDayStateRef.current = myDayState
   }
@@ -1741,6 +1753,76 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const myDayTaskIdSet = React.useMemo((): Set<DbId> => {
     return new Set<DbId>((myDayState?.tasks ?? []).map((item: MyDayTaskEntry) => item.taskId))
   }, [myDayState])
+
+  React.useEffect(() => {
+    setMyDayCompletedTaskIds(new Set())
+    myDayCompletionSnapshotRef.current = new Map()
+  }, [myDayState?.dayKey])
+
+  React.useEffect(() => {
+    setMyDayCompletedTaskIds((prev: Set<DbId>) => {
+      if (prev.size === 0) {
+        return prev
+      }
+
+      let changed = false
+      const next = new Set<DbId>()
+      for (const taskId of prev) {
+        if (myDayTaskIdSet.has(taskId)) {
+          next.add(taskId)
+        } else {
+          changed = true
+        }
+      }
+
+      return changed ? next : prev
+    })
+  }, [myDayTaskIdSet])
+
+  React.useEffect(() => {
+    const nextSnapshot = new Map<DbId, MyDayTaskCompletionSnapshot>()
+    for (const item of allTaskItems) {
+      nextSnapshot.set(item.blockId, {
+        status: item.status,
+        repeatOccurrence: resolveRepeatOccurrence(item.repeatRule),
+      })
+    }
+
+    const previousSnapshot = myDayCompletionSnapshotRef.current
+    const completedTaskIds: DbId[] = []
+    for (const taskId of myDayTaskIdSet) {
+      const previous = previousSnapshot.get(taskId)
+      const current = nextSnapshot.get(taskId)
+      if (previous == null || current == null) {
+        continue
+      }
+
+      const statusMovedToDone = previous.status !== doneStatus && current.status === doneStatus
+      // 重复任务完成后会立即复发为待开始，这里通过 occurrence 递增识别“本次已完成”。
+      const recurringOccurrenceAdvanced =
+        previous.repeatOccurrence != null &&
+        current.repeatOccurrence != null &&
+        current.repeatOccurrence > previous.repeatOccurrence
+
+      if (statusMovedToDone || recurringOccurrenceAdvanced) {
+        completedTaskIds.push(taskId)
+      }
+    }
+
+    myDayCompletionSnapshotRef.current = nextSnapshot
+    if (completedTaskIds.length === 0) {
+      return
+    }
+
+    setMyDayCompletedTaskIds((prev: Set<DbId>) => {
+      const next = new Set(prev)
+      for (const taskId of completedTaskIds) {
+        next.add(taskId)
+      }
+      return next
+    })
+  }, [allTaskItems, doneStatus, myDayTaskIdSet])
+
   const filteredMyDayTaskItems = React.useMemo((): AllTaskItem[] => {
     if (myDayState == null) {
       return []
@@ -1777,6 +1859,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         blockId: taskItem.blockId,
         text: taskItem.text,
         status: taskItem.status,
+        completed: taskItem.status === doneStatus || myDayCompletedTaskIds.has(taskItem.blockId),
         labels: taskItem.labels,
         star: taskItem.star,
         scheduleStartMinute: entry.scheduleStartMinute,
@@ -1785,7 +1868,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     }
 
     return result
-  }, [allTaskItems, matchesItem, myDayState])
+  }, [allTaskItems, doneStatus, matchesItem, myDayCompletedTaskIds, myDayState])
   const isDashboardTab = tab === "dashboard"
   const isMyDayTab = tab === "my-day"
   const myDayDisplayMode: MyDayDisplayMode = myDayState?.displayMode === "schedule"
@@ -6438,6 +6521,25 @@ function isNeverReviewedCycleTask(item: AllTaskItem): boolean {
     item.reviewEvery.trim() !== "" &&
     item.lastReviewed == null &&
     item.nextReview == null
+}
+
+function resolveRepeatOccurrence(repeatRule: string): number | null {
+  if (repeatRule.trim() === "") {
+    return null
+  }
+
+  const parsed = parseRepeatRuleConfig(repeatRule)
+  if (parsed == null) {
+    return null
+  }
+
+  const occurrence = parsed.occurrence
+  if (!Number.isFinite(occurrence) || Number.isNaN(occurrence)) {
+    return null
+  }
+
+  const normalized = Math.floor(occurrence)
+  return normalized >= 1 ? normalized : null
 }
 
 function flattenVisibleTree(
