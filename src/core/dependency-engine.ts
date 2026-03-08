@@ -38,7 +38,7 @@ export interface NextActionItem {
   labels: string[]
   score: number
   star: boolean
-  parentTaskName: string | null
+  parentTaskNames: string[]
   taskTagRef: BlockRef | null
   blockProperties: BlockProperty[]
 }
@@ -191,7 +191,7 @@ export function evaluateNextAction(
   }
 
   const values = getTaskPropertiesFromRef(taskRef?.data, schema, liveTaskBlock)
-  const parentTaskName = resolveParentTaskName(taskId, taskMap, schema, subtaskContext)
+  const parentTaskNames = resolveParentTaskNames(taskId, taskMap, schema, subtaskContext)
 
   if (values.startTime != null && values.startTime.getTime() > now.getTime()) {
     blockedReason.push("not-started")
@@ -267,7 +267,7 @@ export function evaluateNextAction(
       labels: values.labels,
       score,
       star: values.star,
-      parentTaskName,
+      parentTaskNames,
       taskTagRef: taskRef,
       blockProperties: collectTaskBlockProperties(liveTaskBlock, block),
     },
@@ -822,27 +822,38 @@ function hasOpenSubtask(
   return hasOpenSubtaskByTaskId(getMirrorId(sourceBlock.id), schema, subtaskContext)
 }
 
-function resolveParentTaskName(
+function resolveParentTaskNames(
   taskId: DbId,
   taskMap: Map<DbId, Block>,
   schema: TaskSchemaDefinition,
   subtaskContext: SubtaskContext | null,
-): string | null {
+): string[] {
   if (subtaskContext == null) {
-    return null
+    return []
   }
 
-  const parentTaskId = subtaskContext.parentTaskIdByTaskId.get(taskId) ?? null
-  if (parentTaskId == null) {
-    return null
+  const parentTaskNames: string[] = []
+  const visited = new Set<DbId>()
+  let currentTaskId = subtaskContext.parentTaskIdByTaskId.get(taskId) ?? null
+
+  while (currentTaskId != null) {
+    if (visited.has(currentTaskId)) {
+      break
+    }
+    visited.add(currentTaskId)
+
+    const parentTask = taskMap.get(currentTaskId) ?? orca.state.blocks[currentTaskId]
+    if (parentTask != null) {
+      const parentTaskName = resolveTaskText(getLiveTaskBlock(parentTask), schema.tagAlias).trim()
+      if (parentTaskName !== "") {
+        parentTaskNames.push(parentTaskName)
+      }
+    }
+
+    currentTaskId = subtaskContext.parentTaskIdByTaskId.get(currentTaskId) ?? null
   }
 
-  const parentTask = taskMap.get(parentTaskId) ?? orca.state.blocks[parentTaskId]
-  if (parentTask == null) {
-    return null
-  }
-
-  return resolveTaskText(getLiveTaskBlock(parentTask), schema.tagAlias)
+  return parentTaskNames.reverse()
 }
 
 function hasOpenSubtaskByTaskId(
