@@ -1790,6 +1790,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
 
     const previousSnapshot = myDayCompletionSnapshotRef.current
     const completedTaskIds: DbId[] = []
+    const reopenedTaskIds: DbId[] = []
     for (const taskId of myDayTaskIdSet) {
       const previous = previousSnapshot.get(taskId)
       const current = nextSnapshot.get(taskId)
@@ -1803,19 +1804,28 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         previous.repeatOccurrence != null &&
         current.repeatOccurrence != null &&
         current.repeatOccurrence > previous.repeatOccurrence
+      const statusMovedOutOfDone =
+        previous.status === doneStatus &&
+        current.status !== doneStatus &&
+        !recurringOccurrenceAdvanced
 
       if (statusMovedToDone || recurringOccurrenceAdvanced) {
         completedTaskIds.push(taskId)
+      } else if (statusMovedOutOfDone) {
+        reopenedTaskIds.push(taskId)
       }
     }
 
     myDayCompletionSnapshotRef.current = nextSnapshot
-    if (completedTaskIds.length === 0) {
+    if (completedTaskIds.length === 0 && reopenedTaskIds.length === 0) {
       return
     }
 
     setMyDayCompletedTaskIds((prev: Set<DbId>) => {
       const next = new Set(prev)
+      for (const taskId of reopenedTaskIds) {
+        next.delete(taskId)
+      }
       for (const taskId of completedTaskIds) {
         next.add(taskId)
       }

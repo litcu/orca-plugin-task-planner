@@ -1377,8 +1377,22 @@ function TaskPropertyPopupView(props: {
       activationLoading || activationInfo == null
         ? "var(--orca-color-bg-2)"
         : activationInfo.isActive
-          ? "rgba(56, 161, 105, 0.12)"
-          : "rgba(183, 121, 31, 0.12)",
+        ? "rgba(56, 161, 105, 0.12)"
+        : "rgba(183, 121, 31, 0.12)",
+  }
+  const canNavigateToTask = isPanelSidebarMode && props.blockId != null && block != null
+  const titleActionButtonStyle = {
+    width: "26px",
+    height: "26px",
+    padding: 0,
+    border: "1px solid var(--orca-color-border-1)",
+    borderRadius: "7px",
+    background: "var(--orca-color-bg-2)",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
   }
   const overlayStyle = isPanelSidebarMode
     ? {
@@ -1459,6 +1473,13 @@ function TaskPropertyPopupView(props: {
     }
     props.onClose()
   }
+  const handleNavigateToTask = () => {
+    if (!canNavigateToTask || props.blockId == null) {
+      return
+    }
+
+    orca.nav.openInLastPanel("block", { blockId: props.blockId })
+  }
 
   React.useEffect(() => {
     if (!isPanelSidebarMode || props.visible) {
@@ -1480,8 +1501,8 @@ function TaskPropertyPopupView(props: {
           {
             style: {
               display: "flex",
-              alignItems: "center",
-              justifyContent: "flex-start",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
               gap: "8px",
               flexWrap: "wrap",
               marginBottom: "12px",
@@ -1517,32 +1538,55 @@ function TaskPropertyPopupView(props: {
             !isCreateMode
               ? React.createElement("span", { style: activationBadgeStyle }, activationBadgeText)
               : null,
-            React.createElement(
-              "button",
-              {
-                type: "button",
-                onClick: () => setStarValue((prev: boolean) => !prev),
-                title: starValue ? t("Starred") : t("Not starred"),
-                style: {
-                  width: "26px",
-                  height: "26px",
-                  padding: 0,
-                  border: "1px solid var(--orca-color-border-1)",
-                  borderRadius: "7px",
-                  background: "var(--orca-color-bg-2)",
-                  color: starValue
-                    ? "var(--orca-color-text-yellow, #d69e2e)"
-                    : "var(--orca-color-text-2)",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                },
-              },
-              React.createElement(StarIcon, { filled: starValue }),
-            ),
           ),
-        ),
+          !isCreateMode
+            ? React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    flexShrink: 0,
+                    marginLeft: "auto",
+                  },
+                },
+                canNavigateToTask
+                  ? React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: handleNavigateToTask,
+                        title: t("Jump to task location"),
+                        style: {
+                          ...titleActionButtonStyle,
+                          color: "var(--orca-color-text-2)",
+                        },
+                      },
+                      React.createElement("i", {
+                        className: "ti ti-arrow-up-right",
+                        style: { fontSize: "14px", lineHeight: 1 },
+                      }),
+                    )
+                  : null,
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setStarValue((prev: boolean) => !prev),
+                    title: starValue ? t("Starred") : t("Not starred"),
+                    style: {
+                      ...titleActionButtonStyle,
+                      color: starValue
+                        ? "var(--orca-color-text-yellow, #d69e2e)"
+                        : "var(--orca-color-text-2)",
+                    },
+                  },
+                  React.createElement(StarIcon, { filled: starValue }),
+                ),
+              )
+            : null,
+          ),
         renderSection(
           renderFormRow(
             t("Task name"),

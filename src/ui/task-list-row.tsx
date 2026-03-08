@@ -29,7 +29,7 @@ export interface TaskListRowItem {
   labels: string[]
   star: boolean
   blockProperties?: BlockProperty[]
-  parentTaskName?: string | null
+  parentTaskNames?: string[]
   taskTagRef?: BlockRef | null
 }
 
@@ -100,8 +100,12 @@ export function TaskListRow(props: TaskListRowProps) {
     props.item.nextReview != null || props.item.reviewEvery.trim() !== ""
   const canShowReviewAction = props.showReviewAction && hasReviewConfiguration
   const taskLabels = Array.isArray(props.item.labels) ? props.item.labels : []
-  const parentTaskName = props.item.parentTaskName ?? ""
-  const hasParentContext = props.showParentTaskContext && props.item.parentTaskName != null
+  const parentTaskNames = Array.isArray(props.item.parentTaskNames)
+    ? props.item.parentTaskNames.filter((name) => typeof name === "string" && name.trim() !== "")
+    : []
+  const hasParentContext = props.showParentTaskContext && parentTaskNames.length > 0
+  const visibleParentTaskNames = hasParentContext ? parentTaskNames.slice(-3) : []
+  const parentTaskChainLabel = parentTaskNames.join(" > ")
   const visibleLabels = taskLabels.slice(0, hasParentContext ? 2 : 3)
   const hiddenLabelCount = Math.max(0, taskLabels.length - visibleLabels.length)
   const timerData = readTaskTimerFromProperties(props.item.blockProperties)
@@ -476,24 +480,24 @@ export function TaskListRow(props: TaskListRowProps) {
             "div",
             {
               style: {
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
-                width: "100%",
                 minWidth: 0,
+                maxWidth: "100%",
               },
             },
             React.createElement(
               "span",
               {
                 key: `${props.item.blockId}-parent`,
-                title: t("Parent: ${name}", { name: parentTaskName }),
+                title: t("Parent: ${name}", { name: parentTaskChainLabel }),
                 style: {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "3px",
                   minWidth: 0,
                   maxWidth: "100%",
-                  flex: "1 1 auto",
+                  flex: "0 1 auto",
                   padding: "0 6px",
                   height: "16px",
                   borderRadius: "999px",
@@ -520,12 +524,51 @@ export function TaskListRow(props: TaskListRowProps) {
                 "span",
                 {
                   style: {
+                    display: "inline-flex",
+                    alignItems: "center",
+                    minWidth: 0,
+                    maxWidth: "100%",
+                    flex: "0 1 auto",
                     overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
                   },
                 },
-                parentTaskName,
+                ...visibleParentTaskNames.flatMap((name, index) => {
+                  const nodes: React.ReactNode[] = []
+                  if (index > 0) {
+                    nodes.push(
+                      React.createElement(
+                        "span",
+                        {
+                          key: `${props.item.blockId}-parent-separator-${index}`,
+                          style: {
+                            flexShrink: 0,
+                            opacity: 0.65,
+                            padding: "0 2px",
+                          },
+                        },
+                        ">",
+                      ),
+                    )
+                  }
+
+                  nodes.push(
+                    React.createElement(
+                      "span",
+                      {
+                        key: `${props.item.blockId}-parent-name-${index}`,
+                        style: {
+                          minWidth: 0,
+                          flex: "0 1 auto",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        },
+                      },
+                      name,
+                    ),
+                  )
+                  return nodes
+                }),
               ),
             ),
           )

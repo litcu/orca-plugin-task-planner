@@ -19,6 +19,14 @@ function Write-Step {
   Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+function Invoke-MarketplaceValidation {
+  Write-Step "Validating marketplace metadata"
+  node scripts/validate-marketplace-package.mjs
+  if ($LASTEXITCODE -ne 0) {
+    throw "Marketplace metadata validation failed."
+  }
+}
+
 function New-LocalReleaseZip {
   param([string]$Version)
 
@@ -51,6 +59,10 @@ function New-LocalReleaseZip {
     Write-Host "Warning: icon.png not found at repository root. Packaging without icon." -ForegroundColor Yellow
   }
 
+  if (Test-Path (Join-Path $pluginRoot "package-lock.json")) {
+    throw "package-lock.json must not be included in the release archive root."
+  }
+
   Compress-Archive -Path $pluginRoot -DestinationPath $archivePath -Force
   return $archivePath
 }
@@ -75,6 +87,8 @@ if (-not $DryRun) {
 } else {
   Write-Step "Running dry-run mode"
 }
+
+Invoke-MarketplaceValidation
 
 if (-not $SkipBuild) {
   Write-Step "Building plugin"

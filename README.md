@@ -234,6 +234,15 @@ Build output: `dist/index.js`.
    `...\plugins\orca-task-planner\dist\index.js`
 4. Start/restart Orca Note and enable `orca-task-planner`.
 
+### Marketplace submission readiness
+
+This repository is updated to match the latest `awesome-orcanote` contribution requirements:
+
+- `package.json` includes the required metadata fields: `name`, `description`, `version`, `keywords`, `license`, `author`
+- `author` is set to the GitHub username `litcu`
+- the release package explicitly excludes `package-lock.json`
+- run `npm run check:marketplace` to validate metadata and print the suggested `plugins/task-planner.json` content for your `awesome-orcanote` PR
+
 
 ## Quick Start
 

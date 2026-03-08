@@ -221,6 +221,24 @@ npm run build
 
 构建产物：`dist/index.js`。
 
+### 从 GitHub Release 安装
+
+1. 从 GitHub `Releases` 资产下载 `orca-task-planner-vX.Y.Z.zip`。
+2. 解压到 Orca 插件目录：  
+   `C:\Users\<你的用户名>\Documents\orca\plugins\`
+3. 确认最终目录结构为：  
+   `...\plugins\orca-task-planner\dist\index.js`
+4. 启动/重启 Orca Note，并启用 `orca-task-planner`。
+
+### 插件市场提交准备
+
+本仓库已按 `awesome-orcanote` 最新贡献要求完成对齐：
+
+- `package.json` 已补齐必填元数据：`name`、`description`、`version`、`keywords`、`license`、`author`
+- `author` 已使用 GitHub 用户名 `litcu`
+- 发布包根目录显式排除 `package-lock.json`
+- 执行 `npm run check:marketplace` 可校验元数据，并输出后续提交 `awesome-orcanote` PR 时建议使用的 `plugins/task-planner.json` 内容
+
 ## 快速上手
 
 1. 打开命令面板，执行 `Open task management panel`（进入统一工作台）。
