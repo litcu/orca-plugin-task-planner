@@ -236,8 +236,9 @@ npm run build
 
 - `package.json` 已补齐必填元数据：`name`、`description`、`version`、`keywords`、`license`、`author`
 - `author` 已使用 GitHub 用户名 `litcu`
-- 发布包根目录显式排除 `package-lock.json`
-- 执行 `npm run check:marketplace` 可校验元数据，并输出后续提交 `awesome-orcanote` PR 时建议使用的 `plugins/task-planner.json` 内容
+- 发布包根目录已显式包含 `LICENSE`，并排除 `package-lock.json`
+- 插件市场图标已对齐 `80x80` 尺寸要求
+- 执行 `npm run check:marketplace` 可校验元数据，并输出后续提交 `awesome-orcanote` PR 时可直接粘贴到 `plugins.json` 的条目内容
 
 ## 快速上手
 

@@ -64,20 +64,29 @@ jobs:
           mkdir -p "release/${PLUGIN_DIR}/dist"
           cp "dist/index.js" "release/${PLUGIN_DIR}/dist/index.js"
           cp "package.json" "release/${PLUGIN_DIR}/package.json"
+          cp "LICENSE" "release/${PLUGIN_DIR}/LICENSE"
           cp "README.md" "release/${PLUGIN_DIR}/README.md"
 
           if [ -f "README_zh.md" ]; then
             cp "README_zh.md" "release/${PLUGIN_DIR}/README_zh.md"
           fi
 
-          if [ -f "icon.png" ]; then
+          if [ -f "icon.svg" ]; then
+            cp "icon.svg" "release/${PLUGIN_DIR}/icon.svg"
+          elif [ -f "icon.png" ]; then
             cp "icon.png" "release/${PLUGIN_DIR}/icon.png"
           else
-            echo "Warning: icon.png not found at repository root. Packaging without icon."
+            echo "icon.png or icon.svg not found at repository root."
+            exit 1
           fi
 
           if [ -f "release/${PLUGIN_DIR}/package-lock.json" ]; then
             echo "package-lock.json must not be included in release archive root."
+            exit 1
+          fi
+
+          if [ ! -f "release/${PLUGIN_DIR}/LICENSE" ]; then
+            echo "LICENSE must be included in release archive root."
             exit 1
           fi
 

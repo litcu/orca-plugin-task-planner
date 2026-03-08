@@ -47,20 +47,27 @@ function New-LocalReleaseZip {
   New-Item -ItemType Directory -Path (Join-Path $pluginRoot "dist") -Force | Out-Null
   Copy-Item -Path "dist/index.js" -Destination (Join-Path $pluginRoot "dist/index.js")
   Copy-Item -Path "package.json" -Destination (Join-Path $pluginRoot "package.json")
+  Copy-Item -Path "LICENSE" -Destination (Join-Path $pluginRoot "LICENSE")
   Copy-Item -Path "README.md" -Destination (Join-Path $pluginRoot "README.md")
 
   if (Test-Path "README_zh.md") {
     Copy-Item -Path "README_zh.md" -Destination (Join-Path $pluginRoot "README_zh.md")
   }
 
-  if (Test-Path "icon.png") {
+  if (Test-Path "icon.svg") {
+    Copy-Item -Path "icon.svg" -Destination (Join-Path $pluginRoot "icon.svg")
+  } elseif (Test-Path "icon.png") {
     Copy-Item -Path "icon.png" -Destination (Join-Path $pluginRoot "icon.png")
   } else {
-    Write-Host "Warning: icon.png not found at repository root. Packaging without icon." -ForegroundColor Yellow
+    throw "icon.png or icon.svg not found at repository root."
   }
 
   if (Test-Path (Join-Path $pluginRoot "package-lock.json")) {
     throw "package-lock.json must not be included in the release archive root."
+  }
+
+  if (-not (Test-Path (Join-Path $pluginRoot "LICENSE"))) {
+    throw "LICENSE must be included in the release archive root."
   }
 
   Compress-Archive -Path $pluginRoot -DestinationPath $archivePath -Force

@@ -240,8 +240,9 @@ This repository is updated to match the latest `awesome-orcanote` contribution r
 
 - `package.json` includes the required metadata fields: `name`, `description`, `version`, `keywords`, `license`, `author`
 - `author` is set to the GitHub username `litcu`
-- the release package explicitly excludes `package-lock.json`
-- run `npm run check:marketplace` to validate metadata and print the suggested `plugins/task-planner.json` content for your `awesome-orcanote` PR
+- the release package explicitly includes `LICENSE` and excludes `package-lock.json`
+- the marketplace icon now follows the `80x80` size limit
+- run `npm run check:marketplace` to validate metadata and print a ready-to-paste `plugins.json` entry for your `awesome-orcanote` PR
 
 
 ## Quick Start
