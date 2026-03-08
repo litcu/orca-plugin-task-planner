@@ -80,6 +80,12 @@ interface TimelineLaneLayout {
 
 const TIMELINE_LANE_GAP_PX = 8
 
+interface OverflowTitleBinding<T extends HTMLElement> {
+  ref: { current: T | null }
+  overflowed: boolean
+  refresh: () => void
+}
+
 export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   const React = window.React
   const boardRef = React.useRef<HTMLDivElement | null>(null)
@@ -988,6 +994,179 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   )
 }
 
+function useOverflowTitle<T extends HTMLElement>(text: string): OverflowTitleBinding<T> {
+  const React = window.React
+  const titleRef = React.useRef<T | null>(null)
+  const [overflowed, setOverflowed] = React.useState(false)
+
+  const refresh = React.useCallback(() => {
+    const element = titleRef.current
+    const nextOverflowed = element != null && isElementTextOverflowing(element)
+    setOverflowed((prev: boolean) => {
+      return prev === nextOverflowed ? prev : nextOverflowed
+    })
+  }, [text])
+
+  React.useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  React.useEffect(() => {
+    const element = titleRef.current
+    if (element == null) {
+      return
+    }
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", refresh)
+      return () => {
+        window.removeEventListener("resize", refresh)
+      }
+    }
+
+    const observer = new ResizeObserver(() => {
+      refresh()
+    })
+    observer.observe(element)
+    const parentElement = element.parentElement
+    if (parentElement != null) {
+      observer.observe(parentElement)
+    }
+    return () => {
+      observer.disconnect()
+    }
+  }, [refresh])
+
+  return {
+    ref: titleRef,
+    overflowed,
+    refresh,
+  }
+}
+
+function isElementTextOverflowing(element: HTMLElement): boolean {
+  if (element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1) {
+    return true
+  }
+
+  const actualWidth = element.getBoundingClientRect().width
+  if (!Number.isFinite(actualWidth) || actualWidth <= 0) {
+    return false
+  }
+
+  const naturalWidth = measureNaturalElementWidth(element)
+  return naturalWidth > actualWidth + 0.5
+}
+
+function measureNaturalElementWidth(element: HTMLElement): number {
+  const clone = element.cloneNode(true) as HTMLElement
+  clone.style.position = "fixed"
+  clone.style.left = "-9999px"
+  clone.style.top = "-9999px"
+  clone.style.visibility = "hidden"
+  clone.style.pointerEvents = "none"
+  clone.style.width = "auto"
+  clone.style.maxWidth = "none"
+  clone.style.minWidth = "0"
+  clone.style.overflow = "visible"
+  clone.style.textOverflow = "clip"
+  clone.style.whiteSpace = "nowrap"
+  clone.style.flex = "none"
+
+  document.body.appendChild(clone)
+  const naturalWidth = clone.getBoundingClientRect().width
+  clone.remove()
+  return naturalWidth
+}
+
+function renderOverflowTooltip(
+  text: string,
+  binding: OverflowTitleBinding<HTMLElement>,
+  child: React.ReactElement,
+) {
+  const React = window.React
+  const Tooltip = orca.components.Tooltip
+
+  if (!binding.overflowed) {
+    return child
+  }
+
+  return React.createElement(
+    Tooltip,
+    {
+      text,
+      defaultPlacement: "top",
+      alignment: "left",
+      delay: 180,
+      allowBeyondContainer: true,
+    },
+    child,
+  )
+}
+
+interface OverflowTooltipLabelProps {
+  text: string
+  className: string
+}
+
+function OverflowTooltipLabel(props: OverflowTooltipLabelProps) {
+  const React = window.React
+  const binding = useOverflowTitle<HTMLSpanElement>(props.text)
+
+  return renderOverflowTooltip(
+    props.text,
+    binding as OverflowTitleBinding<HTMLElement>,
+    React.createElement(
+      "span",
+      {
+        ref: binding.ref,
+        className: props.className,
+        onMouseEnter: binding.refresh,
+      },
+      props.text,
+    ),
+  )
+}
+
+function renderHiddenLabelsTooltip(hiddenLabels: string[], child: React.ReactElement) {
+  const React = window.React
+  const Tooltip = orca.components.Tooltip
+
+  if (hiddenLabels.length === 0) {
+    return child
+  }
+
+  return React.createElement(
+    Tooltip,
+    {
+      text: React.createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+            maxWidth: "240px",
+          },
+        },
+        ...hiddenLabels.map((label: string, index: number) =>
+          React.createElement(
+            "span",
+            {
+              key: `${index}-${label}`,
+            },
+            label,
+          )),
+      ),
+      defaultPlacement: "top",
+      alignment: "left",
+      delay: 180,
+      allowBeyondContainer: true,
+    },
+    child,
+  )
+}
+
 interface MyDayScheduleCardProps {
   item: MyDayScheduleTaskItem
   rowIndex: number
@@ -1011,8 +1190,10 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
   const [contextMenuVisible, setContextMenuVisible] = React.useState(false)
   const [contextMenuRect, setContextMenuRect] = React.useState<DOMRect | null>(null)
   const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
+  const titleBinding = useOverflowTitle<HTMLButtonElement>(props.item.text)
   const visibleLabels = props.item.labels.slice(0, 2)
-  const hiddenLabelCount = Math.max(0, props.item.labels.length - visibleLabels.length)
+  const hiddenLabels = props.item.labels.slice(visibleLabels.length)
+  const hiddenLabelCount = hiddenLabels.length
   const isCompleted = props.item.completed || props.item.status === props.doneStatus
   if (contextMenuContainerRef.current == null) {
     contextMenuContainerRef.current = document.body
@@ -1054,32 +1235,41 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
         {
           className: "mlo-my-day-card-title-row",
         },
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            className: "mlo-my-day-card-title",
-            onClick: () => props.onOpenTask(props.item.blockId),
-          },
+        renderOverflowTooltip(
           props.item.text,
+          titleBinding as OverflowTitleBinding<HTMLElement>,
+          React.createElement(
+            "button",
+            {
+              ref: titleBinding.ref,
+              type: "button",
+              className: "mlo-my-day-card-title",
+              onClick: () => props.onOpenTask(props.item.blockId),
+              onMouseEnter: titleBinding.refresh,
+              onFocus: titleBinding.refresh,
+            },
+            props.item.text,
+          ),
         ),
         ...visibleLabels.map((label: string) =>
           React.createElement(
-            "span",
+            OverflowTooltipLabel,
             {
               key: `${props.item.blockId}-${label}`,
               className: "mlo-my-day-card-label",
+              text: label,
             },
-            label,
           )),
         hiddenLabelCount > 0
-          ? React.createElement(
-              "span",
-              {
-                className: "mlo-my-day-inline-more-labels",
-                title: `+${hiddenLabelCount}`,
-              },
-              `+${hiddenLabelCount}`,
+          ? renderHiddenLabelsTooltip(
+              hiddenLabels,
+              React.createElement(
+                "span",
+                {
+                  className: "mlo-my-day-inline-more-labels",
+                },
+                `+${hiddenLabelCount}`,
+              ),
             )
           : null,
       ),
@@ -1156,8 +1346,10 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
   const [contextMenuVisible, setContextMenuVisible] = React.useState(false)
   const [contextMenuRect, setContextMenuRect] = React.useState<DOMRect | null>(null)
   const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
+  const titleBinding = useOverflowTitle<HTMLButtonElement>(props.item.text)
   const visibleLabels = props.item.labels.slice(0, 2)
-  const hiddenLabelCount = Math.max(0, props.item.labels.length - visibleLabels.length)
+  const hiddenLabels = props.item.labels.slice(visibleLabels.length)
+  const hiddenLabelCount = hiddenLabels.length
   const isCompleted = props.item.completed || props.item.status === props.doneStatus
   if (contextMenuContainerRef.current == null) {
     contextMenuContainerRef.current = document.body
@@ -1217,37 +1409,46 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
         {
           className: "mlo-my-day-timeline-card-head",
         },
-        React.createElement(
-          "div",
-          {
-            className: "mlo-my-day-timeline-title-wrap",
-          },
-          React.createElement(
-            "button",
-            {
-              type: "button",
-              className: "mlo-my-day-timeline-title",
-              onClick: () => props.onOpenTask(props.item.blockId),
-            },
+      React.createElement(
+        "div",
+        {
+          className: "mlo-my-day-timeline-title-wrap",
+        },
+          renderOverflowTooltip(
             props.item.text,
+            titleBinding as OverflowTitleBinding<HTMLElement>,
+            React.createElement(
+              "button",
+              {
+                ref: titleBinding.ref,
+                type: "button",
+                className: "mlo-my-day-timeline-title",
+                onClick: () => props.onOpenTask(props.item.blockId),
+                onMouseEnter: titleBinding.refresh,
+                onFocus: titleBinding.refresh,
+              },
+              props.item.text,
+            ),
           ),
           ...visibleLabels.map((label: string) =>
             React.createElement(
-              "span",
+              OverflowTooltipLabel,
               {
                 key: `${props.item.blockId}-${label}`,
                 className: "mlo-my-day-timeline-chip",
+                text: label,
               },
-              label,
             )),
           hiddenLabelCount > 0
-            ? React.createElement(
-                "span",
-                {
-                  className: "mlo-my-day-inline-more-labels",
-                  title: `+${hiddenLabelCount}`,
-                },
-                `+${hiddenLabelCount}`,
+            ? renderHiddenLabelsTooltip(
+                hiddenLabels,
+                React.createElement(
+                  "span",
+                  {
+                    className: "mlo-my-day-inline-more-labels",
+                  },
+                  `+${hiddenLabelCount}`,
+                ),
               )
             : null,
           props.item.star
@@ -2627,6 +2828,8 @@ function ensureMyDayScheduleStyles() {
 
 .mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-unscheduled-panel {
   grid-row: 2;
+  min-height: 190px;
+  max-height: min(34vh, 320px);
 }
 
 .mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-timeline-scroll {
