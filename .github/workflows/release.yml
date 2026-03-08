@@ -34,6 +34,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate marketplace metadata
+        run: npm run check:marketplace
+
       - name: Build plugin
         run: npm run build
 
@@ -71,6 +74,11 @@ jobs:
             cp "icon.png" "release/${PLUGIN_DIR}/icon.png"
           else
             echo "Warning: icon.png not found at repository root. Packaging without icon."
+          fi
+
+          if [ -f "release/${PLUGIN_DIR}/package-lock.json" ]; then
+            echo "package-lock.json must not be included in release archive root."
+            exit 1
           fi
 
           cd "release"

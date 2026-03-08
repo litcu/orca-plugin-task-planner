@@ -1,10 +1,29 @@
 {
   "name": "orca-plugin-task-planner",
+  "description": "All-in-one task planning and execution plugin for Orca Note.",
   "version": "0.6.0",
   "private": true,
+  "author": "litcu",
   "license": "Apache-2.0",
+  "keywords": [
+    "orca-note",
+    "orca-plugin",
+    "task-management",
+    "planner",
+    "gtd",
+    "productivity"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/litcu/orca-plugin-task-planner.git"
+  },
+  "homepage": "https://github.com/litcu/orca-plugin-task-planner",
+  "bugs": {
+    "url": "https://github.com/litcu/orca-plugin-task-planner/issues"
+  },
   "type": "module",
   "scripts": {
+    "check:marketplace": "node ./scripts/validate-marketplace-package.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
