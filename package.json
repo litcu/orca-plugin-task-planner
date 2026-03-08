@@ -1,7 +1,7 @@
 {
   "name": "orca-plugin-task-planner",
   "description": "All-in-one task planning and execution plugin for Orca Note.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "author": "litcu",
   "license": "Apache-2.0",
