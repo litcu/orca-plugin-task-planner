@@ -14,6 +14,7 @@ const MIN_TIMELINE_CARD_HEIGHT_PX = 18
 const TIMELINE_AUTO_SCROLL_EDGE_PX = 52
 const TIMELINE_AUTO_SCROLL_MAX_STEP_PX = 22
 const DRAG_DATA_TYPE = "application/x-mlo-my-day-task"
+const COMPACT_LAYOUT_BREAKPOINT_PX = 980
 
 export interface MyDayScheduleTaskItem {
   blockId: DbId
@@ -81,9 +82,11 @@ const TIMELINE_LANE_GAP_PX = 8
 
 export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   const React = window.React
+  const boardRef = React.useRef<HTMLDivElement | null>(null)
   const timelineRef = React.useRef<HTMLDivElement | null>(null)
   const timelineScrollRef = React.useRef<HTMLDivElement | null>(null)
   const unscheduledPanelRef = React.useRef<HTMLDivElement | null>(null)
+  const [compactLayout, setCompactLayout] = React.useState(false)
   const [draggingTaskId, setDraggingTaskId] = React.useState<DbId | null>(null)
   const [dropMinute, setDropMinute] = React.useState<number | null>(null)
   const [timelinePointerDragState, setTimelinePointerDragState] =
@@ -136,6 +139,37 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
 
   React.useEffect(() => {
     ensureMyDayScheduleStyles()
+  }, [])
+
+  React.useEffect(() => {
+    const boardElement = boardRef.current
+    if (boardElement == null) {
+      return
+    }
+
+    const updateCompactLayout = () => {
+      const nextCompact = boardElement.getBoundingClientRect().width <= COMPACT_LAYOUT_BREAKPOINT_PX
+      setCompactLayout((prev: boolean) => {
+        return prev === nextCompact ? prev : nextCompact
+      })
+    }
+
+    updateCompactLayout()
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateCompactLayout)
+      return () => {
+        window.removeEventListener("resize", updateCompactLayout)
+      }
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateCompactLayout()
+    })
+    observer.observe(boardElement)
+    return () => {
+      observer.disconnect()
+    }
   }, [])
 
   const scheduledItems = React.useMemo((): MyDayScheduleTaskItem[] => {
@@ -725,7 +759,8 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   return React.createElement(
     "div",
     {
-      className: "mlo-my-day-board",
+      ref: boardRef,
+      className: compactLayout ? "mlo-my-day-board mlo-my-day-board-compact" : "mlo-my-day-board",
     },
     React.createElement(
       "div",
@@ -2573,6 +2608,53 @@ function ensureMyDayScheduleStyles() {
   font-weight: 600;
   letter-spacing: 0.02em;
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact {
+  overflow: auto;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-board-layout {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(340px, 1fr) minmax(190px, auto);
+  align-content: start;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-timeline-panel {
+  min-height: 360px;
+  grid-row: 1;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-unscheduled-panel {
+  grid-row: 2;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-timeline-scroll {
+  min-height: 320px;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-timeline {
+  min-height: 320px;
+  padding-left: 58px;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-timeline::before {
+  left: 49px;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-slot-label {
+  left: 6px;
+  width: 40px;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-timeline-card {
+  --mlo-timeline-track-left: 62px;
+  --mlo-timeline-track-right: 8px;
+  --mlo-timeline-lane-gap: 6px;
+}
+
+.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-drop-line {
+  left: 50px;
 }
 
 @media (max-width: 980px) {
