@@ -92,7 +92,7 @@ export function TaskListRow(props: TaskListRowProps) {
   const statusColor = resolveStatusColor(props.item.status, props.schema)
   const statusVisualState = resolveStatusVisualState(props.item.status, props.schema)
   const isCompleted = isTaskDoneStatus(props.item.status, props.schema)
-  const dueInfo = resolveDueInfo(props.item.endTime, props.isChinese)
+  const dueInfo = resolveDueInfo(props.item.endTime, isCompleted, props.isChinese)
   const dueBadgeStyle = resolveDueBadgeStyle(dueInfo.tone)
   const reviewInfo = resolveReviewInfo(props.item.nextReview, props.isChinese)
   const reviewBadgeStyle = resolveReviewBadgeStyle(reviewInfo.tone)
@@ -1176,6 +1176,7 @@ function resolveReviewBadgeStyle(tone: ReviewInfoTone): {
 
 function resolveDueInfo(
   endTime: Date | null,
+  isCompleted: boolean,
   isChinese: boolean,
 ): { text: string; color: string; strong: boolean; tone: DueInfoTone } {
   if (endTime == null || Number.isNaN(endTime.getTime())) {
@@ -1190,6 +1191,15 @@ function resolveDueInfo(
   const now = new Date()
   const nowTime = now.getTime()
   const dueTime = endTime.getTime()
+
+  if (isCompleted) {
+    return {
+      text: endTime.toLocaleDateString(isChinese ? "zh-CN" : undefined),
+      color: "var(--orca-color-text-2)",
+      strong: false,
+      tone: "normal",
+    }
+  }
 
   if (dueTime < nowTime) {
     const diffMs = nowTime - dueTime

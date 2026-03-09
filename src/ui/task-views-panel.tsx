@@ -1715,6 +1715,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
     const nowMs = Date.now()
     const endMs = nowMs + panelSettings.dueSoonDays * DAY_MS
     return allTaskItems
+      .filter((item: AllTaskItem) => item.status !== doneStatus)
       .filter((item: AllTaskItem) =>
         isDueSoon(
           item.endTime,
@@ -1724,7 +1725,13 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
         ))
       .filter(matchesItem)
       .sort(compareDueSoonItems)
-  }, [allTaskItems, matchesItem, panelSettings.dueSoonDays, panelSettings.dueSoonIncludeOverdue])
+  }, [
+    allTaskItems,
+    doneStatus,
+    matchesItem,
+    panelSettings.dueSoonDays,
+    panelSettings.dueSoonIncludeOverdue,
+  ])
   const filteredReviewDueTaskItems = React.useMemo(() => {
     const nowMs = Date.now()
     return allTaskItems
