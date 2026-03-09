@@ -46,7 +46,7 @@ export async function ensurePluginSettingsSchema(
   const schema: PluginSettingsSchema = {
     [TASK_TAG_NAME_SETTING]: {
       label: t("Task tag name"),
-      description: t("Name of the tag used to identify tasks. Changes apply after clicking Save."),
+      description: t("Name of the tag used to identify tasks. Changes apply immediately."),
       type: "string",
       defaultValue: TASK_TAG_ALIAS,
     },

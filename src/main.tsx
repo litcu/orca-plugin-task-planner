@@ -89,7 +89,7 @@ function subscribeSettingsChanges() {
         const settings = getPluginSettings(pluginName)
         await syncSettingsSchemaVisibility(settings)
 
-        if (settings.taskTagName === appliedTaskTagName) {
+        if (areTaskTagNamesEquivalent(settings.taskTagName, appliedTaskTagName)) {
           return
         }
 
@@ -126,7 +126,12 @@ function resolveSettingsVisibilityKey(settings: TaskPlannerSettings): string {
 
 async function applyTaskTagNameChange(nextTaskTagName: string): Promise<void> {
   const previousTaskTagName = appliedTaskTagName
-  if (nextTaskTagName !== previousTaskTagName) {
+  if (areTaskTagNamesEquivalent(nextTaskTagName, previousTaskTagName)) {
+    return
+  }
+
+  const nextTaskTag = await getTaskTagByAlias(nextTaskTagName)
+  if (nextTaskTag == null) {
     await renameTaskTagAlias(previousTaskTagName, nextTaskTagName)
   }
 
@@ -139,22 +144,16 @@ async function renameTaskTagAlias(
   oldTaskTagName: string,
   newTaskTagName: string,
 ): Promise<void> {
-  if (oldTaskTagName === newTaskTagName) {
+  if (areTaskTagNamesEquivalent(oldTaskTagName, newTaskTagName)) {
     return
   }
 
-  const oldTaskTag = (await orca.invokeBackend(
-    "get-block-by-alias",
-    oldTaskTagName,
-  )) as Block | null
+  const oldTaskTag = await getTaskTagByAlias(oldTaskTagName)
   if (oldTaskTag == null) {
     return
   }
 
-  const newTaskTag = (await orca.invokeBackend(
-    "get-block-by-alias",
-    newTaskTagName,
-  )) as Block | null
+  const newTaskTag = await getTaskTagByAlias(newTaskTagName)
 
   if (newTaskTag != null && newTaskTag.id !== oldTaskTag.id) {
     throw new Error(
@@ -168,6 +167,21 @@ async function renameTaskTagAlias(
     oldTaskTagName,
     newTaskTagName,
   )
+}
+
+async function getTaskTagByAlias(taskTagName: string): Promise<Block | null> {
+  return (await orca.invokeBackend(
+    "get-block-by-alias",
+    taskTagName,
+  )) as Block | null
+}
+
+function areTaskTagNamesEquivalent(left: string, right: string): boolean {
+  return toTaskTagNameKey(left) === toTaskTagNameKey(right)
+}
+
+function toTaskTagNameKey(value: string): string {
+  return value.trim().replace(/^#+/, "").toLowerCase()
 }
 
 async function setupRuntimeWithSchema(schema: TaskSchemaDefinition): Promise<void> {

@@ -1,7 +1,7 @@
 ﻿const zhCN = {
   "Task schema initialized": "任务 schema 已初始化（语言=${locale}，默认依赖模式=${mode}）",
   "Task tag name": "任务标签名称",
-  "Name of the tag used to identify tasks. Changes apply after clicking Save.": "用于标识任务的标签名称。修改后点击保存才会生效。",
+  "Name of the tag used to identify tasks. Changes apply immediately.": "用于标识任务的标签名称。修改后会立即生效。",
   "Enable My Day": "启用“我的一天”",
   "Enable My Day view in task panel.": "在任务面板中启用“我的一天”视图。",
   "My Day start hour": "“我的一天”开始时间（小时）",
