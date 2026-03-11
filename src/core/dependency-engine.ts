@@ -193,7 +193,7 @@ export function evaluateNextAction(
   const values = getTaskPropertiesFromRef(taskRef?.data, schema, liveTaskBlock)
   const parentTaskNames = resolveParentTaskNames(taskId, taskMap, schema, subtaskContext)
 
-  if (values.startTime != null && values.startTime.getTime() > now.getTime()) {
+  if (isTaskStartDateInFuture(values.startTime, now)) {
     blockedReason.push("not-started")
   }
 
@@ -274,6 +274,21 @@ export function evaluateNextAction(
     isNextAction: forceActiveByReview || blockedReason.length === 0,
     blockedReason,
   }
+}
+
+function isTaskStartDateInFuture(startTime: Date | null, now: Date): boolean {
+  if (startTime == null) {
+    return false
+  }
+
+  const startMs = startTime.getTime()
+  if (Number.isNaN(startMs)) {
+    return false
+  }
+
+  const startDate = new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate())
+  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  return startDate.getTime() > todayDate.getTime()
 }
 
 async function queryTaskBlocks(tagAlias: string): Promise<Block[]> {
