@@ -84,6 +84,7 @@
   "Add": "添加",
   "Status / Star": "状态 / 收藏",
   "Activation": "激活状态",
+  "Completed": "已完成",
   "Active now": "当前可执行",
   "Blocked now": "当前被阻塞",
   "Blocked now - ${reason}": "阻塞中-${reason}",

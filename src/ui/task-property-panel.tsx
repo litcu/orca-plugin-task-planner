@@ -1348,11 +1348,14 @@ function TaskPropertyPopupView(props: {
     )
   }
 
+  const activationCompleted = activationInfo?.blockedReason.includes("completed") === true
   const activationBadgeText = activationLoading
     ? t("Checking activation...")
     : activationInfo == null
       ? t("Activation unknown")
-      : activationInfo.isActive
+      : activationCompleted
+        ? t("Completed")
+        : activationInfo.isActive
         ? t("Active now")
         : t("Blocked now - ${reason}", {
           reason: resolveBlockedReasonTag(activationInfo.blockedReason),
@@ -1370,13 +1373,13 @@ function TaskPropertyPopupView(props: {
     color:
       activationLoading || activationInfo == null
         ? "var(--orca-color-text-2)"
-        : activationInfo.isActive
+        : activationCompleted || activationInfo.isActive
           ? "var(--orca-color-text-green)"
           : "var(--orca-color-text-yellow)",
     background:
       activationLoading || activationInfo == null
         ? "var(--orca-color-bg-2)"
-        : activationInfo.isActive
+        : activationCompleted || activationInfo.isActive
         ? "rgba(56, 161, 105, 0.12)"
         : "rgba(183, 121, 31, 0.12)",
   }
