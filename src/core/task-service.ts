@@ -397,8 +397,12 @@ function createStatusIconClickListener(
       return
     }
 
-    const block = orca.state.blocks[blockId]
-    if (block == null || findTaskTagRef(block, schema.tagAlias) == null) {
+    const rawBlock = orca.state.blocks[blockId] ?? null
+    const liveBlock = orca.state.blocks[getMirrorId(blockId)] ?? rawBlock
+    const taskRef =
+      (liveBlock != null ? findTaskTagRef(liveBlock, schema.tagAlias) : null) ??
+      (rawBlock != null ? findTaskTagRef(rawBlock, schema.tagAlias) : null)
+    if (taskRef == null) {
       return
     }
 
