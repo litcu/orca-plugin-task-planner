@@ -80,6 +80,7 @@ import { TASK_META_PROPERTY_NAME } from "../core/task-meta"
 import { parseReviewRule, type ReviewUnit } from "../core/task-review"
 import { parseRepeatRuleConfig } from "../core/task-repeat"
 import {
+  clearTaskTimer,
   readTaskTimerFromProperties,
   startTaskTimer,
   stopTaskTimer,
@@ -978,6 +979,36 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
           ? t("Failed to stop timer")
           : t("Failed to start timer")
         setErrorText(error instanceof Error ? error.message : fallbackMessage)
+      } finally {
+        setTimingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(item.blockId)
+          return next
+        })
+      }
+    },
+    [loadByTab, props.schema, tab],
+  )
+
+  const clearTaskTimerForItem = React.useCallback(
+    async (item: TaskListRowItem) => {
+      setTimingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(item.blockId)
+        return next
+      })
+
+      try {
+        await clearTaskTimer({
+          blockId: item.blockId,
+          sourceBlockId: item.sourceBlockId,
+          schema: props.schema,
+        })
+        setErrorText("")
+        await loadByTab(tab, { silent: true })
+      } catch (error) {
+        console.error(error)
+        setErrorText(error instanceof Error ? error.message : t("Failed to clear timer"))
       } finally {
         setTimingIds((prev: Set<DbId>) => {
           const next = new Set(prev)
@@ -4098,6 +4129,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                           onNavigate: () => navigateToTask(row.node.item),
                           onToggleStar: () => toggleTaskStar(row.node.item),
                           onToggleTimer: () => toggleTaskTimer(row.node.item),
+                          onClearTimer: () => clearTaskTimerForItem(row.node.item),
                           onMarkReviewed: () => markTaskReviewed(row.node.item),
                           onAddSubtask: () => addSubtask(row.node.item),
                           onDeleteTaskTag: () => removeTaskTag(row.node.item),
@@ -4143,6 +4175,7 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
                       onNavigate: () => navigateToTask(item),
                       onToggleStar: () => toggleTaskStar(item),
                       onToggleTimer: () => toggleTaskTimer(item),
+                      onClearTimer: () => clearTaskTimerForItem(item),
                       onMarkReviewed: () => markTaskReviewed(item),
                       onAddSubtask: () => addSubtask(item),
                       onDeleteTaskTag: () => removeTaskTag(item),

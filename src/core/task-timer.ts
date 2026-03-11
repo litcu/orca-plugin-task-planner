@@ -174,6 +174,22 @@ export async function stopTaskTimer(options: {
   return nextTimer
 }
 
+export async function clearTaskTimer(options: {
+  blockId: DbId
+  sourceBlockId?: DbId | null
+  schema: TaskSchemaDefinition
+}): Promise<TaskTimerData> {
+  const target = await resolveTaskBlock(options.blockId, options.sourceBlockId, options.schema)
+  const currentTimer = readTaskTimerFromSourceAndLiveBlocks(target.sourceBlock, target.liveBlock)
+  if (!hasTaskTimerRecord(currentTimer)) {
+    return currentTimer
+  }
+
+  const nextTimer = createDefaultTaskTimerData()
+  await saveTaskTimer(options.schema, target, nextTimer)
+  return nextTimer
+}
+
 export async function checkpointRunningTaskTimer(options: {
   blockId: DbId
   sourceBlockId?: DbId | null

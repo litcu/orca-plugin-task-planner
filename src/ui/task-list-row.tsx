@@ -60,6 +60,7 @@ interface TaskListRowProps {
   onNavigate: () => void
   onToggleStar: () => void | Promise<void>
   onToggleTimer: () => void | Promise<void>
+  onClearTimer?: () => void | Promise<void>
   onMarkReviewed: () => void | Promise<void>
   onAddSubtask: () => void | Promise<void>
   onDeleteTaskTag: () => void | Promise<void>
@@ -152,6 +153,8 @@ export function TaskListRow(props: TaskListRowProps) {
     props.showMyDayAction === true &&
     ((props.myDaySelected === true && props.onRemoveFromMyDay != null) ||
       (props.myDaySelected !== true && props.onAddToMyDay != null))
+  const canShowClearTimerAction =
+    props.timerEnabled && hasTimerRecord && props.onClearTimer != null
   const myDayMutationDisabled = mutationDisabled || props.myDayUpdating === true
 
   React.useEffect(() => {
@@ -896,6 +899,21 @@ export function TaskListRow(props: TaskListRowProps) {
                 props.onNavigate()
               },
             }),
+            canShowClearTimerAction
+              ? React.createElement(MenuText, {
+                  title: t("Clear timer"),
+                  preIcon: "ti ti-clock-off",
+                  disabled: mutationDisabled,
+                  onClick: (event: MouseEvent) => {
+                    event.stopPropagation()
+                    setContextMenuVisible(false)
+                    if (mutationDisabled) {
+                      return
+                    }
+                    void props.onClearTimer?.()
+                  },
+                })
+              : null,
             canShowMyDayAction
               ? React.createElement(MenuText, {
                   title: props.myDaySelected
