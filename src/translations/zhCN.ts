@@ -53,6 +53,7 @@
   "Depends on": "依赖任务",
   "Depends mode": "依赖模式",
   "Dependency delay": "依赖延迟",
+  "Custom properties": "自定义属性",
   "Save": "保存",
   "Cancel": "取消",
   "${field} must be a number": "${field} 必须是数字",
@@ -114,6 +115,8 @@
   "Extra wait time in hours after dependencies are satisfied.": "前置任务满足后，额外等待的小时数。",
   "(Untitled task)": "(无标题任务)",
   "Close property panel": "关闭属性面板",
+  "Unsupported property type": "暂不支持的属性类型",
+  "This property type is not supported in the task panel yet. Its existing value will be preserved.": "任务面板暂不支持编辑该属性类型，现有值会被保留。",
 
   "Failed to load task view": "加载任务视图失败",
   "Failed to load My Day": "加载“我的一天”失败",

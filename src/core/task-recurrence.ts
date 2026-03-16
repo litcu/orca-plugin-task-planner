@@ -1,8 +1,9 @@
-import type { Block, BlockRef, DbId } from "../orca.d.ts"
+import type { Block, BlockProperty, BlockRef, DbId } from "../orca.d.ts"
 import { getMirrorId, isValidDbId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
+  mergeTaskRefData,
   toRefDataForSave,
   toTaskMetaPropertyForSave,
   type TaskPropertyValues,
@@ -15,6 +16,7 @@ import { buildNextRecurringTaskValues } from "./task-repeat"
 
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
+const TEXT_CHOICES_PROP_TYPE = 6
 
 interface DescendantTaskTarget {
   blockId: DbId
@@ -47,14 +49,42 @@ export async function createRecurringTaskInTodayJournal(
 
   try {
     await orca.commands.invokeGroup(async () => {
-      await orca.commands.invokeEditorCommand(
-        "core.editor.insertTag",
-        null,
-        sourceTaskId,
-        schema.tagAlias,
-        toRefDataForSave(recurringValues, schema),
-      )
       const sourceBlock = orca.state.blocks[sourceTaskId] ?? null
+      const sourceTaskRef = sourceBlock == null
+        ? null
+        : findTaskTagRef(getLiveBlock(sourceBlock), schema.tagAlias) ??
+          findTaskTagRef(sourceBlock, schema.tagAlias)
+      const sourcePayload = toRefDataForSave(recurringValues, schema, {
+        existingRefData: sourceTaskRef?.data,
+      })
+
+      if (sourceTaskRef != null) {
+        try {
+          await orca.commands.invokeEditorCommand(
+            "core.editor.setRefData",
+            null,
+            sourceTaskRef,
+            sourcePayload,
+          )
+        } catch (error) {
+          console.error(error)
+          await orca.commands.invokeEditorCommand(
+            "core.editor.insertTag",
+            null,
+            sourceTaskId,
+            schema.tagAlias,
+            sourcePayload,
+          )
+        }
+      } else {
+        await orca.commands.invokeEditorCommand(
+          "core.editor.insertTag",
+          null,
+          sourceTaskId,
+          schema.tagAlias,
+          sourcePayload,
+        )
+      }
       await orca.commands.invokeEditorCommand(
         "core.editor.setProperties",
         null,
@@ -99,25 +129,40 @@ async function reopenDescendantTasks(
 
   for (const descendant of descendants) {
     const descendantValues = getTaskPropertiesFromRef(descendant.taskRef.data, schema)
-    await orca.commands.invokeEditorCommand(
-      "core.editor.insertTag",
-      null,
-      descendant.blockId,
-      schema.tagAlias,
-      [
-        { name: schema.propertyNames.status, value: todoStatus },
-        {
-          name: schema.propertyNames.startTime,
-          type: DATE_TIME_PROP_TYPE,
-          value: shiftDateByMs(descendantValues.startTime, dateShiftMs),
-        },
-        {
-          name: schema.propertyNames.endTime,
-          type: DATE_TIME_PROP_TYPE,
-          value: shiftDateByMs(descendantValues.endTime, dateShiftMs),
-        },
-      ],
-    )
+    const payload: BlockProperty[] = [
+      {
+        name: schema.propertyNames.status,
+        type: TEXT_CHOICES_PROP_TYPE,
+        value: todoStatus,
+      },
+      {
+        name: schema.propertyNames.startTime,
+        type: DATE_TIME_PROP_TYPE,
+        value: shiftDateByMs(descendantValues.startTime, dateShiftMs),
+      },
+      {
+        name: schema.propertyNames.endTime,
+        type: DATE_TIME_PROP_TYPE,
+        value: shiftDateByMs(descendantValues.endTime, dateShiftMs),
+      },
+    ]
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setRefData",
+        null,
+        descendant.taskRef,
+        payload,
+      )
+    } catch (error) {
+      console.error(error)
+      await orca.commands.invokeEditorCommand(
+        "core.editor.insertTag",
+        null,
+        descendant.blockId,
+        schema.tagAlias,
+        mergeTaskRefData(descendant.taskRef.data, payload),
+      )
+    }
   }
 }
 

@@ -8,6 +8,7 @@ import {
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import {
   getTaskPropertiesFromRef,
+  mergeTaskRefData,
   normalizeTaskValuesForStatus,
   toRefDataForSave,
   toTaskMetaPropertyForSave,
@@ -34,6 +35,7 @@ const TAG_REF_TYPE = 2
 const REF_DATA_TYPE = 3
 const DATE_TIME_PROP_TYPE = 5
 const BOOLEAN_PROP_TYPE = 4
+const TEXT_CHOICES_PROP_TYPE = 6
 
 export interface AllTaskItem {
   blockId: DbId
@@ -384,8 +386,12 @@ export async function cycleTaskStatusInView(
         : values.startTime,
     endTime: values.endTime,
   }, schema)
-  const payload: Array<{ name: string; type?: number; value: unknown }> = [
-    { name: schema.propertyNames.status, value: nextValues.status },
+  const payload: BlockProperty[] = [
+    {
+      name: schema.propertyNames.status,
+      type: TEXT_CHOICES_PROP_TYPE,
+      value: nextValues.status,
+    },
     {
       name: schema.propertyNames.startTime,
       type: DATE_TIME_PROP_TYPE,
@@ -398,6 +404,7 @@ export async function cycleTaskStatusInView(
     },
     {
       name: schema.propertyNames.dependsMode,
+      type: TEXT_CHOICES_PROP_TYPE,
       value: dependsMode,
     },
   ]
@@ -450,7 +457,7 @@ export async function cycleTaskStatusInView(
         null,
         targetId,
         schema.tagAlias,
-        payload,
+        mergeTaskRefData(effectiveTaskRef?.data, payload),
       )
       await orca.commands.invokeEditorCommand(
         "core.editor.setProperties",
@@ -496,7 +503,7 @@ export async function toggleTaskStarInView(
   taskTagRef?: BlockRef | null,
   sourceBlockId?: DbId | null,
 ): Promise<void> {
-  const payload = [
+  const payload: BlockProperty[] = [
     {
       name: schema.propertyNames.star,
       type: BOOLEAN_PROP_TYPE,
@@ -537,7 +544,7 @@ export async function toggleTaskStarInView(
         null,
         targetId,
         schema.tagAlias,
-        payload,
+        mergeTaskRefData(taskTagRef?.data, payload),
       )
       invalidateNextActionEvaluationCache()
       return
@@ -1070,6 +1077,8 @@ interface DependencyCleanupPlan {
   blockId: DbId
   values: TaskPropertyValues
   taskBlock: Block | null
+  taskRef?: BlockRef | null
+  taskRefData?: BlockProperty[]
 }
 
 async function collectDeletionTargetIds(
@@ -1121,13 +1130,36 @@ async function applyDependencyCleanupPlans(
   let cacheInvalidated = false
   for (const plan of cleanupPlans) {
     try {
-      await orca.commands.invokeEditorCommand(
-        "core.editor.insertTag",
-        null,
-        plan.blockId,
-        schema.tagAlias,
-        toRefDataForSave(plan.values, schema),
-      )
+      const payload = toRefDataForSave(plan.values, schema, {
+        existingRefData: plan.taskRefData,
+      })
+      if (plan.taskRef != null) {
+        try {
+          await orca.commands.invokeEditorCommand(
+            "core.editor.setRefData",
+            null,
+            plan.taskRef,
+            payload,
+          )
+        } catch (error) {
+          console.error(error)
+          await orca.commands.invokeEditorCommand(
+            "core.editor.insertTag",
+            null,
+            plan.blockId,
+            schema.tagAlias,
+            payload,
+          )
+        }
+      } else {
+        await orca.commands.invokeEditorCommand(
+          "core.editor.insertTag",
+          null,
+          plan.blockId,
+          schema.tagAlias,
+          payload,
+        )
+      }
       await orca.commands.invokeEditorCommand(
         "core.editor.setProperties",
         null,
@@ -1205,6 +1237,8 @@ async function collectDependencyCleanupPlans(
       blockId: resolveUsableBlockId(taskId),
       values: nextValues,
       taskBlock,
+      taskRef,
+      taskRefData: taskRef.data,
     })
     seenTaskIds.add(taskId)
   }

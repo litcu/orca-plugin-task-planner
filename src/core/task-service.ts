@@ -1,4 +1,4 @@
-import type { Block, BlockProperty, CursorData, DbId } from "../orca.d.ts"
+import type { Block, BlockProperty, BlockRef, CursorData, DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import {
   DEFAULT_TASK_SCORE,
@@ -13,6 +13,7 @@ import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import { getPluginSettings } from "./plugin-settings"
 import {
   getTaskPropertiesFromRef,
+  mergeTaskRefData,
   normalizeTaskValuesForStatus,
   toTaskMetaPropertyForSave,
 } from "./task-properties"
@@ -25,6 +26,7 @@ import { applyTaskTimerForStatusChange } from "./task-timer"
 
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
+const TEXT_CHOICES_PROP_TYPE = 6
 const TASK_STATUS_SHORTCUT = "alt+enter"
 const COMMAND_PREFIX = "task-planner"
 
@@ -251,7 +253,7 @@ async function cycleTaskTagStatus(
   blockId: DbId,
   cursor: CursorData | null,
   block: Block,
-  taskTagRef: { data?: BlockProperty[] },
+  taskTagRef: BlockRef,
   schema: TaskSchemaDefinition,
   pluginName: string,
 ) {
@@ -269,8 +271,12 @@ async function cycleTaskTagStatus(
     endTime: currentValues.endTime,
   }, schema)
 
-  const payload: Array<{ name: string; type?: number; value: unknown }> = [
-    { name: propertyNames.status, value: nextValues.status },
+  const payload: BlockProperty[] = [
+    {
+      name: propertyNames.status,
+      type: TEXT_CHOICES_PROP_TYPE,
+      value: nextValues.status,
+    },
     {
       name: propertyNames.startTime,
       type: DATE_TIME_PROP_TYPE,
@@ -283,17 +289,28 @@ async function cycleTaskTagStatus(
     },
     {
       name: propertyNames.dependsMode,
+      type: TEXT_CHOICES_PROP_TYPE,
       value: dependsModeValue,
     },
   ]
 
-  await orca.commands.invokeEditorCommand(
-    "core.editor.insertTag",
-    cursor,
-    blockId,
-    schema.tagAlias,
-    payload,
-  )
+  try {
+    await orca.commands.invokeEditorCommand(
+      "core.editor.setRefData",
+      cursor,
+      taskTagRef,
+      payload,
+    )
+  } catch (error) {
+    console.error(error)
+    await orca.commands.invokeEditorCommand(
+      "core.editor.insertTag",
+      cursor,
+      blockId,
+      schema.tagAlias,
+      mergeTaskRefData(taskTagRef.data, payload),
+    )
+  }
 
   await orca.commands.invokeEditorCommand(
     "core.editor.setProperties",

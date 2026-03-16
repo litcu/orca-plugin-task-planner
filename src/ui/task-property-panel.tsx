@@ -8,11 +8,18 @@ import {
 import { dedupeDbIds, getMirrorId, isValidDbId } from "../core/block-utils"
 import {
   buildTaskFieldLabels,
+  buildTaskCustomRefData,
+  collectTaskCustomPropertyDescriptors,
+  createTaskCustomPropertyStateMap,
   getTaskPropertiesFromRef,
   normalizeTaskValuesForStatus,
+  TASK_PROP_TYPE,
   toRefDataForSave,
   toTaskMetaPropertyForSave,
   validateNumericField,
+  type TaskCustomPropertyDescriptor,
+  type TaskCustomPropertyState,
+  type TaskCustomPropertyStateMap,
 } from "../core/task-properties"
 import { invalidateNextActionEvaluationCache } from "../core/dependency-engine"
 import { createRecurringTaskInTodayJournal } from "../core/task-recurrence"
@@ -63,6 +70,18 @@ interface OpenTaskPropertyPopupOptions {
   onTaskCreated?: (blockId: DbId) => void
   onTaskSaved?: (blockId: DbId) => void
 }
+
+type BuiltInDateFieldKey = "start" | "end" | "repeatEnd" | "nextReview"
+
+type EditingDateField =
+  | {
+    kind: "built-in"
+    key: BuiltInDateFieldKey
+  }
+  | {
+    kind: "custom"
+    name: string
+  }
 
 const popupState: PopupState = {
   root: null,
@@ -260,6 +279,22 @@ function TaskPropertyPopupView(props: {
       intervalText: parsed.intervalText,
     }
   }, [editorInitialValues.reviewEvery])
+  const [taskTagSchemaProperties, setTaskTagSchemaProperties] = React.useState<BlockProperty[]>(
+    [],
+  )
+  const customPropertyDescriptors = React.useMemo(() => {
+    return collectTaskCustomPropertyDescriptors(
+      taskTagSchemaProperties,
+      props.schema,
+      {
+        refData: taskRef?.data,
+        includeSchemaDefaults: isCreateMode,
+      },
+    )
+  }, [isCreateMode, props.schema, taskRef?.data, taskTagSchemaProperties])
+  const initialCustomPropertyStates = React.useMemo(() => {
+    return createTaskCustomPropertyStateMap(customPropertyDescriptors)
+  }, [customPropertyDescriptors])
 
   const [taskNameText, setTaskNameText] = React.useState(taskName)
   const [statusValue, setStatusValue] = React.useState(editorInitialValues.status)
@@ -346,9 +381,10 @@ function TaskPropertyPopupView(props: {
       ? ""
       : String(editorInitialValues.dependencyDelay),
   )
-  const [editingDateField, setEditingDateField] = React.useState<
-    "start" | "end" | "repeatEnd" | "nextReview" | null
-  >(null)
+  const [customPropertyStates, setCustomPropertyStates] = React.useState<TaskCustomPropertyStateMap>(
+    initialCustomPropertyStates,
+  )
+  const [editingDateField, setEditingDateField] = React.useState<EditingDateField | null>(null)
   const [errorText, setErrorText] = React.useState("")
   const [saving, setSaving] = React.useState(false)
   const [lastSavedSnapshot, setLastSavedSnapshot] = React.useState("")
@@ -404,18 +440,43 @@ function TaskPropertyPopupView(props: {
       ? 760
       : 560
   const useCompactRowLayout = estimatedPanelWidth < 420
+  const resolveCustomPropertyState = React.useCallback((
+    descriptor: TaskCustomPropertyDescriptor,
+  ): TaskCustomPropertyState => {
+    return customPropertyStates[descriptor.name] ?? {
+      value: descriptor.initialValue,
+      present: descriptor.initialPresent,
+    }
+  }, [customPropertyStates])
+  const updateCustomPropertyState = React.useCallback((
+    descriptor: TaskCustomPropertyDescriptor,
+    nextState: TaskCustomPropertyState,
+  ) => {
+    setCustomPropertyStates((prev: TaskCustomPropertyStateMap) => ({
+      ...prev,
+      [descriptor.name]: nextState,
+    }))
+  }, [])
 
   const hasDependencies = dependsOnValues.length > 0
   const selectedDateValue =
-    editingDateField === "start"
-      ? startTimeValue
-      : editingDateField === "end"
-        ? endTimeValue
-        : editingDateField === "nextReview"
-          ? nextReviewValue
-        : editingDateField === "repeatEnd"
-          ? repeatEndAtValue
-        : null
+    editingDateField == null
+      ? null
+      : editingDateField.kind === "built-in"
+        ? editingDateField.key === "start"
+          ? startTimeValue
+          : editingDateField.key === "end"
+            ? endTimeValue
+            : editingDateField.key === "nextReview"
+              ? nextReviewValue
+              : repeatEndAtValue
+        : (() => {
+          const descriptor = customPropertyDescriptors.find(
+            (item: TaskCustomPropertyDescriptor) => item.name === editingDateField.name,
+          )
+          const state = descriptor == null ? null : resolveCustomPropertyState(descriptor)
+          return state?.value instanceof Date ? state.value : null
+        })()
   const initialSnapshot = React.useMemo(() => {
     return buildEditorSnapshot({
       taskNameText: taskName,
@@ -444,8 +505,17 @@ function TaskPropertyPopupView(props: {
           ? ""
           : String(editorInitialValues.dependencyDelay),
       hasDependencies: initialDependsOnForEditor.length > 0,
+      customProperties: customPropertyDescriptors.map((descriptor: TaskCustomPropertyDescriptor) => ({
+        descriptor,
+        state: initialCustomPropertyStates[descriptor.name] ?? {
+          value: descriptor.initialValue,
+          present: descriptor.initialPresent,
+        },
+      })),
     })
   }, [
+    customPropertyDescriptors,
+    initialCustomPropertyStates,
     initialDependsOnForEditor,
     taskName,
     editorInitialValues.dependencyDelay,
@@ -490,8 +560,13 @@ function TaskPropertyPopupView(props: {
       dependsMode: dependsModeValue,
       dependencyDelayText,
       hasDependencies,
+      customProperties: customPropertyDescriptors.map((descriptor: TaskCustomPropertyDescriptor) => ({
+        descriptor,
+        state: resolveCustomPropertyState(descriptor),
+      })),
     })
   }, [
+    customPropertyDescriptors,
     dependencyDelayText,
     dependsModeValue,
     dependsOnValues,
@@ -513,6 +588,7 @@ function TaskPropertyPopupView(props: {
     taskNameText,
     taskLabelsValue,
     urgencyText,
+    resolveCustomPropertyState,
   ])
 
   React.useEffect(() => {
@@ -554,6 +630,7 @@ function TaskPropertyPopupView(props: {
         ? ""
         : String(editorInitialValues.dependencyDelay),
     )
+    setCustomPropertyStates(initialCustomPropertyStates)
     setEditingDateField(null)
     setErrorText("")
     setSaving(false)
@@ -571,6 +648,7 @@ function TaskPropertyPopupView(props: {
     initialRepeatEditor.weekdayValue,
     initialReviewEditor.intervalText,
     initialReviewEditor.mode,
+    initialCustomPropertyStates,
     initialSnapshot,
     taskName,
     blockTagLabels,
@@ -694,17 +772,23 @@ function TaskPropertyPopupView(props: {
   React.useEffect(() => {
     let disposed = false
 
-    const loadTaskLabelOptions = async () => {
-      const choices = await getTaskLabelChoicesFromSchema(props.schema)
+    const loadTaskTagSchema = async () => {
+      const tagBlock = await getTaskTagBlockFromSchema(props.schema)
       if (disposed) {
         return
       }
 
+      const properties = Array.isArray(tagBlock?.properties) ? tagBlock.properties : []
+      const labelsProperty = properties.find((item) => {
+        return item.name === props.schema.propertyNames.labels
+      })
+      const choices = readTaskLabelChoiceValues(labelsProperty)
+      setTaskTagSchemaProperties(properties)
       setTaskLabelOptions((prev: string[]) =>
         mergeTaskLabelValues(prev, choices, editorInitialValues.labels, blockTagLabels))
     }
 
-    void loadTaskLabelOptions()
+    void loadTaskTagSchema()
     return () => {
       disposed = true
     }
@@ -875,7 +959,13 @@ function TaskPropertyPopupView(props: {
             dependencyDelay: hasDependencies ? dependencyDelay.value : null,
           }, props.schema)
           createdTaskStatus = valuesToSave.status
-          const payload = toRefDataForSave(valuesToSave, props.schema)
+          const customRefData = buildTaskCustomRefData(
+            customPropertyDescriptors,
+            customPropertyStates,
+          )
+          const payload = toRefDataForSave(valuesToSave, props.schema, {
+            customProperties: customRefData,
+          })
           await orca.commands.invokeEditorCommand(
             "core.editor.insertTag",
             null,
@@ -983,19 +1073,33 @@ function TaskPropertyPopupView(props: {
         dependsMode: hasDependencies ? dependsModeValue : "ALL",
         dependencyDelay: hasDependencies ? dependencyDelay.value : null,
       }, props.schema)
-
-      const payload = toRefDataForSave(
-        valuesToSave,
-        props.schema,
+      const customRefData = buildTaskCustomRefData(
+        customPropertyDescriptors,
+        customPropertyStates,
       )
 
-      await orca.commands.invokeEditorCommand(
-        "core.editor.insertTag",
-        null,
-        sourceBlockId,
-        props.schema.tagAlias,
-        payload,
-      )
+      const payload = toRefDataForSave(valuesToSave, props.schema, {
+        existingRefData: taskRef.data,
+        customProperties: customRefData,
+      })
+
+      try {
+        await orca.commands.invokeEditorCommand(
+          "core.editor.setRefData",
+          null,
+          taskRef,
+          payload,
+        )
+      } catch (error) {
+        console.error(error)
+        await orca.commands.invokeEditorCommand(
+          "core.editor.insertTag",
+          null,
+          sourceBlockId,
+          props.schema.tagAlias,
+          payload,
+        )
+      }
       await orca.commands.invokeEditorCommand(
         "core.editor.setProperties",
         null,
@@ -1144,6 +1248,14 @@ function TaskPropertyPopupView(props: {
     border: "1px solid var(--orca-color-border-1)",
     background: "var(--orca-color-bg-2)",
   }
+  const sectionTitleStyle = {
+    marginBottom: "12px",
+    fontSize: "11px",
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase" as const,
+    color: "var(--orca-color-text-2)",
+  }
   const timeFieldAnchorStyle = {
     width: "100%",
     minWidth: 0,
@@ -1170,6 +1282,9 @@ function TaskPropertyPopupView(props: {
   }
   const renderSection = (...children: unknown[]) => {
     return React.createElement("div", { style: sectionStyle }, ...children)
+  }
+  const renderSectionTitle = (title: string) => {
+    return React.createElement("div", { style: sectionTitleStyle }, title)
   }
 
   const renderFormLabel = (label: string, helpText?: string) => {
@@ -1216,7 +1331,7 @@ function TaskPropertyPopupView(props: {
   }
 
   const renderTimeField = (
-    key: "start" | "end" | "repeatEnd" | "nextReview",
+    field: EditingDateField,
     label: string,
     value: Date | null,
     setValue: (next: Date | null) => void,
@@ -1232,7 +1347,7 @@ function TaskPropertyPopupView(props: {
           style: timeFieldAnchorStyle,
           onClick: (event: MouseEvent) => {
             dateAnchorRef.current = event.currentTarget as HTMLElement
-            setEditingDateField(key)
+            setEditingDateField(field)
           },
         },
         React.createElement(Input, {
@@ -1241,7 +1356,7 @@ function TaskPropertyPopupView(props: {
           readOnly: true,
           onClick: (event: Event) => {
             dateAnchorRef.current = event.currentTarget as HTMLElement
-            setEditingDateField(key)
+            setEditingDateField(field)
           },
           post: React.createElement(
             Button,
@@ -1260,7 +1375,7 @@ function TaskPropertyPopupView(props: {
                 dateAnchorRef.current = anchor instanceof HTMLElement
                   ? anchor
                   : event.currentTarget as HTMLElement
-                setEditingDateField(key)
+                setEditingDateField(field)
               },
               style: {
                 borderRadius: "6px",
@@ -1346,6 +1461,227 @@ function TaskPropertyPopupView(props: {
         }),
       ),
     )
+  }
+  const renderCustomPropertyField = (descriptor: TaskCustomPropertyDescriptor) => {
+    const state = resolveCustomPropertyState(descriptor)
+    if (!descriptor.supported) {
+      const displayText = formatTaskCustomPropertyDisplayValue(
+        descriptor,
+        state,
+      )
+      return renderFormRow(
+        descriptor.name,
+        React.createElement(
+          "div",
+          {
+            style: {
+              ...readOnlyFieldStyle,
+              alignItems: "flex-start",
+              padding: "8px 10px",
+              whiteSpace: "normal",
+            },
+          },
+          displayText === ""
+            ? t("Unsupported property type")
+            : displayText,
+        ),
+        t("This property type is not supported in the task panel yet. Its existing value will be preserved."),
+      )
+    }
+
+    if (descriptor.type === TASK_PROP_TYPE.TEXT) {
+      const textValue = typeof state.value === "string" ? state.value : ""
+      return renderFormRow(
+        descriptor.name,
+        React.createElement(Input, {
+          value: textValue,
+          placeholder: t("Not set"),
+          onChange: (event: Event) => {
+            const nextValue = (event.target as HTMLInputElement).value
+            updateCustomPropertyState(descriptor, {
+              present: nextValue.trim() !== "",
+              value: nextValue,
+            })
+          },
+          width: "100%",
+        }),
+      )
+    }
+
+    if (descriptor.type === TASK_PROP_TYPE.NUMBER) {
+      const numberValue = state.present && typeof state.value === "number"
+        ? String(state.value)
+        : ""
+      return renderFormRow(
+        descriptor.name,
+        React.createElement(Input, {
+          type: "number",
+          value: numberValue,
+          placeholder: t("Not set"),
+          onChange: (event: Event) => {
+            const rawValue = (event.target as HTMLInputElement).value.trim()
+            if (rawValue === "") {
+              updateCustomPropertyState(descriptor, {
+                present: false,
+                value: null,
+              })
+              return
+            }
+
+            const parsed = Number(rawValue)
+            if (Number.isNaN(parsed)) {
+              return
+            }
+
+            updateCustomPropertyState(descriptor, {
+              present: true,
+              value: parsed,
+            })
+          },
+          width: "100%",
+        }),
+      )
+    }
+
+    if (descriptor.type === TASK_PROP_TYPE.BOOLEAN) {
+      return renderFormRow(
+        descriptor.name,
+        React.createElement(
+          "label",
+          {
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              fontSize: "12px",
+              color: "var(--orca-color-text-1, var(--orca-color-text))",
+            },
+          },
+          React.createElement(Checkbox, {
+            checked: state.value === true,
+            onChange: ({ checked }: { checked: boolean }) => {
+              updateCustomPropertyState(descriptor, {
+                present: true,
+                value: checked,
+              })
+            },
+          }),
+          state.value === true ? t("True") : t("False"),
+        ),
+      )
+    }
+
+    if (descriptor.type === TASK_PROP_TYPE.DATE_TIME) {
+      return renderTimeField(
+        { kind: "custom", name: descriptor.name },
+        descriptor.name,
+        state.present && state.value instanceof Date
+          ? state.value
+          : null,
+        (next: Date | null) => {
+          updateCustomPropertyState(descriptor, {
+            present: next != null,
+            value: next,
+          })
+        },
+      )
+    }
+
+    if (descriptor.type === TASK_PROP_TYPE.TEXT_CHOICES) {
+      const rawOptions = readTaskLabelChoiceValues(descriptor)
+      if (typeof descriptor.typeArgs?.subType === "string" && descriptor.typeArgs.subType === "multi") {
+        const selectedValues = Array.isArray(state.value)
+          ? normalizeTaskLabelValues(
+            state.value.filter((item: unknown): item is string => typeof item === "string"),
+          )
+          : []
+        const options = buildStaticSelectOptions(rawOptions, selectedValues)
+        return renderFormRow(
+          descriptor.name,
+          React.createElement(Select, {
+            selected: selectedValues,
+            options,
+            multiSelection: true,
+            filter: true,
+            placeholder: t("Select"),
+            onChange: (selected: string[]) => {
+              const normalized = normalizeTaskLabelValues(selected)
+              updateCustomPropertyState(descriptor, {
+                present: normalized.length > 0,
+                value: normalized,
+              })
+            },
+            menuContainer: popupMenuContainerRef,
+            width: "100%",
+          }),
+        )
+      }
+
+      const singleValue = state.present && typeof state.value === "string"
+        ? state.value
+        : ""
+      const options = [
+        { value: "", label: t("Not set") },
+        ...buildStaticSelectOptions(rawOptions, singleValue === "" ? [] : [singleValue]),
+      ]
+      return renderFormRow(
+        descriptor.name,
+        React.createElement(Select, {
+          selected: [singleValue],
+          options,
+          onChange: (selected: string[]) => {
+            const nextValue = selected[0] ?? ""
+            updateCustomPropertyState(descriptor, {
+              present: nextValue.trim() !== "",
+              value: nextValue,
+            })
+          },
+          menuContainer: popupMenuContainerRef,
+          width: "100%",
+        }),
+      )
+    }
+
+    if (descriptor.type === TASK_PROP_TYPE.BLOCK_REFS) {
+      const subType = typeof descriptor.typeArgs?.subType === "string"
+        ? descriptor.typeArgs.subType
+        : "multi"
+      const selectedValues = Array.isArray(state.value)
+        ? state.value
+          .map((item: unknown) => Number(item))
+          .filter((item: number): item is DbId => isValidDbId(item))
+        : []
+      return renderFormRow(
+        descriptor.name,
+        React.createElement(BlockSelect, {
+          mode: "block",
+          scope: typeof descriptor.typeArgs?.scope === "string"
+            ? descriptor.typeArgs.scope
+            : undefined,
+          selected: selectedValues,
+          multiSelection: subType !== "single",
+          width: "100%",
+          menuContainer: popupMenuContainerRef,
+          onChange: (selected: string[]) => {
+            const normalized = dedupeBlockIds(
+              selected
+                .map((item) => Number(item))
+                .filter((item): item is DbId => isValidDbId(item))
+                .map((item) => getMirrorId(item)),
+            )
+            const nextValue = subType === "single"
+              ? normalized.slice(0, 1)
+              : normalized
+            updateCustomPropertyState(descriptor, {
+              present: nextValue.length > 0,
+              value: nextValue,
+            })
+          },
+        }),
+      )
+    }
+
+    return null
   }
 
   const activationCompleted = activationInfo?.blockedReason.includes("completed") === true
@@ -1655,14 +1991,14 @@ function TaskPropertyPopupView(props: {
         ),
         renderSection(
           renderTimeField(
-            "start",
+            { kind: "built-in", key: "start" },
             labels.startTime,
             startTimeValue,
             setStartTimeValue,
             fieldHelpTexts.startTime,
           ),
           renderTimeField(
-            "end",
+            { kind: "built-in", key: "end" },
             labels.endTime,
             endTimeValue,
             setEndTimeValue,
@@ -1769,7 +2105,7 @@ function TaskPropertyPopupView(props: {
             : null,
           repeatModeValue !== "none"
             ? renderTimeField(
-                "repeatEnd",
+                { kind: "built-in", key: "repeatEnd" },
                 t("Repeat ends at"),
                 repeatEndAtValue,
                 (next: Date | null) => {
@@ -1846,7 +2182,7 @@ function TaskPropertyPopupView(props: {
             : null,
           reviewEnabledValue && reviewTypeValue === "single"
             ? renderTimeField(
-                "nextReview",
+                { kind: "built-in", key: "nextReview" },
                 labels.nextReview,
                 nextReviewValue,
                 setNextReviewValue,
@@ -2022,6 +2358,16 @@ function TaskPropertyPopupView(props: {
               )
             : null,
         ),
+        customPropertyDescriptors.length > 0
+          ? renderSection(
+              renderSectionTitle(t("Custom properties")),
+              ...customPropertyDescriptors
+                .map((descriptor: TaskCustomPropertyDescriptor) => {
+                  return renderCustomPropertyField(descriptor)
+                })
+                .filter((item: unknown) => item != null),
+            )
+          : null,
         editingDateField != null
           ? React.createElement(DatePicker, {
               mode: "datetime",
@@ -2034,14 +2380,30 @@ function TaskPropertyPopupView(props: {
                   return
                 }
                 const normalizedNext = normalizeDateToMinute(next) ?? next
-                if (editingDateField === "start") {
+                if (editingDateField?.kind === "built-in" && editingDateField.key === "start") {
                   setStartTimeValue(normalizedNext)
-                } else if (editingDateField === "end") {
+                } else if (editingDateField?.kind === "built-in" && editingDateField.key === "end") {
                   setEndTimeValue(normalizedNext)
-                } else if (editingDateField === "nextReview") {
+                } else if (
+                  editingDateField?.kind === "built-in" &&
+                  editingDateField.key === "nextReview"
+                ) {
                   setNextReviewValue(normalizedNext)
-                } else {
+                } else if (
+                  editingDateField?.kind === "built-in" &&
+                  editingDateField.key === "repeatEnd"
+                ) {
                   updateRepeatEditor({ endAtValue: normalizedNext })
+                } else if (editingDateField?.kind === "custom") {
+                  const descriptor = customPropertyDescriptors.find((item: TaskCustomPropertyDescriptor) => {
+                    return item.name === editingDateField.name
+                  })
+                  if (descriptor != null) {
+                    updateCustomPropertyState(descriptor, {
+                      present: true,
+                      value: normalizedNext,
+                    })
+                  }
                 }
                 setEditingDateField(null)
               },
@@ -2151,6 +2513,10 @@ interface TaskEditorSnapshotInput {
   dependsMode: string
   dependencyDelayText: string
   hasDependencies: boolean
+  customProperties: Array<{
+    descriptor: TaskCustomPropertyDescriptor
+    state: TaskCustomPropertyState
+  }>
 }
 
 async function resolveCreateTaskInsertParentId(options: {
@@ -2246,6 +2612,11 @@ function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {
     dependsOn: [...input.dependsOn].sort((left, right) => left - right),
     dependsMode: input.hasDependencies ? input.dependsMode : "ALL",
     dependencyDelayText: input.hasDependencies ? input.dependencyDelayText.trim() : "",
+    customProperties: [...input.customProperties]
+      .sort((left, right) => left.descriptor.name.localeCompare(right.descriptor.name))
+      .map(({ descriptor, state }) => {
+        return serializeCustomPropertySnapshot(descriptor, state)
+      }),
   })
 }
 
@@ -2524,25 +2895,17 @@ function readTaskLabelChoiceValues(property: BlockProperty | undefined): string[
   )
 }
 
-async function getTaskLabelChoicesFromSchema(
+async function getTaskTagBlockFromSchema(
   schema: TaskSchemaDefinition,
-): Promise<string[]> {
+): Promise<Block | null> {
   try {
-    const taskTagBlock = (await orca.invokeBackend(
+    return (await orca.invokeBackend(
       "get-block-by-alias",
       schema.tagAlias,
     )) as Block | null
-    if (taskTagBlock == null) {
-      return []
-    }
-
-    const property = taskTagBlock.properties.find((item) => {
-      return item.name === schema.propertyNames.labels
-    })
-    return readTaskLabelChoiceValues(property)
   } catch (error) {
     console.error(error)
-    return []
+    return null
   }
 }
 
@@ -2555,10 +2918,7 @@ async function ensureTaskLabelChoices(
     return
   }
 
-  const taskTagBlock = (await orca.invokeBackend(
-    "get-block-by-alias",
-    schema.tagAlias,
-  )) as Block | null
+  const taskTagBlock = await getTaskTagBlockFromSchema(schema)
   if (taskTagBlock == null) {
     return
   }
@@ -2605,6 +2965,134 @@ async function ensureTaskLabelChoices(
     [taskTagBlock.id],
     nextProperties,
   )
+}
+
+function buildStaticSelectOptions(
+  optionValues: string[],
+  selectedValues: string[],
+): { value: string; label: string }[] {
+  return mergeTaskLabelValues(optionValues, selectedValues).map((value) => ({
+    value,
+    label: value,
+  }))
+}
+
+function formatTaskCustomPropertyDisplayValue(
+  descriptor: TaskCustomPropertyDescriptor,
+  state: TaskCustomPropertyState,
+): string {
+  if (!state.present) {
+    return descriptor.rawInitialValue == null
+      ? t("Not set")
+      : formatUnknownCustomPropertyValue(descriptor.rawInitialValue)
+  }
+
+  if (descriptor.type === TASK_PROP_TYPE.BOOLEAN) {
+    return state.value === true ? t("True") : t("False")
+  }
+  if (descriptor.type === TASK_PROP_TYPE.DATE_TIME) {
+    return state.value instanceof Date ? formatDateTimeToMinute(state.value) : t("Not set")
+  }
+  if (descriptor.type === TASK_PROP_TYPE.BLOCK_REFS) {
+    return Array.isArray(state.value)
+      ? state.value.map((item) => formatBlockRefDisplayValue(item)).join(", ")
+      : t("Not set")
+  }
+  if (Array.isArray(state.value)) {
+    return state.value.join(", ")
+  }
+  if (typeof state.value === "string") {
+    return state.value.trim() === "" ? t("Not set") : state.value
+  }
+  if (typeof state.value === "number") {
+    return String(state.value)
+  }
+
+  return descriptor.rawInitialValue == null
+    ? ""
+    : formatUnknownCustomPropertyValue(descriptor.rawInitialValue)
+}
+
+function serializeCustomPropertySnapshot(
+  descriptor: TaskCustomPropertyDescriptor,
+  state: TaskCustomPropertyState,
+) {
+  return {
+    name: descriptor.name,
+    supported: descriptor.supported,
+    present: state.present,
+    value: normalizeCustomPropertySnapshotValue(descriptor, state),
+  }
+}
+
+function normalizeCustomPropertySnapshotValue(
+  descriptor: TaskCustomPropertyDescriptor,
+  state: TaskCustomPropertyState,
+): unknown {
+  if (!descriptor.supported) {
+    return formatUnknownCustomPropertyValue(descriptor.rawInitialValue)
+  }
+  if (!state.present) {
+    return null
+  }
+  if (descriptor.type === TASK_PROP_TYPE.DATE_TIME) {
+    return state.value instanceof Date ? state.value.getTime() : null
+  }
+  if (descriptor.type === TASK_PROP_TYPE.BLOCK_REFS) {
+    return Array.isArray(state.value)
+      ? [...state.value].map((item) => Number(item)).sort((left, right) => left - right)
+      : []
+  }
+  if (descriptor.type === TASK_PROP_TYPE.TEXT_CHOICES && Array.isArray(state.value)) {
+    return [...state.value]
+      .filter((item): item is string => typeof item === "string")
+      .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))
+  }
+
+  return state.value
+}
+
+function formatBlockRefDisplayValue(value: unknown): string {
+  const parsed = Number(value)
+  if (Number.isNaN(parsed)) {
+    return String(value ?? "")
+  }
+
+  const candidateIds = [parsed, getMirrorId(parsed)]
+  for (const candidateId of candidateIds) {
+    const block = orca.state.blocks[candidateId]
+    if (block == null) {
+      continue
+    }
+
+    const blockText = typeof block.text === "string" ? block.text.replace(/\s+/g, " ").trim() : ""
+    if (blockText !== "") {
+      return blockText
+    }
+  }
+
+  return String(parsed)
+}
+
+function formatUnknownCustomPropertyValue(value: unknown): string {
+  if (value == null) {
+    return ""
+  }
+  if (value instanceof Date) {
+    return formatDateTimeToMinute(value)
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => formatUnknownCustomPropertyValue(item)).join(", ")
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+
+  return String(value)
 }
 
 function normalizeDateToMinute(value: Date | null): Date | null {

@@ -15,7 +15,7 @@ import {
 } from "./task-meta"
 import { t } from "../libs/l10n"
 
-const PROP_TYPE = {
+export const TASK_PROP_TYPE = {
   TEXT: 1,
   BLOCK_REFS: 2,
   NUMBER: 3,
@@ -23,6 +23,68 @@ const PROP_TYPE = {
   DATE_TIME: 5,
   TEXT_CHOICES: 6,
 } as const
+
+const TASK_RESERVED_CUSTOM_PROPERTY_NAMES = [
+  "task name",
+  "任务名称",
+  "review",
+  "回顾",
+  "review every",
+  "回顾周期",
+  "review type",
+  "回顾类型",
+  "enable review",
+  "启用回顾",
+  "next review",
+  "下次回顾",
+  "last reviewed",
+  "上次回顾",
+  "importance",
+  "重要性",
+  "urgency",
+  "紧急度",
+  "effort",
+  "工作量",
+  "repeat rule",
+  "重复规则",
+] as const
+
+export type TaskCustomPropertyValue =
+  | string
+  | number
+  | boolean
+  | Date
+  | string[]
+  | DbId[]
+  | null
+
+export interface TaskCustomPropertyDescriptor {
+  name: string
+  type: number
+  typeArgs?: any
+  pos?: number
+  supported: boolean
+  initialValue: TaskCustomPropertyValue
+  initialPresent: boolean
+  rawInitialValue?: unknown
+}
+
+export interface TaskCustomPropertyState {
+  value: TaskCustomPropertyValue
+  present: boolean
+}
+
+export type TaskCustomPropertyStateMap = Record<string, TaskCustomPropertyState>
+
+interface ResolveTaskCustomPropertyDescriptorsOptions {
+  refData?: BlockProperty[]
+  includeSchemaDefaults?: boolean
+}
+
+interface BuildTaskRefDataOptions {
+  existingRefData?: BlockProperty[]
+  customProperties?: BlockProperty[]
+}
 
 export interface TaskPropertyValues {
   status: string
@@ -152,7 +214,7 @@ export function getTaskPropertiesFromRef(
   }
 }
 
-export function toRefDataForSave(
+export function buildTaskCoreRefData(
   values: TaskPropertyValues,
   schema: TaskSchemaDefinition,
 ): BlockProperty[] {
@@ -161,50 +223,63 @@ export function toRefDataForSave(
   return [
     {
       name: names.status,
-      type: PROP_TYPE.TEXT_CHOICES,
+      type: TASK_PROP_TYPE.TEXT_CHOICES,
       value: values.status,
     },
     {
       name: names.startTime,
-      type: PROP_TYPE.DATE_TIME,
+      type: TASK_PROP_TYPE.DATE_TIME,
       value: values.startTime,
     },
     {
       name: names.endTime,
-      type: PROP_TYPE.DATE_TIME,
+      type: TASK_PROP_TYPE.DATE_TIME,
       value: values.endTime,
     },
     {
       name: names.star,
-      type: PROP_TYPE.BOOLEAN,
+      type: TASK_PROP_TYPE.BOOLEAN,
       value: values.star,
     },
     {
       name: names.labels,
-      type: PROP_TYPE.TEXT_CHOICES,
+      type: TASK_PROP_TYPE.TEXT_CHOICES,
       value: normalizeTaskLabels(values.labels),
     },
     {
       name: names.remark,
-      type: PROP_TYPE.TEXT,
+      type: TASK_PROP_TYPE.TEXT,
       value: values.remark.trim() === "" ? null : values.remark,
     },
     {
       name: names.dependsOn,
-      type: PROP_TYPE.BLOCK_REFS,
+      type: TASK_PROP_TYPE.BLOCK_REFS,
       value: values.dependsOn,
     },
     {
       name: names.dependsMode,
-      type: PROP_TYPE.TEXT_CHOICES,
+      type: TASK_PROP_TYPE.TEXT_CHOICES,
       value: values.dependsMode,
     },
     {
       name: names.dependencyDelay,
-      type: PROP_TYPE.NUMBER,
+      type: TASK_PROP_TYPE.NUMBER,
       value: values.dependencyDelay,
     },
   ]
+}
+
+export function toRefDataForSave(
+  values: TaskPropertyValues,
+  schema: TaskSchemaDefinition,
+  options?: BuildTaskRefDataOptions,
+): BlockProperty[] {
+  const payload = [
+    ...buildTaskCoreRefData(values, schema),
+    ...(options?.customProperties ?? []),
+  ]
+
+  return mergeTaskRefData(options?.existingRefData, payload)
 }
 
 export function toTaskMetaPropertyForSave(
@@ -270,6 +345,143 @@ export function formatTaskLabels(labels: string[]): string {
   return normalizeTaskLabels(labels).join(", ")
 }
 
+export function collectTaskCustomPropertyDescriptors(
+  schemaProperties: BlockProperty[] | undefined,
+  schema: TaskSchemaDefinition,
+  options?: ResolveTaskCustomPropertyDescriptorsOptions,
+): TaskCustomPropertyDescriptor[] {
+  if (!Array.isArray(schemaProperties) || schemaProperties.length === 0) {
+    return []
+  }
+
+  const descriptors: TaskCustomPropertyDescriptor[] = []
+  const reservedNames = getReservedTaskPropertyNameSet(schema)
+  const seen = new Set<string>()
+
+  for (const property of schemaProperties) {
+    const name = normalizeTaskPropertyName(property.name)
+    if (name === "" || name.startsWith("_")) {
+      continue
+    }
+
+    const dedupKey = name.toLowerCase()
+    if (reservedNames.has(dedupKey) || seen.has(dedupKey)) {
+      continue
+    }
+
+    seen.add(dedupKey)
+    const initialState = resolveTaskCustomPropertyInitialState(property, options)
+    descriptors.push({
+      name,
+      type: typeof property.type === "number" ? property.type : TASK_PROP_TYPE.TEXT,
+      typeArgs: property.typeArgs,
+      pos: property.pos,
+      supported: isSupportedTaskCustomProperty(property),
+      initialValue: initialState.value,
+      initialPresent: initialState.present,
+      rawInitialValue: initialState.rawValue,
+    })
+  }
+
+  return descriptors.sort((left, right) => {
+    const leftPos = typeof left.pos === "number" ? left.pos : Number.MAX_SAFE_INTEGER
+    const rightPos = typeof right.pos === "number" ? right.pos : Number.MAX_SAFE_INTEGER
+    if (leftPos !== rightPos) {
+      return leftPos - rightPos
+    }
+    return left.name.localeCompare(right.name)
+  })
+}
+
+export function createTaskCustomPropertyStateMap(
+  descriptors: TaskCustomPropertyDescriptor[],
+): TaskCustomPropertyStateMap {
+  const map: TaskCustomPropertyStateMap = {}
+
+  for (const descriptor of descriptors) {
+    map[descriptor.name] = {
+      value: cloneTaskCustomPropertyValue(descriptor.initialValue),
+      present: descriptor.initialPresent,
+    }
+  }
+
+  return map
+}
+
+export function buildTaskCustomRefData(
+  descriptors: TaskCustomPropertyDescriptor[],
+  states: TaskCustomPropertyStateMap,
+): BlockProperty[] {
+  const payload: BlockProperty[] = []
+
+  for (const descriptor of descriptors) {
+    if (!descriptor.supported) {
+      continue
+    }
+
+    const state = states[descriptor.name] ?? {
+      value: descriptor.initialValue,
+      present: descriptor.initialPresent,
+    }
+    const shouldPersist = state.present || descriptor.initialPresent
+    if (!shouldPersist) {
+      continue
+    }
+
+    payload.push({
+      name: descriptor.name,
+      type: descriptor.type,
+      value: serializeTaskCustomPropertyValue(
+        descriptor,
+        state.present ? state.value : getClearedTaskCustomPropertyValue(descriptor),
+      ),
+    })
+  }
+
+  return payload
+}
+
+export function mergeTaskRefData(
+  existingRefData: BlockProperty[] | undefined,
+  updates: BlockProperty[],
+): BlockProperty[] {
+  const normalizedUpdates = normalizeRefDataProperties(updates)
+  if (normalizedUpdates.length === 0) {
+    return normalizeRefDataProperties(existingRefData)
+  }
+
+  const nextByKey = new Map<string, BlockProperty>()
+  const remainingKeys = new Set<string>()
+  for (const update of normalizedUpdates) {
+    const key = normalizeTaskPropertyName(update.name).toLowerCase()
+    nextByKey.set(key, update)
+    remainingKeys.add(key)
+  }
+
+  const merged: BlockProperty[] = []
+  for (const property of normalizeRefDataProperties(existingRefData)) {
+    const key = normalizeTaskPropertyName(property.name).toLowerCase()
+    const nextProperty = nextByKey.get(key)
+    if (nextProperty != null) {
+      merged.push(nextProperty)
+      remainingKeys.delete(key)
+      continue
+    }
+
+    merged.push(property)
+  }
+
+  for (const update of normalizedUpdates) {
+    const key = normalizeTaskPropertyName(update.name).toLowerCase()
+    if (remainingKeys.has(key)) {
+      merged.push(update)
+      remainingKeys.delete(key)
+    }
+  }
+
+  return merged
+}
+
 export function validateNumericField(
   label: string,
   rawValue: string,
@@ -294,7 +506,7 @@ function getString(
   refData: BlockProperty[] | undefined,
   name: string,
 ): string | null {
-  const property = refData?.find((item) => item.name === name)
+  const property = findTaskProperty(refData, name)
   return typeof property?.value === "string" ? property.value : null
 }
 
@@ -302,7 +514,7 @@ function getStringArray(
   refData: BlockProperty[] | undefined,
   name: string,
 ): string[] | null {
-  const property = refData?.find((item) => item.name === name)
+  const property = findTaskProperty(refData, name)
   if (!Array.isArray(property?.value)) {
     return null
   }
@@ -315,7 +527,7 @@ function getNumber(
   refData: BlockProperty[] | undefined,
   name: string,
 ): number | null {
-  const property = refData?.find((item) => item.name === name)
+  const property = findTaskProperty(refData, name)
   return typeof property?.value === "number" ? property.value : null
 }
 
@@ -323,7 +535,7 @@ function getDate(
   refData: BlockProperty[] | undefined,
   name: string,
 ): Date | null {
-  const property = refData?.find((item) => item.name === name)
+  const property = findTaskProperty(refData, name)
   if (property?.value == null) {
     return null
   }
@@ -339,7 +551,7 @@ function getBoolean(
   refData: BlockProperty[] | undefined,
   name: string,
 ): boolean {
-  const property = refData?.find((item) => item.name === name)
+  const property = findTaskProperty(refData, name)
   return property?.value === true
 }
 
@@ -347,7 +559,7 @@ function getDbIdArray(
   refData: BlockProperty[] | undefined,
   name: string,
 ): DbId[] {
-  const property = refData?.find((item) => item.name === name)
+  const property = findTaskProperty(refData, name)
   if (!Array.isArray(property?.value)) {
     return []
   }
@@ -402,4 +614,365 @@ function normalizeTaskLabels(labels: string[]): string[] {
   }
 
   return normalizedLabels
+}
+
+function getReservedTaskPropertyNameSet(schema: TaskSchemaDefinition): Set<string> {
+  const names = new Set<string>()
+
+  for (const name of Object.values(schema.propertyNames)) {
+    names.add(normalizeTaskPropertyName(name).toLowerCase())
+  }
+  for (const name of TASK_RESERVED_CUSTOM_PROPERTY_NAMES) {
+    names.add(normalizeTaskPropertyName(name).toLowerCase())
+  }
+
+  return names
+}
+
+function resolveTaskCustomPropertyInitialState(
+  property: BlockProperty,
+  options?: ResolveTaskCustomPropertyDescriptorsOptions,
+): {
+  value: TaskCustomPropertyValue
+  present: boolean
+  rawValue?: unknown
+} {
+  const refProperty = findTaskProperty(options?.refData, property.name)
+  if (refProperty != null) {
+    return parseTaskCustomPropertyState(property, refProperty.value, true)
+  }
+
+  if (options?.includeSchemaDefaults === true) {
+    const defaultState = resolveTaskCustomPropertyDefaultState(property)
+    if (defaultState.present) {
+      return defaultState
+    }
+  }
+
+  return {
+    value: getEmptyTaskCustomPropertyValue(property),
+    present: false,
+    rawValue: undefined,
+  }
+}
+
+function resolveTaskCustomPropertyDefaultState(
+  property: BlockProperty,
+): {
+  value: TaskCustomPropertyValue
+  present: boolean
+  rawValue?: unknown
+} {
+  const typeArgs = isRecord(property.typeArgs) ? property.typeArgs : null
+  if (typeArgs?.defaultEnabled !== true || !("default" in typeArgs)) {
+    return {
+      value: getEmptyTaskCustomPropertyValue(property),
+      present: false,
+      rawValue: undefined,
+    }
+  }
+
+  return parseTaskCustomPropertyState(property, typeArgs.default, true)
+}
+
+function parseTaskCustomPropertyState(
+  property: BlockProperty,
+  rawValue: unknown,
+  present: boolean,
+): {
+  value: TaskCustomPropertyValue
+  present: boolean
+  rawValue?: unknown
+} {
+  const type = typeof property.type === "number" ? property.type : TASK_PROP_TYPE.TEXT
+  if (type === TASK_PROP_TYPE.TEXT) {
+    return {
+      value: typeof rawValue === "string" ? rawValue : "",
+      present,
+      rawValue,
+    }
+  }
+  if (type === TASK_PROP_TYPE.NUMBER) {
+    return {
+      value: typeof rawValue === "number" && Number.isFinite(rawValue) ? rawValue : null,
+      present,
+      rawValue,
+    }
+  }
+  if (type === TASK_PROP_TYPE.BOOLEAN) {
+    return {
+      value: rawValue === true,
+      present,
+      rawValue,
+    }
+  }
+  if (type === TASK_PROP_TYPE.DATE_TIME) {
+    return {
+      value: toTaskCustomDateValue(rawValue),
+      present,
+      rawValue,
+    }
+  }
+  if (type === TASK_PROP_TYPE.TEXT_CHOICES) {
+    if (getTaskTextChoicesSubType(property) === "multi") {
+      return {
+        value: normalizeStringValues(rawValue),
+        present,
+        rawValue,
+      }
+    }
+
+    return {
+      value: typeof rawValue === "string" ? rawValue : "",
+      present,
+      rawValue,
+    }
+  }
+  if (type === TASK_PROP_TYPE.BLOCK_REFS) {
+    return {
+      value: normalizeDbIdValues(rawValue),
+      present,
+      rawValue,
+    }
+  }
+
+  return {
+    value: null,
+    present,
+    rawValue,
+  }
+}
+
+function isSupportedTaskCustomProperty(property: BlockProperty): boolean {
+  if (
+    property.type === TASK_PROP_TYPE.TEXT ||
+    property.type === TASK_PROP_TYPE.NUMBER ||
+    property.type === TASK_PROP_TYPE.BOOLEAN ||
+    property.type === TASK_PROP_TYPE.DATE_TIME ||
+    property.type === TASK_PROP_TYPE.BLOCK_REFS
+  ) {
+    return true
+  }
+
+  if (property.type !== TASK_PROP_TYPE.TEXT_CHOICES) {
+    return false
+  }
+
+  const subType = getTaskTextChoicesSubType(property)
+  return subType === "single" || subType === "multi"
+}
+
+function serializeTaskCustomPropertyValue(
+  descriptor: TaskCustomPropertyDescriptor,
+  value: TaskCustomPropertyValue,
+): TaskCustomPropertyValue {
+  if (descriptor.type === TASK_PROP_TYPE.TEXT) {
+    if (typeof value !== "string") {
+      return null
+    }
+    const normalized = value.trim()
+    return normalized === "" ? null : value
+  }
+  if (descriptor.type === TASK_PROP_TYPE.NUMBER) {
+    return typeof value === "number" && Number.isFinite(value) ? value : null
+  }
+  if (descriptor.type === TASK_PROP_TYPE.BOOLEAN) {
+    return value === true
+  }
+  if (descriptor.type === TASK_PROP_TYPE.DATE_TIME) {
+    return toTaskCustomDateValue(value)
+  }
+  if (descriptor.type === TASK_PROP_TYPE.TEXT_CHOICES) {
+    if (getTaskTextChoicesSubType(descriptor) === "multi") {
+      return normalizeStringValues(value)
+    }
+
+    if (typeof value !== "string") {
+      return null
+    }
+    const normalized = value.trim()
+    return normalized === "" ? null : normalized
+  }
+  if (descriptor.type === TASK_PROP_TYPE.BLOCK_REFS) {
+    return normalizeDbIdValues(value)
+  }
+
+  return null
+}
+
+function getClearedTaskCustomPropertyValue(
+  descriptor: TaskCustomPropertyDescriptor,
+): TaskCustomPropertyValue {
+  if (
+    descriptor.type === TASK_PROP_TYPE.TEXT_CHOICES &&
+    getTaskTextChoicesSubType(descriptor) === "multi"
+  ) {
+    return []
+  }
+  if (descriptor.type === TASK_PROP_TYPE.BLOCK_REFS) {
+    return []
+  }
+  if (descriptor.type === TASK_PROP_TYPE.BOOLEAN) {
+    return false
+  }
+
+  return null
+}
+
+function getEmptyTaskCustomPropertyValue(
+  property: Pick<BlockProperty, "type" | "typeArgs">,
+): TaskCustomPropertyValue {
+  if (
+    property.type === TASK_PROP_TYPE.TEXT_CHOICES &&
+    getTaskTextChoicesSubType(property) === "multi"
+  ) {
+    return []
+  }
+  if (property.type === TASK_PROP_TYPE.BLOCK_REFS) {
+    return []
+  }
+  if (property.type === TASK_PROP_TYPE.BOOLEAN) {
+    return false
+  }
+  if (property.type === TASK_PROP_TYPE.TEXT) {
+    return ""
+  }
+
+  return null
+}
+
+function getTaskTextChoicesSubType(
+  property: Pick<BlockProperty, "typeArgs"> | Pick<TaskCustomPropertyDescriptor, "typeArgs">,
+): "single" | "multi" {
+  return typeof property.typeArgs?.subType === "string" && property.typeArgs.subType === "multi"
+    ? "multi"
+    : "single"
+}
+
+function cloneTaskCustomPropertyValue(
+  value: TaskCustomPropertyValue,
+): TaskCustomPropertyValue {
+  if (value instanceof Date) {
+    return new Date(value.getTime())
+  }
+  if (Array.isArray(value)) {
+    return [...value] as string[] | DbId[]
+  }
+
+  return value
+}
+
+function normalizeRefDataProperties(
+  refData: BlockProperty[] | undefined,
+): BlockProperty[] {
+  if (!Array.isArray(refData)) {
+    return []
+  }
+
+  const normalized: BlockProperty[] = []
+  const seen = new Set<string>()
+  for (const property of refData) {
+    const name = normalizeTaskPropertyName(property.name)
+    if (name === "") {
+      continue
+    }
+
+    const key = name.toLowerCase()
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    normalized.push({
+      ...property,
+      name,
+    })
+  }
+
+  return normalized
+}
+
+function findTaskProperty(
+  refData: BlockProperty[] | undefined,
+  name: string,
+): BlockProperty | undefined {
+  const normalizedName = normalizeTaskPropertyName(name).toLowerCase()
+  return normalizeRefDataProperties(refData).find((property) => {
+    return normalizeTaskPropertyName(property.name).toLowerCase() === normalizedName
+  })
+}
+
+function normalizeTaskPropertyName(name: unknown): string {
+  return typeof name === "string"
+    ? name.replace(/\s+/g, " ").trim()
+    : ""
+}
+
+function normalizeStringValues(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const normalizedValues: string[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue
+    }
+
+    const normalized = item.replace(/\s+/g, " ").trim()
+    if (normalized === "") {
+      continue
+    }
+
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    normalizedValues.push(normalized)
+  }
+
+  return normalizedValues
+}
+
+function normalizeDbIdValues(value: unknown): DbId[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const normalizedValues: DbId[] = []
+  const seen = new Set<DbId>()
+  for (const item of value) {
+    const parsed = Number(item)
+    if (!Number.isInteger(parsed) || seen.has(parsed)) {
+      continue
+    }
+
+    seen.add(parsed)
+    normalizedValues.push(parsed)
+  }
+
+  return normalizedValues
+}
+
+function toTaskCustomDateValue(value: unknown): Date | null {
+  if (value == null) {
+    return null
+  }
+  if (
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    !(value instanceof Date)
+  ) {
+    return null
+  }
+
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return value != null && typeof value === "object" && !Array.isArray(value)
 }

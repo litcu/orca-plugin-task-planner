@@ -13,11 +13,12 @@ import {
   isTaskWaitingStatus,
   type TaskSchemaDefinition,
 } from "./task-schema"
-import { getTaskPropertiesFromRef } from "./task-properties"
+import { getTaskPropertiesFromRef, mergeTaskRefData } from "./task-properties"
 
 const PROP_TYPE_JSON = 0
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
+const TEXT_CHOICES_PROP_TYPE = 6
 const TASK_TIMER_SCHEMA_VERSION = 1
 const POMODORO_DURATION_MS = 25 * 60 * 1000
 
@@ -476,8 +477,12 @@ async function promoteTaskStatusToDoingIfNeeded(
     return
   }
 
-  const payload: Array<{ name: string; type?: number; value: unknown }> = [
-    { name: schema.propertyNames.status, value: doingStatus },
+  const payload: BlockProperty[] = [
+    {
+      name: schema.propertyNames.status,
+      type: TEXT_CHOICES_PROP_TYPE,
+      value: doingStatus,
+    },
   ]
   if (values.startTime == null) {
     payload.push({
@@ -487,12 +492,26 @@ async function promoteTaskStatusToDoingIfNeeded(
     })
   }
 
+  if (taskRef != null) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setRefData",
+        null,
+        taskRef,
+        payload,
+      )
+      return
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
   await orca.commands.invokeEditorCommand(
     "core.editor.insertTag",
     null,
     target.writableBlockId,
     schema.tagAlias,
-    payload,
+    mergeTaskRefData(taskRef?.data, payload),
   )
 }
 
