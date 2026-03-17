@@ -101,6 +101,7 @@ function subscribeSettingsChanges() {
         }
 
         const message = error instanceof Error ? error.message : String(error)
+        orca.notify("error", message)
         console.error(t("Failed to apply task tag name: ${message}", { message }))
       })
   })
@@ -130,14 +131,20 @@ async function applyTaskTagNameChange(nextTaskTagName: string): Promise<void> {
     return
   }
 
-  const nextTaskTag = await getTaskTagByAlias(nextTaskTagName)
-  if (nextTaskTag == null) {
+  let tagRenamed = false
+  try {
     await renameTaskTagAlias(previousTaskTagName, nextTaskTagName)
-  }
+    tagRenamed = true
 
-  const schemaResult = await ensureTaskTagSchema(orca.state.locale, nextTaskTagName)
-  await setupRuntimeWithSchema(schemaResult.schema)
-  appliedTaskTagName = schemaResult.schema.tagAlias
+    const schemaResult = await ensureTaskTagSchema(orca.state.locale, nextTaskTagName)
+    await setupRuntimeWithSchema(schemaResult.schema)
+    appliedTaskTagName = schemaResult.schema.tagAlias
+  } catch (error) {
+    if (!tagRenamed) {
+      await restoreTaskTagNameSetting(previousTaskTagName)
+    }
+    throw error
+  }
 }
 
 async function renameTaskTagAlias(
@@ -174,6 +181,37 @@ async function getTaskTagByAlias(taskTagName: string): Promise<Block | null> {
     "get-block-by-alias",
     taskTagName,
   )) as Block | null
+}
+
+async function restoreTaskTagNameSetting(taskTagName: string): Promise<void> {
+  const pluginState = orca.state.plugins[pluginName]
+  if (pluginState == null) {
+    return
+  }
+
+  const currentSettings =
+    pluginState.settings != null && typeof pluginState.settings === "object"
+      ? pluginState.settings
+      : {}
+  const currentTaskTagName =
+    typeof currentSettings.taskTagName === "string"
+      ? currentSettings.taskTagName
+      : TASK_TAG_ALIAS
+  if (areTaskTagNamesEquivalent(currentTaskTagName, taskTagName)) {
+    return
+  }
+
+  const nextSettings = {
+    ...currentSettings,
+    taskTagName,
+  }
+
+  try {
+    await orca.plugins.setSettings("repo", pluginName, nextSettings)
+  } catch (error) {
+    console.error(error)
+    pluginState.settings = nextSettings
+  }
 }
 
 function areTaskTagNamesEquivalent(left: string, right: string): boolean {
