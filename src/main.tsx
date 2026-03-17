@@ -1,8 +1,10 @@
 import type { Block } from "./orca.d.ts"
+import { invalidateNextActionEvaluationCache } from "./core/dependency-engine"
 import { ensureTaskTagSchema, TASK_TAG_ALIAS, type TaskSchemaDefinition } from "./core/task-schema"
 import { setupTaskQuickActions } from "./core/task-service"
 import { setupTaskPopupEntry } from "./core/task-popup-entry"
 import { setupNextActionsEntry } from "./core/next-actions-entry"
+import { setActiveTaskRuntimeSchema } from "./core/task-runtime-schema"
 import {
   ensurePluginSettingsSchema,
   getPluginSettings,
@@ -13,7 +15,6 @@ import { setupL10N, t } from "./libs/l10n"
 import zhCN from "./translations/zhCN"
 
 const DAY_MS = 24 * 60 * 60 * 1000
-
 let pluginName: string
 let taskQuickActionsDisposer: (() => Promise<void>) | null = null
 let taskPopupEntryDisposer: (() => void) | null = null
@@ -139,6 +140,7 @@ async function applyTaskTagNameChange(nextTaskTagName: string): Promise<void> {
     const schemaResult = await ensureTaskTagSchema(orca.state.locale, nextTaskTagName)
     await setupRuntimeWithSchema(schemaResult.schema)
     appliedTaskTagName = schemaResult.schema.tagAlias
+    invalidateNextActionEvaluationCache()
   } catch (error) {
     if (!tagRenamed) {
       await restoreTaskTagNameSetting(previousTaskTagName)
@@ -232,6 +234,7 @@ async function setupRuntimeWithSchema(schema: TaskSchemaDefinition): Promise<voi
   taskQuickActionsDisposer = taskQuickActions.dispose
   taskPopupEntryDisposer = taskPopupEntry.dispose
   nextActionsEntryDisposer = nextActionsEntry.dispose
+  setActiveTaskRuntimeSchema(schema)
 }
 
 async function notifyStartupTaskSummary(

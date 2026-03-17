@@ -136,7 +136,7 @@ function registerCycleTaskStatusCommand(
   pluginName: string,
 ) {
   if (orca.state.commands[commandId] != null) {
-    return
+    orca.commands.unregisterEditorCommand(commandId)
   }
 
   orca.commands.registerEditorCommand(

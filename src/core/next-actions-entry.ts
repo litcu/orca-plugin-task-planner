@@ -56,9 +56,11 @@ export function setupNextActionsEntry(
     }
   }
 
-  if (orca.state.panelRenderers[panelType] == null) {
-    orca.panels.registerPanel(panelType, panelRenderer)
+  if (orca.state.panelRenderers[panelType] != null) {
+    orca.panels.unregisterPanel(panelType)
   }
+  orca.panels.registerPanel(panelType, panelRenderer)
+  refreshOpenedPanels(panelType, orca.state.panels)
 
   registerOpenCommand(openTaskViewsCommandId, t("Open task management panel"))
 
@@ -206,6 +208,25 @@ function findPanelIdByViewType(
   return findPanelByView(panelViewType, rootPanel)?.id ?? null
 }
 
+function refreshOpenedPanels(
+  panelViewType: string,
+  rootPanel: RowPanel,
+) {
+  const panelIds = findPanelIdsByViewType(panelViewType, rootPanel)
+  for (const panelId of panelIds) {
+    orca.nav.replace(panelViewType, {}, panelId)
+  }
+}
+
+function findPanelIdsByViewType(
+  panelViewType: string,
+  rootPanel: RowPanel,
+): string[] {
+  const matched: string[] = []
+  collectPanelsByView(panelViewType, rootPanel, matched)
+  return matched
+}
+
 function findPanelByView(
   panelViewType: string,
   panelNode: RowPanel | ColumnPanel | ViewPanel,
@@ -222,6 +243,23 @@ function findPanelByView(
   }
 
   return null
+}
+
+function collectPanelsByView(
+  panelViewType: string,
+  panelNode: RowPanel | ColumnPanel | ViewPanel,
+  matched: string[],
+) {
+  if (isViewPanel(panelNode)) {
+    if (panelNode.view === panelViewType) {
+      matched.push(panelNode.id)
+    }
+    return
+  }
+
+  for (const child of panelNode.children) {
+    collectPanelsByView(panelViewType, child, matched)
+  }
 }
 
 function isViewPanel(node: RowPanel | ColumnPanel | ViewPanel): node is ViewPanel {

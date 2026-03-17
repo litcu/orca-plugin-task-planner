@@ -20,6 +20,10 @@ import {
   type TaskViewsTab,
 } from "../core/task-views-state"
 import {
+  getActiveTaskRuntimeSchema,
+  subscribeActiveTaskRuntimeSchema,
+} from "../core/task-runtime-schema"
+import {
   collectNextActionEvaluations,
   collectNextActions,
   selectNextActionsFromEvaluations,
@@ -190,8 +194,15 @@ const DASHBOARD_ACTIONABLE_BLOCKED_REASON_SET = new Set<NextActionBlockedReason>
   "ancestor-dependency-unmet",
 ])
 
-export function TaskViewsPanel(props: TaskViewsPanelProps) {
+export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const React = window.React
+  const [schema, setSchema] = React.useState<TaskSchemaDefinition>(() => {
+    return getActiveTaskRuntimeSchema(baseProps.schema)
+  })
+  const props = {
+    ...baseProps,
+    schema,
+  }
   const Button = orca.components.Button
   const ConfirmBox = orca.components.ConfirmBox
   const DatePicker = orca.components.DatePicker
@@ -201,6 +212,16 @@ export function TaskViewsPanel(props: TaskViewsPanelProps) {
   const Select = orca.components.Select
   const Segmented = orca.components.Segmented
   const Switch = orca.components.Switch
+
+  React.useEffect(() => {
+    setSchema(getActiveTaskRuntimeSchema(baseProps.schema))
+  }, [baseProps.schema])
+
+  React.useEffect(() => {
+    return subscribeActiveTaskRuntimeSchema((nextSchema) => {
+      setSchema(nextSchema)
+    })
+  }, [])
 
   const isChinese = orca.state.locale === "zh-CN"
   const [tab, setTab] = React.useState<TaskViewsTab>(() => {
