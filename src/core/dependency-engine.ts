@@ -4,6 +4,7 @@ import {
   type TaskPropertyValues,
 } from "./task-properties"
 import {
+  isTaskCanceledStatus,
   isTaskDoneStatus,
   isTaskWaitingStatus,
   type DependencyMode,
@@ -186,7 +187,7 @@ export function evaluateNextAction(
   const parentBlockId = liveTaskBlock.parent != null ? getMirrorId(liveTaskBlock.parent) : null
 
   const blockedReason: NextActionEvaluation["blockedReason"] = []
-  if (isTaskDoneStatus(status, schema) || isCanceledStatus(status)) {
+  if (isTaskDoneStatus(status, schema) || isTaskCanceledStatus(status)) {
     blockedReason.push(isTaskDoneStatus(status, schema) ? "completed" : "canceled")
   }
 
@@ -896,7 +897,7 @@ function hasOpenSubtaskByTaskId(
     visited.add(childTaskId)
 
     const status = subtaskContext.statusByTaskId.get(childTaskId)
-    if (status != null && !isTaskDoneStatus(status, schema) && !isCanceledStatus(status)) {
+    if (status != null && !isTaskDoneStatus(status, schema) && !isTaskCanceledStatus(status)) {
       return true
     }
 
@@ -1302,16 +1303,6 @@ function getTaskStatus(
   schema: TaskSchemaDefinition,
 ): string {
   return getTaskPropertiesFromRef(refData, schema).status
-}
-
-function isCanceledStatus(status: string): boolean {
-  const normalized = status.trim().toLowerCase()
-  return (
-    normalized === "canceled" ||
-    normalized === "cancelled" ||
-    normalized === "已取消" ||
-    normalized === "取消"
-  )
 }
 
 function resolveTaskText(block: Block, tagAlias: string): string {

@@ -229,6 +229,23 @@ export function isTaskDoneStatus(
   return status === getTaskStatusValues(schema).done
 }
 
+export function isTaskCanceledStatus(status: string): boolean {
+  const normalized = status.trim().toLowerCase()
+  return (
+    normalized === "canceled" ||
+    normalized === "cancelled" ||
+    normalized === "已取消" ||
+    normalized === "取消"
+  )
+}
+
+export function isTaskClosedStatus(
+  status: string,
+  schema: TaskSchemaDefinition,
+): boolean {
+  return isTaskDoneStatus(status, schema) || isTaskCanceledStatus(status)
+}
+
 export function getNextTaskStatusInMainCycle(
   currentStatus: string | null,
   schema: TaskSchemaDefinition,

@@ -2,6 +2,8 @@ import type { BlockProperty, BlockRef, DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import {
   getTaskStatusValues,
+  isTaskCanceledStatus,
+  isTaskClosedStatus,
   isTaskDoneStatus,
   type TaskSchemaDefinition,
 } from "../core/task-schema"
@@ -93,7 +95,9 @@ export function TaskListRow(props: TaskListRowProps) {
   const statusColor = resolveStatusColor(props.item.status, props.schema)
   const statusVisualState = resolveStatusVisualState(props.item.status, props.schema)
   const isCompleted = isTaskDoneStatus(props.item.status, props.schema)
-  const dueInfo = resolveDueInfo(props.item.endTime, isCompleted, props.isChinese)
+  const isCanceled = isTaskCanceledStatus(props.item.status)
+  const isClosed = isTaskClosedStatus(props.item.status, props.schema)
+  const dueInfo = resolveDueInfo(props.item.endTime, isClosed, props.isChinese)
   const dueBadgeStyle = resolveDueBadgeStyle(dueInfo.tone)
   const reviewInfo = resolveReviewInfo(props.item.nextReview, props.isChinese)
   const reviewBadgeStyle = resolveReviewBadgeStyle(reviewInfo.tone)
@@ -118,10 +122,10 @@ export function TaskListRow(props: TaskListRowProps) {
     props.loading ||
     props.updating ||
     props.timerUpdating ||
-    (!timerData.running && isCompleted)
+    (!timerData.running && isClosed)
   const timerButtonTitle =
-    !timerData.running && isCompleted
-      ? t("Completed task cannot start timer")
+    !timerData.running && isClosed
+      ? t("Closed task cannot start timer")
       : timerData.running
         ? t("Stop timer")
         : t("Start timer")
@@ -212,7 +216,7 @@ export function TaskListRow(props: TaskListRowProps) {
         borderRadius: "9px",
         background: props.contextOnly
           ? "linear-gradient(120deg, rgba(148, 163, 184, 0.04), rgba(148, 163, 184, 0.01))"
-          : isCompleted
+          : isClosed
             ? hovered || focused
               ? "linear-gradient(120deg, rgba(148, 163, 184, 0.2), var(--orca-color-bg-1) 58%, rgba(148, 163, 184, 0.1))"
               : "linear-gradient(120deg, rgba(148, 163, 184, 0.16), var(--orca-color-bg-1) 58%, rgba(148, 163, 184, 0.08))"
@@ -221,7 +225,7 @@ export function TaskListRow(props: TaskListRowProps) {
             : "linear-gradient(120deg, var(--orca-color-bg-2), var(--orca-color-bg-1) 58%, rgba(148, 163, 184, 0.06))",
         borderColor: props.contextOnly
           ? "rgba(148, 163, 184, 0.24)"
-          : isCompleted
+          : isClosed
           ? hovered || focused
             ? "rgba(148, 163, 184, 0.65)"
             : "rgba(148, 163, 184, 0.4)"
@@ -230,7 +234,7 @@ export function TaskListRow(props: TaskListRowProps) {
             : "var(--orca-color-border)",
         boxShadow: props.contextOnly
           ? "none"
-          : isCompleted
+          : isClosed
           ? "0 1px 3px rgba(15, 23, 42, 0.06)"
           : hovered || focused
             ? "0 6px 14px rgba(15, 23, 42, 0.13)"
@@ -238,7 +242,7 @@ export function TaskListRow(props: TaskListRowProps) {
         transform: hovered && !props.contextOnly ? "translateY(-1px)" : "translateY(0)",
         transition:
           "transform 170ms ease, box-shadow 170ms ease, background 170ms ease, border-color 170ms ease, filter 170ms ease, opacity 170ms ease",
-        opacity: props.contextOnly ? (hovered || focused ? 0.68 : 0.58) : isCompleted ? 0.86 : 1,
+        opacity: props.contextOnly ? (hovered || focused ? 0.68 : 0.58) : isClosed ? 0.86 : 1,
         filter: props.contextOnly ? "saturate(0.38) brightness(0.94)" : "none",
         animationName: "mloTaskRowEnter",
         animationDuration: "260ms",
@@ -373,7 +377,7 @@ export function TaskListRow(props: TaskListRowProps) {
           background: "transparent",
           color: props.contextOnly
             ? "var(--orca-color-text-2)"
-            : isCompleted
+            : isClosed
               ? "var(--orca-color-text-2)"
               : "var(--orca-color-text)",
           textAlign: "left",
@@ -416,10 +420,11 @@ export function TaskListRow(props: TaskListRowProps) {
               letterSpacing: "0.01em",
               color: props.contextOnly
                 ? "var(--orca-color-text-2)"
-                : isCompleted
+                : isClosed
                   ? "var(--orca-color-text-2)"
                   : "var(--orca-color-text)",
               textDecoration: isCompleted ? "line-through" : "none",
+              fontStyle: isCanceled ? "italic" : "normal",
             },
           },
           props.item.text,
@@ -436,13 +441,13 @@ export function TaskListRow(props: TaskListRowProps) {
                 padding: "0 6px",
                 height: "16px",
                 borderRadius: "999px",
-                border: isCompleted
+                border: isClosed
                   ? "1px solid rgba(148, 163, 184, 0.3)"
                   : "1px solid rgba(37, 99, 235, 0.24)",
-                background: isCompleted
+                background: isClosed
                   ? "rgba(148, 163, 184, 0.09)"
                   : "rgba(37, 99, 235, 0.12)",
-                color: isCompleted
+                color: isClosed
                   ? "var(--orca-color-text-2)"
                   : "var(--orca-color-text-blue, #2563eb)",
                 fontSize: "10px",
@@ -1053,7 +1058,7 @@ function StarIcon(props: { filled: boolean }) {
   )
 }
 
-type StatusVisualState = "todo" | "doing" | "waiting" | "done"
+type StatusVisualState = "todo" | "doing" | "waiting" | "done" | "canceled"
 
 function resolveStatusVisualState(
   status: string,
@@ -1061,6 +1066,9 @@ function resolveStatusVisualState(
 ): StatusVisualState {
   const { todo: todoStatus, doing: doingStatus, waiting: waitingStatus, done: doneStatus } =
     getTaskStatusValues(schema)
+  if (isTaskCanceledStatus(status)) {
+    return "canceled"
+  }
   if (status === doneStatus) {
     return "done"
   }
@@ -1101,6 +1109,10 @@ function StatusIcon(props: { state: StatusVisualState }) {
       ? React.createElement("path", {
           d: "M8.4 12.3l2.1 2.2 5-5.2",
         })
+      : props.state === "canceled"
+        ? React.createElement("path", {
+            d: "M8.5 8.5l7 7m0-7l-7 7",
+          })
       : props.state === "waiting"
         ? React.createElement("path", {
             d: "M12 8.6v3.8l2.4 1.4",
@@ -1120,6 +1132,9 @@ function StatusIcon(props: { state: StatusVisualState }) {
 function resolveStatusColor(status: string, schema: TaskSchemaDefinition): string {
   const { doing: doingStatus, waiting: waitingStatus, done: doneStatus } =
     getTaskStatusValues(schema)
+  if (isTaskCanceledStatus(status)) {
+    return "var(--orca-color-text-2)"
+  }
   if (status === doneStatus) {
     return "var(--orca-color-text-2)"
   }
@@ -1194,7 +1209,7 @@ function resolveReviewBadgeStyle(tone: ReviewInfoTone): {
 
 function resolveDueInfo(
   endTime: Date | null,
-  isCompleted: boolean,
+  isClosed: boolean,
   isChinese: boolean,
 ): { text: string; color: string; strong: boolean; tone: DueInfoTone } {
   if (endTime == null || Number.isNaN(endTime.getTime())) {
@@ -1210,7 +1225,7 @@ function resolveDueInfo(
   const nowTime = now.getTime()
   const dueTime = endTime.getTime()
 
-  if (isCompleted) {
+  if (isClosed) {
     return {
       text: endTime.toLocaleDateString(isChinese ? "zh-CN" : undefined),
       color: "var(--orca-color-text-2)",

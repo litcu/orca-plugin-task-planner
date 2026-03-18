@@ -7,6 +7,9 @@
 } from "../orca.d.ts"
 import {
   getTaskStatusValues,
+  isTaskCanceledStatus,
+  isTaskClosedStatus,
+  isTaskDoneStatus,
   type TaskSchemaDefinition,
 } from "../core/task-schema"
 import {
@@ -184,7 +187,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const DASHBOARD_DUE_DAYS = 7
 
 type BlockedReasonCountMap = Partial<Record<NextActionBlockedReason, number>>
-type DashboardListQuickFilter = TaskDashboardQuickFilter | null
+type AllTasksQuickFilter = TaskDashboardQuickFilter | "doing" | null
 
 const DASHBOARD_ACTIONABLE_BLOCKED_REASON_SET = new Set<NextActionBlockedReason>([
   "dependency-unmet",
@@ -257,7 +260,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const [filterRoot, setFilterRoot] = React.useState<TaskFilterGroupNode>(() =>
     createTaskFilterGroup(FILTER_GROUP_ROOT_ID, "and")
   )
-  const [showCompletedInAllTasks, setShowCompletedInAllTasks] = React.useState(true)
+  const [showClosedInAllTasks, setShowClosedInAllTasks] = React.useState(true)
   const [updatingIds, setUpdatingIds] = React.useState<Set<DbId>>(new Set())
   const [timingIds, setTimingIds] = React.useState<Set<DbId>>(new Set())
   const [starringIds, setStarringIds] = React.useState<Set<DbId>>(new Set())
@@ -276,9 +279,10 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const [dashboardBlockedTaskIds, setDashboardBlockedTaskIds] = React.useState<Set<DbId>>(
     () => new Set(),
   )
-  const [dashboardQuickFilter, setDashboardQuickFilter] = React.useState<DashboardListQuickFilter>(
+  const [allTasksQuickFilter, setAllTasksQuickFilter] = React.useState<AllTasksQuickFilter>(
     null,
   )
+  const [closedSectionCollapsed, setClosedSectionCollapsed] = React.useState(true)
   const [dashboardGeneratedAt, setDashboardGeneratedAt] = React.useState<Date>(() => new Date())
   const [timerNowMs, setTimerNowMs] = React.useState<number>(() => Date.now())
   const [panelSettings, setPanelSettings] = React.useState<TaskPlannerSettings>(() =>
@@ -393,6 +397,14 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         } else if (targetTab === "next-actions") {
           const nextActions = await collectNextActions(props.schema)
           setNextActionItems(nextActions)
+        } else if (targetTab === "all-tasks") {
+          const [allTasks, evaluations] = await Promise.all([
+            collectAllTasks(props.schema),
+            collectNextActionEvaluations(props.schema),
+          ])
+          setAllTaskItems(allTasks)
+          setAllTaskItemsLoaded(true)
+          setDashboardBlockedTaskIds(collectDashboardBlockedTaskIds(evaluations))
         } else if (targetTab === "my-day") {
           const allTasks = await collectAllTasks(props.schema)
           setAllTaskItems(allTasks)
@@ -762,12 +774,12 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   }, [tab])
 
   React.useEffect(() => {
-    if (tab === "all-tasks" || dashboardQuickFilter == null) {
+    if (tab === "all-tasks" || allTasksQuickFilter == null) {
       return
     }
 
-    setDashboardQuickFilter(null)
-  }, [dashboardQuickFilter, tab])
+    setAllTasksQuickFilter(null)
+  }, [allTasksQuickFilter, tab])
 
   React.useEffect(() => {
     // Listen for block changes and do lightweight refresh.
@@ -1422,12 +1434,12 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   }, [])
 
   const applyDashboardQuickFilter = React.useCallback((filter: TaskDashboardQuickFilter) => {
-    setDashboardQuickFilter(filter)
+    setAllTasksQuickFilter(filter)
     setPreferredTaskViewsTab("all-tasks")
   }, [])
 
-  const clearDashboardQuickFilter = React.useCallback(() => {
-    setDashboardQuickFilter(null)
+  const clearAllTasksQuickFilter = React.useCallback(() => {
+    setAllTasksQuickFilter(null)
   }, [])
 
   const toggleCollapsed = React.useCallback((blockId: DbId) => {
@@ -1718,23 +1730,23 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     })
   }, [filterFieldByKey, filterFields])
 
-  const { done: doneStatus } = getTaskStatusValues(props.schema)
-  const dashboardQuickFilterContext = React.useMemo(() => {
-    if (dashboardQuickFilter == null || tab !== "all-tasks") {
+  const { done: doneStatus, doing: doingStatus } = getTaskStatusValues(props.schema)
+  const allTasksQuickFilterContext = React.useMemo(() => {
+    if (allTasksQuickFilter == null || tab !== "all-tasks") {
       return null
     }
 
     const now = new Date()
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     return {
-      filter: dashboardQuickFilter,
+      filter: allTasksQuickFilter,
       nowMs: now.getTime(),
       startOfTodayMs: startOfToday.getTime(),
       endOfTodayMs: startOfToday.getTime() + DAY_MS,
-      doneStatus,
+      doingStatus,
       blockedTaskIds: dashboardBlockedTaskIds,
     }
-  }, [dashboardBlockedTaskIds, dashboardQuickFilter, doneStatus, tab])
+  }, [allTasksQuickFilter, dashboardBlockedTaskIds, doingStatus, tab])
 
   const matchesItem = React.useCallback(
     (item: FilterableTaskItem) => {
@@ -1743,16 +1755,16 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       }
 
       if (!hasActiveFilters) {
-        if (dashboardQuickFilterContext == null) {
+        if (allTasksQuickFilterContext == null) {
           return true
         }
       } else if (!evaluateTaskFilterGroup(filterRoot, item, filterFieldByKey)) {
         return false
       }
 
-      return matchesDashboardQuickFilter(item, dashboardQuickFilterContext)
+      return matchesAllTasksQuickFilter(item, allTasksQuickFilterContext, props.schema)
     },
-    [dashboardQuickFilterContext, filterFieldByKey, filterRoot, hasActiveFilters, normalizedQuickSearch],
+    [allTasksQuickFilterContext, filterFieldByKey, filterRoot, hasActiveFilters, normalizedQuickSearch, props.schema],
   )
 
   const filteredNextActionItems = React.useMemo(() => {
@@ -1767,7 +1779,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     const nowMs = Date.now()
     const endMs = nowMs + panelSettings.dueSoonDays * DAY_MS
     return allTaskItems
-      .filter((item: AllTaskItem) => item.status !== doneStatus)
+      .filter((item: AllTaskItem) => !isTaskClosedStatus(item.status, props.schema))
       .filter((item: AllTaskItem) =>
         isDueSoon(
           item.endTime,
@@ -1779,19 +1791,19 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       .sort(compareDueSoonItems)
   }, [
     allTaskItems,
-    doneStatus,
     matchesItem,
     panelSettings.dueSoonDays,
     panelSettings.dueSoonIncludeOverdue,
+    props.schema,
   ])
   const filteredReviewDueTaskItems = React.useMemo(() => {
     const nowMs = Date.now()
     return allTaskItems
-      .filter((item: AllTaskItem) => item.status !== doneStatus)
+      .filter((item: AllTaskItem) => !isTaskClosedStatus(item.status, props.schema))
       .filter((item: AllTaskItem) => isTaskDueForReview(item, nowMs))
       .filter(matchesItem)
       .sort(compareReviewDueItems)
-  }, [allTaskItems, doneStatus, matchesItem])
+  }, [allTaskItems, matchesItem, props.schema])
   const filteredCustomViewTaskItems = React.useMemo(() => {
     if (!isCustomTaskViewsTab(tab) || activeCustomView == null) {
       return []
@@ -2070,26 +2082,109 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     }
   }, [markTaskItemsReviewed, selectedReviewItems])
 
-  const allTaskItemsForTree = React.useMemo(() => {
-    if (showCompletedInAllTasks) {
-      return allTaskItems
+  const allTaskItemById = React.useMemo(() => {
+    const map = new Map<DbId, AllTaskItem>()
+    for (const item of allTaskItems) {
+      map.set(item.blockId, item)
     }
-
-    return allTaskItems.filter((item: AllTaskItem) => item.status !== doneStatus)
-  }, [allTaskItems, doneStatus, showCompletedInAllTasks])
-  const allTaskTree = React.useMemo(() => buildTaskTree(allTaskItemsForTree), [allTaskItemsForTree])
-  const filteredAllTaskTree = React.useMemo(() => {
-    return filterTreeWithContext(allTaskTree, matchesItem)
-  }, [allTaskTree, matchesItem])
-  const visibleAllTaskRows = React.useMemo(() => {
-    return flattenVisibleTree(filteredAllTaskTree, collapsedIds)
-  }, [collapsedIds, filteredAllTaskTree])
+    return map
+  }, [allTaskItems])
+  const openAllTaskItems = React.useMemo(() => {
+    return allTaskItems.filter((item: AllTaskItem) => !isTaskClosedStatus(item.status, props.schema))
+  }, [allTaskItems, props.schema])
+  const closedAllTaskItems = React.useMemo(() => {
+    return allTaskItems.filter((item: AllTaskItem) => isTaskClosedStatus(item.status, props.schema))
+  }, [allTaskItems, props.schema])
+  const filteredOpenAllTaskItems = React.useMemo(() => {
+    return openAllTaskItems.filter(matchesItem)
+  }, [matchesItem, openAllTaskItems])
+  const filteredClosedAllTaskItems = React.useMemo(() => {
+    return closedAllTaskItems.filter(matchesItem)
+  }, [closedAllTaskItems, matchesItem])
+  const openTaskIdSet = React.useMemo(() => {
+    return new Set<DbId>(openAllTaskItems.map((item: AllTaskItem) => item.blockId))
+  }, [openAllTaskItems])
+  const closedTaskIdSet = React.useMemo(() => {
+    return new Set<DbId>(closedAllTaskItems.map((item: AllTaskItem) => item.blockId))
+  }, [closedAllTaskItems])
+  const openTaskTree = React.useMemo(() => buildTaskTree(openAllTaskItems), [openAllTaskItems])
+  const closedTaskTree = React.useMemo(() => buildTaskTree(closedAllTaskItems), [closedAllTaskItems])
+  const filteredOpenTaskTree = React.useMemo(() => {
+    return filterTreeWithContext(openTaskTree, matchesItem)
+  }, [matchesItem, openTaskTree])
+  const filteredClosedTaskTree = React.useMemo(() => {
+    return filterTreeWithContext(closedTaskTree, matchesItem)
+  }, [closedTaskTree, matchesItem])
+  const visibleOpenTaskRows = React.useMemo(() => {
+    return flattenVisibleTree(filteredOpenTaskTree, collapsedIds)
+  }, [collapsedIds, filteredOpenTaskTree])
+  const visibleClosedTaskRows = React.useMemo(() => {
+    return flattenVisibleTree(filteredClosedTaskTree, collapsedIds)
+  }, [collapsedIds, filteredClosedTaskTree])
+  const filteredClosedDoneCount = React.useMemo(() => {
+    return filteredClosedAllTaskItems.filter((item: AllTaskItem) =>
+      isTaskDoneStatus(item.status, props.schema)
+    ).length
+  }, [filteredClosedAllTaskItems, props.schema])
+  const filteredClosedCanceledCount = React.useMemo(() => {
+    return filteredClosedAllTaskItems.filter((item: AllTaskItem) =>
+      isTaskCanceledStatus(item.status)
+    ).length
+  }, [filteredClosedAllTaskItems])
+  const allTasksVisibleCount = visibleOpenTaskRows.length +
+    (showClosedInAllTasks ? visibleClosedTaskRows.length : 0)
+  const hasOpenTaskSection = filteredOpenAllTaskItems.length > 0
+  const hasClosedTaskSection = showClosedInAllTasks && filteredClosedAllTaskItems.length > 0
+  const hasAllTaskResults = hasOpenTaskSection || hasClosedTaskSection
   const collapsibleVisibleTaskIds = React.useMemo(() => {
-    return collectCollapsibleNodeIds(filteredAllTaskTree)
-  }, [filteredAllTaskTree])
+    const ids = collectCollapsibleNodeIds(filteredOpenTaskTree)
+    if (showClosedInAllTasks && !closedSectionCollapsed) {
+      ids.push(...collectCollapsibleNodeIds(filteredClosedTaskTree))
+    }
+    return ids
+  }, [
+    closedSectionCollapsed,
+    filteredClosedTaskTree,
+    filteredOpenTaskTree,
+    showClosedInAllTasks,
+  ])
   const canToggleAllCollapsed = collapsibleVisibleTaskIds.length > 0
   const allVisibleCollapsed = canToggleAllCollapsed &&
     collapsibleVisibleTaskIds.every((blockId: DbId) => collapsedIds.has(blockId))
+
+  React.useEffect(() => {
+    if (showClosedInAllTasks) {
+      return
+    }
+
+    setClosedSectionCollapsed(true)
+  }, [showClosedInAllTasks])
+
+  React.useEffect(() => {
+    if (tab !== "all-tasks" || !showClosedInAllTasks) {
+      return
+    }
+
+    const hasRefiningConditions =
+      normalizedQuickSearch !== "" ||
+      hasActiveFilters ||
+      allTasksQuickFilter != null
+    if (!hasRefiningConditions) {
+      return
+    }
+
+    if (filteredOpenAllTaskItems.length === 0 && filteredClosedAllTaskItems.length > 0) {
+      setClosedSectionCollapsed(false)
+    }
+  }, [
+    allTasksQuickFilter,
+    filteredClosedAllTaskItems.length,
+    filteredOpenAllTaskItems.length,
+    hasActiveFilters,
+    normalizedQuickSearch,
+    showClosedInAllTasks,
+    tab,
+  ])
 
   const toggleAllCollapsed = React.useCallback(() => {
     if (collapsibleVisibleTaskIds.length === 0) {
@@ -2111,6 +2206,9 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       return next
     })
   }, [allVisibleCollapsed, collapsibleVisibleTaskIds])
+  const toggleClosedSectionCollapsed = React.useCallback(() => {
+    setClosedSectionCollapsed((prev: boolean) => !prev)
+  }, [])
 
   const taskItemById = React.useMemo(() => {
     const map = new Map<DbId, AllTaskItem>()
@@ -2427,7 +2525,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
             ? t("Review")
             : activeCustomView?.name ?? t("Custom View")
   const visibleCount = isAllTasksTab
-    ? visibleAllTaskRows.length
+    ? allTasksVisibleCount
     : isDashboardTab
       ? allTaskItems.length
       : isMyDayTab
@@ -2466,6 +2564,18 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const countText = isDashboardTab
     ? t("Total ${count} tasks", { count: String(visibleCount) })
     : t("Showing ${count} items", { count: String(visibleCount) })
+  const allTasksQuickFilterOptions = React.useMemo<Array<{
+    value: AllTasksQuickFilter
+    label: string
+  }>>(() => {
+    return [
+      { value: null, label: t("All") },
+      { value: "doing" as const, label: doingStatus },
+      { value: "overdue" as const, label: t("Only overdue") },
+      { value: "due-today" as const, label: t("Only due today") },
+      { value: "blocked" as const, label: t("Only blocked") },
+    ]
+  }, [doingStatus])
   const groupLogicOptions = [
     { value: "and", label: t("AND") },
     { value: "or", label: t("OR") },
@@ -3010,6 +3120,245 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
           }),
     )
   }
+
+  const renderAllTaskSectionHeader = (
+    title: string,
+    countText: string,
+    options?: {
+      collapsed?: boolean
+      onToggle?: () => void
+    },
+  ) => {
+    const collapsible = options?.onToggle != null
+    return React.createElement(
+      "div",
+      {
+        key: `${title}-${countText}`,
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "10px",
+          padding: "6px 10px 2px",
+          marginTop: "2px",
+        },
+      },
+      React.createElement(
+        "div",
+        {
+          style: {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+            minWidth: 0,
+          },
+        },
+        collapsible
+          ? React.createElement(
+              "button",
+              {
+                type: "button",
+                onClick: () => options?.onToggle?.(),
+                style: {
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  padding: 0,
+                  color: "var(--orca-color-text)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "12px",
+                  fontWeight: 650,
+                },
+              },
+              React.createElement("i", {
+                className: options?.collapsed ? "ti ti-chevron-right" : "ti ti-chevron-down",
+                style: {
+                  fontSize: "14px",
+                  lineHeight: 1,
+                },
+              }),
+              React.createElement(
+                "span",
+                null,
+                title,
+              ),
+            )
+          : React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "12px",
+                  fontWeight: 650,
+                  color: "var(--orca-color-text)",
+                },
+              },
+              title,
+            ),
+        React.createElement(
+          "span",
+          {
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "0 8px",
+              minHeight: "20px",
+              borderRadius: "999px",
+              border: "1px solid rgba(148, 163, 184, 0.28)",
+              background: "rgba(148, 163, 184, 0.08)",
+              color: "var(--orca-color-text-2)",
+              fontSize: "10.5px",
+              whiteSpace: "nowrap",
+            },
+          },
+          countText,
+        ),
+      ),
+    )
+  }
+
+  const renderAllTaskRow = (
+    row: VisibleTreeRow,
+    index: number,
+    sectionKey: string,
+    sectionTaskIdSet: Set<DbId>,
+  ) => {
+    const isDragging = draggingTaskId === row.node.item.blockId
+    const moving = movingIds.has(row.node.item.blockId)
+    const activeDropPosition =
+      dropTarget?.targetTaskId === row.node.item.blockId
+        ? dropTarget.position
+        : null
+    const detachedRoot =
+      row.depth === 0 &&
+      row.node.item.parentId != null &&
+      !sectionTaskIdSet.has(row.node.item.parentId)
+    const parentTaskNames = detachedRoot
+      ? resolveTaskAncestorNames(row.node.item, allTaskItemById)
+      : []
+    const rowItem: TaskListRowItem = parentTaskNames.length > 0
+      ? {
+          ...row.node.item,
+          parentTaskNames,
+        }
+      : row.node.item
+
+    return React.createElement(
+      "div",
+      {
+        key: `${sectionKey}-${row.node.item.blockId}`,
+        draggable: !loading && !moving,
+        onDragStart: (event: DragEvent) => {
+          handleTaskDragStart(event, row.node.item.blockId)
+        },
+        onDragEnd: () => handleTaskDragEnd(),
+        onDragOver: (event: DragEvent) => {
+          handleTaskRowDragOver(event, row.node.item.blockId, row.depth)
+        },
+        onDrop: (event: DragEvent) => {
+          handleTaskRowDrop(event, row.node.item.blockId, row.depth)
+        },
+        style: {
+          position: "relative",
+          borderTop: activeDropPosition === "before"
+            ? "2px solid var(--orca-color-text-blue, #2563eb)"
+            : "2px solid transparent",
+          borderBottom: activeDropPosition === "after"
+            ? "2px solid var(--orca-color-text-blue, #2563eb)"
+            : "2px solid transparent",
+          borderRadius: "10px",
+          background: activeDropPosition === "child"
+            ? "rgba(37, 99, 235, 0.1)"
+            : "transparent",
+          opacity: isDragging ? 0.42 : 1,
+          transition: "background 120ms ease, opacity 120ms ease",
+        },
+      },
+      React.createElement(TaskListRow, {
+        item: rowItem,
+        schema: props.schema,
+        isChinese,
+        rowIndex: index,
+        depth: row.depth,
+        contextOnly: row.node.contextOnly,
+        loading,
+        updating: updatingIds.has(row.node.item.blockId) || moving,
+        showCollapseToggle: row.hasChildren,
+        collapsed: row.collapsed,
+        showParentTaskContext: parentTaskNames.length > 0,
+        showReviewAction: false,
+        showReviewSelection: false,
+        reviewSelected: false,
+        starUpdating: starringIds.has(row.node.item.blockId),
+        timerEnabled: panelSettings.taskTimerEnabled,
+        timerMode: panelSettings.taskTimerMode,
+        timerNowMs,
+        timerUpdating: timingIds.has(row.node.item.blockId),
+        reviewUpdating: reviewingIds.has(row.node.item.blockId),
+        onToggleCollapse: row.hasChildren
+          ? () => toggleCollapsed(row.node.item.blockId)
+          : undefined,
+        onToggleReviewSelected: undefined,
+        onToggleStatus: () => toggleTaskStatus(row.node.item),
+        onNavigate: () => navigateToTask(row.node.item),
+        onToggleStar: () => toggleTaskStar(row.node.item),
+        onToggleTimer: () => toggleTaskTimer(row.node.item),
+        onClearTimer: () => clearTaskTimerForItem(row.node.item),
+        onMarkReviewed: () => markTaskReviewed(row.node.item),
+        onAddSubtask: () => addSubtask(row.node.item),
+        onDeleteTaskTag: () => removeTaskTag(row.node.item),
+        onDeleteTaskBlock: () => deleteTaskBlock(row.node.item),
+        showMyDayAction: panelSettings.myDayEnabled,
+        myDaySelected: myDayTaskIdSet.has(row.node.item.blockId),
+        myDayUpdating: myDayUpdatingIds.has(row.node.item.blockId),
+        onAddToMyDay: () => addTaskToMyDay(row.node.item),
+        onRemoveFromMyDay: () => removeTaskFromMyDay(row.node.item),
+        onOpen: () => openTaskProperty(row.node.item.blockId),
+      }),
+    )
+  }
+
+  const allTasksListNodes = isAllTasksTab
+    ? [
+        ...(hasOpenTaskSection
+          ? [
+              renderAllTaskSectionHeader(
+                t("Open tasks"),
+                String(filteredOpenAllTaskItems.length),
+              ),
+              ...visibleOpenTaskRows.map((row: VisibleTreeRow, index: number) =>
+                renderAllTaskRow(row, index, "open", openTaskIdSet)
+              ),
+            ]
+          : []),
+        ...(hasClosedTaskSection
+          ? [
+              renderAllTaskSectionHeader(
+                t("Closed tasks"),
+                t("Done ${done} / Canceled ${canceled}", {
+                  done: String(filteredClosedDoneCount),
+                  canceled: String(filteredClosedCanceledCount),
+                }),
+                {
+                  collapsed: closedSectionCollapsed,
+                  onToggle: toggleClosedSectionCollapsed,
+                },
+              ),
+              ...(closedSectionCollapsed
+                ? []
+                : visibleClosedTaskRows.map((row: VisibleTreeRow, index: number) =>
+                    renderAllTaskRow(
+                      row,
+                      visibleOpenTaskRows.length + index,
+                      "closed",
+                      closedTaskIdSet,
+                    )
+                  )),
+            ]
+          : []),
+      ]
+    : []
 
   return React.createElement(
     "div",
@@ -3612,7 +3961,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
               },
             })
           : null,
-        isAllTasksTab && dashboardQuickFilter != null
+        isAllTasksTab && allTasksQuickFilter != null
           ? React.createElement(
               "div",
               {
@@ -3629,13 +3978,13 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                 },
               },
               t("Quick filter: ${name}", {
-                name: resolveDashboardQuickFilterLabel(dashboardQuickFilter),
+                name: resolveAllTasksQuickFilterLabel(allTasksQuickFilter, props.schema),
               }),
               React.createElement(
                 "button",
                 {
                   type: "button",
-                  onClick: () => clearDashboardQuickFilter(),
+                  onClick: () => clearAllTasksQuickFilter(),
                   style: {
                     border: "none",
                     background: "transparent",
@@ -3647,6 +3996,46 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                 },
                 t("Clear quick filter"),
               ),
+            )
+          : null,
+        isAllTasksTab
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  flexWrap: "wrap",
+                },
+              },
+              ...allTasksQuickFilterOptions.map((option: {
+                value: AllTasksQuickFilter
+                label: string
+              }) =>
+                React.createElement(
+                  Button,
+                  {
+                    key: option.value ?? "__all__",
+                    variant: allTasksQuickFilter === option.value ? "solid" : "outline",
+                    onClick: () => {
+                      setAllTasksQuickFilter(option.value)
+                    },
+                    style: {
+                      borderRadius: "999px",
+                      paddingInline: "10px",
+                      minHeight: "28px",
+                      borderColor: allTasksQuickFilter === option.value
+                        ? "var(--orca-color-text-blue, #2563eb)"
+                        : undefined,
+                      background: allTasksQuickFilter === option.value
+                        ? "var(--orca-color-text-blue, #2563eb)"
+                        : undefined,
+                      color: allTasksQuickFilter === option.value ? "#fff" : undefined,
+                    },
+                  },
+                  option.label,
+                )),
             )
           : null,
         isAllTasksTab
@@ -3664,12 +4053,12 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                 },
               },
               React.createElement(Switch, {
-                on: showCompletedInAllTasks,
+                on: showClosedInAllTasks,
                 onChange: (nextOn: boolean) => {
-                  setShowCompletedInAllTasks(nextOn)
+                  setShowClosedInAllTasks(nextOn)
                 },
               }),
-              t("Show completed tasks"),
+              t("Show closed tasks"),
             )
           : null,
         isAllTasksTab
@@ -3952,7 +4341,9 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
               isDashboardTab ? t("Loading dashboard...") : t("Loading..."),
             )
           : null,
-        !loading && !isDashboardTab && visibleCount === 0
+        !loading &&
+        !isDashboardTab &&
+        (isAllTasksTab ? !hasAllTaskResults : visibleCount === 0)
           ? React.createElement(
               "div",
               {
@@ -4063,7 +4454,10 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
               }),
             )
           : null,
-        !loading && !isDashboardTab && (!isMyDayTab || !isMyDayScheduleMode) && visibleCount > 0
+        !loading &&
+        !isDashboardTab &&
+        (!isMyDayTab || !isMyDayScheduleMode) &&
+        (isAllTasksTab ? hasAllTaskResults : visibleCount > 0)
           ? React.createElement(
               "div",
               {
@@ -4081,90 +4475,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                 },
               },
               isAllTasksTab
-                ? [
-                    ...visibleAllTaskRows.map((row: VisibleTreeRow, index: number) => {
-                      const isDragging = draggingTaskId === row.node.item.blockId
-                      const moving = movingIds.has(row.node.item.blockId)
-                      const activeDropPosition =
-                        dropTarget?.targetTaskId === row.node.item.blockId
-                          ? dropTarget.position
-                          : null
-
-                      return React.createElement(
-                        "div",
-                        {
-                        key: row.node.item.blockId,
-                        draggable: !loading && !moving,
-                          onDragStart: (event: DragEvent) => {
-                            handleTaskDragStart(event, row.node.item.blockId)
-                          },
-                          onDragEnd: () => handleTaskDragEnd(),
-                          onDragOver: (event: DragEvent) => {
-                            handleTaskRowDragOver(event, row.node.item.blockId, row.depth)
-                          },
-                          onDrop: (event: DragEvent) => {
-                            handleTaskRowDrop(event, row.node.item.blockId, row.depth)
-                          },
-                          style: {
-                            position: "relative",
-                            borderTop: activeDropPosition === "before"
-                              ? "2px solid var(--orca-color-text-blue, #2563eb)"
-                              : "2px solid transparent",
-                            borderBottom: activeDropPosition === "after"
-                              ? "2px solid var(--orca-color-text-blue, #2563eb)"
-                              : "2px solid transparent",
-                            borderRadius: "10px",
-                            background: activeDropPosition === "child"
-                              ? "rgba(37, 99, 235, 0.1)"
-                              : "transparent",
-                            opacity: isDragging ? 0.42 : 1,
-                            transition: "background 120ms ease, opacity 120ms ease",
-                          },
-                        },
-                        React.createElement(TaskListRow, {
-                          item: row.node.item,
-                          schema: props.schema,
-                          isChinese,
-                          rowIndex: index,
-                          depth: row.depth,
-                          contextOnly: row.node.contextOnly,
-                          loading,
-                          updating: updatingIds.has(row.node.item.blockId) || moving,
-                          showCollapseToggle: row.hasChildren,
-                          collapsed: row.collapsed,
-                          showParentTaskContext: false,
-                          showReviewAction: false,
-                          showReviewSelection: false,
-                          reviewSelected: false,
-                          starUpdating: starringIds.has(row.node.item.blockId),
-                          timerEnabled: panelSettings.taskTimerEnabled,
-                          timerMode: panelSettings.taskTimerMode,
-                          timerNowMs,
-                          timerUpdating: timingIds.has(row.node.item.blockId),
-                          reviewUpdating: reviewingIds.has(row.node.item.blockId),
-                          onToggleCollapse: row.hasChildren
-                            ? () => toggleCollapsed(row.node.item.blockId)
-                            : undefined,
-                          onToggleReviewSelected: undefined,
-                          onToggleStatus: () => toggleTaskStatus(row.node.item),
-                          onNavigate: () => navigateToTask(row.node.item),
-                          onToggleStar: () => toggleTaskStar(row.node.item),
-                          onToggleTimer: () => toggleTaskTimer(row.node.item),
-                          onClearTimer: () => clearTaskTimerForItem(row.node.item),
-                          onMarkReviewed: () => markTaskReviewed(row.node.item),
-                          onAddSubtask: () => addSubtask(row.node.item),
-                          onDeleteTaskTag: () => removeTaskTag(row.node.item),
-                          onDeleteTaskBlock: () => deleteTaskBlock(row.node.item),
-                          showMyDayAction: panelSettings.myDayEnabled,
-                          myDaySelected: myDayTaskIdSet.has(row.node.item.blockId),
-                          myDayUpdating: myDayUpdatingIds.has(row.node.item.blockId),
-                          onAddToMyDay: () => addTaskToMyDay(row.node.item),
-                          onRemoveFromMyDay: () => removeTaskFromMyDay(row.node.item),
-                          onOpen: () => openTaskProperty(row.node.item.blockId),
-                        }),
-                      )
-                    }),
-                  ]
+                ? allTasksListNodes
                 : flatVisibleItems.map((item: TaskListRowItem, index: number) => {
                     const reviewSelectionEnabled = isReviewDueTab
                     return React.createElement(TaskListRow, {
@@ -4460,11 +4771,11 @@ interface BuildTaskDashboardDataParams {
 }
 
 interface DashboardQuickFilterContext {
-  filter: TaskDashboardQuickFilter
+  filter: Exclude<AllTasksQuickFilter, null>
   nowMs: number
   startOfTodayMs: number
   endOfTodayMs: number
-  doneStatus: string
+  doingStatus: string
   blockedTaskIds: Set<DbId>
 }
 
@@ -4505,16 +4816,21 @@ function collectDashboardBlockedTaskIds(
   return blockedTaskIds
 }
 
-function matchesDashboardQuickFilter(
+function matchesAllTasksQuickFilter(
   item: FilterableTaskItem,
   context: DashboardQuickFilterContext | null,
+  schema: TaskSchemaDefinition,
 ): boolean {
   if (context == null) {
     return true
   }
 
-  if (item.status === context.doneStatus) {
+  if (isTaskClosedStatus(item.status, schema)) {
     return false
+  }
+
+  if (context.filter === "doing") {
+    return item.status === context.doingStatus
   }
 
   const dueMs = item.endTime?.getTime()
@@ -4532,9 +4848,13 @@ function matchesDashboardQuickFilter(
   return item.blockId != null && context.blockedTaskIds.has(item.blockId)
 }
 
-function resolveDashboardQuickFilterLabel(
-  filter: TaskDashboardQuickFilter,
+function resolveAllTasksQuickFilterLabel(
+  filter: Exclude<AllTasksQuickFilter, null>,
+  schema: TaskSchemaDefinition,
 ): string {
+  if (filter === "doing") {
+    return getTaskStatusValues(schema).doing
+  }
   if (filter === "overdue") {
     return t("Only overdue")
   }
@@ -4561,7 +4881,7 @@ function buildTaskDashboardData(
   const startOfTodayMs = startOfToday.getTime()
   const endOfTodayMs = startOfTodayMs + DAY_MS
   const endOf48HoursMs = nowMs + 2 * DAY_MS
-  const openItems = allTaskItems.filter((item: AllTaskItem) => item.status !== doneStatus)
+  const openItems = allTaskItems.filter((item: AllTaskItem) => !isTaskClosedStatus(item.status, schema))
   const overdueTasks = openItems.filter((item: AllTaskItem) => {
     const dueMs = resolveTaskDueTimeMs(item)
     return dueMs != null && dueMs < nowMs
@@ -6464,6 +6784,31 @@ function buildTaskTree(items: AllTaskItem[]): TaskTreeNode[] {
     .sort((left, right) => left.item.blockId - right.item.blockId)
 
   return roots.concat(detached)
+}
+
+function resolveTaskAncestorNames(
+  item: Pick<AllTaskItem, "parentId">,
+  itemById: Map<DbId, Pick<AllTaskItem, "text" | "parentId">>,
+): string[] {
+  const names: string[] = []
+  const visited = new Set<DbId>()
+  let currentId = item.parentId
+
+  while (currentId != null && !visited.has(currentId)) {
+    visited.add(currentId)
+    const parentItem = itemById.get(currentId)
+    if (parentItem == null) {
+      break
+    }
+
+    const parentName = parentItem.text.replace(/\s+/g, " ").trim()
+    if (parentName !== "") {
+      names.push(parentName)
+    }
+    currentId = parentItem.parentId
+  }
+
+  return names.reverse()
 }
 
 function filterTreeWithContext(

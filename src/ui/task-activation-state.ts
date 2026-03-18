@@ -5,7 +5,11 @@ import {
   type NextActionBlockedReason,
 } from "../core/dependency-engine"
 import { getTaskPropertiesFromRef } from "../core/task-properties"
-import { isTaskDoneStatus, type TaskSchemaDefinition } from "../core/task-schema"
+import {
+  isTaskCanceledStatus,
+  isTaskDoneStatus,
+  type TaskSchemaDefinition,
+} from "../core/task-schema"
 import { t } from "../libs/l10n"
 
 export interface TaskActivationInfo {
@@ -61,7 +65,7 @@ export async function loadTaskActivationInfo(
     }
   }
 
-  if (isCanceledStatus(status)) {
+  if (isTaskCanceledStatus(status)) {
     return {
       isActive: false,
       blockedReason: ["canceled"],
@@ -117,12 +121,3 @@ function findTaskTagRef(block: Block, tagAlias: string): BlockRef | null {
   return block.refs.find((ref) => ref.type === 2 && ref.alias === tagAlias) ?? null
 }
 
-function isCanceledStatus(status: string): boolean {
-  const normalized = status.trim().toLowerCase()
-  return (
-    normalized === "canceled" ||
-    normalized === "cancelled" ||
-    normalized === "已取消" ||
-    normalized === "取消"
-  )
-}
