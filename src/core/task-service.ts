@@ -160,7 +160,7 @@ function registerCycleTaskStatusCommand(
       const taskTagRef = findTaskTagRef(block, schema.tagAlias)
 
       if (taskTagRef == null) {
-        await initializeTaskTag(blockId, cursor, schema)
+        await initializeTaskTagForBlock(blockId, schema, cursor)
         return null
       }
 
@@ -196,10 +196,10 @@ function isCollapsedCursor(cursor: CursorData): boolean {
   )
 }
 
-async function initializeTaskTag(
+export async function initializeTaskTagForBlock(
   blockId: DbId,
-  cursor: CursorData | null,
   schema: TaskSchemaDefinition,
+  cursor: CursorData | null = null,
 ) {
   const propertyNames = schema.propertyNames
   const todoStatus = getDefaultTaskStatus(schema)

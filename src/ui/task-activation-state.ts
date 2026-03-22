@@ -24,6 +24,7 @@ const BLOCKED_REASON_PRIORITY: NextActionBlockedReason[] = [
   "dependency-delayed",
   "dependency-unmet",
   "ancestor-dependency-unmet",
+  "previous-subtask-unfinished",
   "has-open-children",
 ]
 
@@ -110,6 +111,8 @@ function resolveBlockedReasonLabel(reason: NextActionBlockedReason): string {
       return t("Blocked by dependency delay")
     case "has-open-children":
       return t("Blocked by open subtasks")
+    case "previous-subtask-unfinished":
+      return t("Blocked by previous subtasks")
     case "ancestor-dependency-unmet":
       return t("Blocked by ancestor dependencies")
     default:
@@ -120,4 +123,3 @@ function resolveBlockedReasonLabel(reason: NextActionBlockedReason): string {
 function findTaskTagRef(block: Block, tagAlias: string): BlockRef | null {
   return block.refs.find((ref) => ref.type === 2 && ref.alias === tagAlias) ?? null
 }
-

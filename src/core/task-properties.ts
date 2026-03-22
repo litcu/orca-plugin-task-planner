@@ -286,6 +286,7 @@ export function toTaskMetaPropertyForSave(
   values: TaskPropertyValues,
   taskBlock?: Block | null,
 ): BlockProperty {
+  const existingMeta = readTaskMetaFromBlock(taskBlock)
   const reviewType = values.reviewType === "cycle" ? "cycle" : "single"
   const reviewEnabled = values.reviewEnabled === true
   const existingProperty = taskBlock?.properties?.find((item) => {
@@ -314,6 +315,9 @@ export function toTaskMetaPropertyForSave(
     },
     recurrence: {
       repeatRule: values.repeatRule.trim(),
+    },
+    subtasks: {
+      sequential: existingMeta.subtasks.sequential,
     },
   }, existingProperty)
 }

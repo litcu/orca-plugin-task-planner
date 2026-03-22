@@ -13,6 +13,7 @@ export interface TaskPlannerSettings {
   startupTaskSummaryNotificationEnabled: boolean
   defaultTaskViewsTab: BuiltinTaskViewsTab
   showTaskPanelIcon: boolean
+  showSubtaskProgressBar: boolean
   taskTimerEnabled: boolean
   taskTimerAutoStartOnDoing: boolean
   taskTimerMode: TaskTimerMode
@@ -26,6 +27,7 @@ const DUE_SOON_INCLUDE_OVERDUE_SETTING = "dueSoonIncludeOverdue"
 const STARTUP_TASK_SUMMARY_NOTIFICATION_ENABLED_SETTING = "startupTaskSummaryNotificationEnabled"
 const DEFAULT_TASK_VIEWS_TAB_SETTING = "defaultTaskViewsTab"
 const SHOW_TASK_PANEL_ICON_SETTING = "showTaskPanelIcon"
+const SHOW_SUBTASK_PROGRESS_BAR_SETTING = "showSubtaskProgressBar"
 const TASK_TIMER_ENABLED_SETTING = "taskTimerEnabled"
 const TASK_TIMER_AUTO_START_ON_DOING_SETTING = "taskTimerAutoStartOnDoing"
 const TASK_TIMER_MODE_SETTING = "taskTimerMode"
@@ -53,6 +55,12 @@ export async function ensurePluginSettingsSchema(
     [SHOW_TASK_PANEL_ICON_SETTING]: {
       label: t("Show task panel icon"),
       description: t("Show task panel icon in the top bar."),
+      type: "boolean",
+      defaultValue: true,
+    },
+    [SHOW_SUBTASK_PROGRESS_BAR_SETTING]: {
+      label: t("Show subtask progress bar"),
+      description: t("Show task progress bar based on subtask completion in task lists."),
       type: "boolean",
       defaultValue: true,
     },
@@ -180,6 +188,9 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
   const showTaskPanelIcon = normalizeShowTaskPanelIcon(
     pluginSettings?.[SHOW_TASK_PANEL_ICON_SETTING],
   )
+  const showSubtaskProgressBar = normalizeShowSubtaskProgressBar(
+    pluginSettings?.[SHOW_SUBTASK_PROGRESS_BAR_SETTING],
+  )
   const taskTimerEnabled = normalizeTaskTimerEnabled(
     pluginSettings?.[TASK_TIMER_ENABLED_SETTING],
   )
@@ -199,6 +210,7 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
     startupTaskSummaryNotificationEnabled,
     defaultTaskViewsTab,
     showTaskPanelIcon,
+    showSubtaskProgressBar,
     taskTimerEnabled,
     taskTimerAutoStartOnDoing,
     taskTimerMode,
@@ -212,6 +224,10 @@ function normalizeTaskTagName(rawValue: unknown): string {
 
   const normalized = rawValue.trim().replace(/^#+/, "")
   return normalized === "" ? TASK_TAG_ALIAS : normalized
+}
+
+function normalizeShowSubtaskProgressBar(rawValue: unknown): boolean {
+  return typeof rawValue === "boolean" ? rawValue : true
 }
 
 function normalizeDueSoonDays(rawValue: unknown): number {
