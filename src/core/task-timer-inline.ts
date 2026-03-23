@@ -1,4 +1,5 @@
-﻿import type { Block, DbId } from "../orca.d.ts"
+﻿import pomodoroCompleteSoundSrc from "../assets/pomodoro-complete.wav"
+import type { Block, DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import { getMirrorId, isValidDbId } from "./block-utils"
 import { getPluginSettings } from "./plugin-settings"
@@ -35,6 +36,15 @@ export interface TaskTimerInlineHandle {
   dispose: () => void
 }
 
+interface RunningPomodoroSession {
+  taskId: DbId
+  sourceBlockId: DbId
+  taskTitle: string
+  elapsedMs: number
+  startedAt: number
+  completedCyclesNotified: number
+}
+
 export function setupTaskTimerInlineWidgets(
   pluginName: string,
   schema: TaskSchemaDefinition,
@@ -52,6 +62,10 @@ export function setupTaskTimerInlineWidgets(
   let previousSettings = getPluginSettings(pluginName)
   let checkpointing = false
   let lastCheckpointAtMs = 0
+  let activePomodoroSession: RunningPomodoroSession | null = null
+  let syncingPomodoroSession = false
+  let queuedPomodoroSessionSync = false
+  let reminderAudio: HTMLAudioElement | null = null
 
   const scheduleRefresh = (delayMs: number = REFRESH_DEBOUNCE_MS) => {
     if (disposed) {
@@ -130,6 +144,119 @@ export function setupTaskTimerInlineWidgets(
     })()
   }
 
+  const ensureReminderAudio = (): HTMLAudioElement | null => {
+    if (reminderAudio != null) {
+      return reminderAudio
+    }
+
+    try {
+      reminderAudio = new Audio(orca.utils.getAssetPath(pomodoroCompleteSoundSrc))
+      reminderAudio.preload = "auto"
+      return reminderAudio
+    } catch (error) {
+      console.error(error)
+      return null
+    }
+  }
+
+  const playPomodoroReminderSound = async () => {
+    const audio = ensureReminderAudio()
+    if (audio == null) {
+      return
+    }
+
+    try {
+      audio.pause()
+      audio.currentTime = 0
+      await audio.play()
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const notifyPomodoroCycleCompleted = (session: RunningPomodoroSession, cycle: number) => {
+    const settings = getPluginSettings(pluginName)
+    if (
+      !settings.pomodoroCompletionNotificationEnabled &&
+      !settings.pomodoroCompletionSoundEnabled
+    ) {
+      return
+    }
+
+    const taskTitle = session.taskTitle.trim() === ""
+      ? t("Untitled task")
+      : session.taskTitle.trim()
+    if (settings.pomodoroCompletionNotificationEnabled) {
+      orca.notify(
+        "info",
+        t("Completed Pomodoro ${cycle} for ${task}", {
+          cycle: String(cycle),
+          task: taskTitle,
+        }),
+        { title: t("Pomodoro complete") },
+      )
+    }
+    if (settings.pomodoroCompletionSoundEnabled) {
+      void playPomodoroReminderSound()
+    }
+  }
+
+  const maybeNotifyPomodoroCompletion = () => {
+    if (activePomodoroSession == null) {
+      return
+    }
+
+    const totalElapsedMs = Math.max(
+      activePomodoroSession.elapsedMs,
+      activePomodoroSession.elapsedMs + Date.now() - activePomodoroSession.startedAt,
+    )
+    const completedCycles = Math.floor(totalElapsedMs / POMODORO_DURATION_MS)
+    if (completedCycles <= activePomodoroSession.completedCyclesNotified) {
+      return
+    }
+
+    for (
+      let cycle = activePomodoroSession.completedCyclesNotified + 1;
+      cycle <= completedCycles;
+      cycle += 1
+    ) {
+      notifyPomodoroCycleCompleted(activePomodoroSession, cycle)
+    }
+    activePomodoroSession.completedCyclesNotified = completedCycles
+  }
+
+  const syncActivePomodoroSession = async () => {
+    if (syncingPomodoroSession) {
+      queuedPomodoroSessionSync = true
+      return
+    }
+
+    syncingPomodoroSession = true
+    try {
+      do {
+        queuedPomodoroSessionSync = false
+        const nextSession = await resolveRunningPomodoroSession(schema)
+        if (nextSession == null) {
+          activePomodoroSession = null
+          continue
+        }
+
+        if (activePomodoroSession != null && activePomodoroSession.taskId === nextSession.taskId) {
+          const nowMs = Date.now()
+          const previousTotalElapsedMs = resolveRunningSessionElapsedMs(activePomodoroSession, nowMs)
+          const nextTotalElapsedMs = resolveRunningSessionElapsedMs(nextSession, nowMs)
+          if (nextTotalElapsedMs + TICK_INTERVAL_MS >= previousTotalElapsedMs) {
+            nextSession.completedCyclesNotified = activePomodoroSession.completedCyclesNotified
+          }
+        }
+
+        activePomodoroSession = nextSession
+      } while (queuedPomodoroSessionSync)
+    } finally {
+      syncingPomodoroSession = false
+    }
+  }
+
   const checkpointNow = async () => {
     if (checkpointing) {
       return
@@ -174,6 +301,12 @@ export function setupTaskTimerInlineWidgets(
     const settings = getPluginSettings(pluginName)
     if (!settings.taskTimerEnabled) {
       return
+    }
+
+    if (settings.taskTimerMode === "pomodoro") {
+      maybeNotifyPomodoroCompletion()
+    } else {
+      activePomodoroSession = null
     }
 
     maybeCheckpoint()
@@ -272,6 +405,7 @@ export function setupTaskTimerInlineWidgets(
   window.addEventListener("beforeunload", beforeUnloadListener)
 
   blocksUnsubscribe = subscribe(orca.state.blocks, () => {
+    void syncActivePomodoroSession()
     scheduleRefresh()
   })
 
@@ -280,17 +414,20 @@ export function setupTaskTimerInlineWidgets(
     settingsUnsubscribe = subscribe(pluginState, () => {
       const nextSettings = getPluginSettings(pluginName)
       if (previousSettings.taskTimerEnabled && !nextSettings.taskTimerEnabled) {
+        activePomodoroSession = null
         void stopAllRunningTaskTimers(schema).finally(() => {
           scheduleRefresh(0)
         })
       }
 
       previousSettings = nextSettings
+      void syncActivePomodoroSession()
       scheduleRefresh()
     })
   }
 
   tickTimerId = window.setInterval(tick, TICK_INTERVAL_MS)
+  void syncActivePomodoroSession()
   scheduleRefresh(0)
 
   return {
@@ -315,10 +452,61 @@ export function setupTaskTimerInlineWidgets(
       blocksUnsubscribe = null
 
       void checkpointNow()
+      if (reminderAudio != null) {
+        reminderAudio.pause()
+        reminderAudio = null
+      }
+      activePomodoroSession = null
       removeInlineWidgets()
       removeInlineTimerStyles(pluginName)
     },
   }
+}
+
+async function resolveRunningPomodoroSession(
+  schema: TaskSchemaDefinition,
+): Promise<RunningPomodoroSession | null> {
+  const taskBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
+    schema.tagAlias,
+  ])) as Block[]
+  const seenTaskIds = new Set<DbId>()
+
+  for (const sourceBlock of taskBlocks) {
+    const liveBlock = resolveLiveTaskBlock(sourceBlock)
+    const taskId = getMirrorId(liveBlock.id)
+    if (!isValidDbId(taskId) || seenTaskIds.has(taskId)) {
+      continue
+    }
+    seenTaskIds.add(taskId)
+
+    const timer = readTaskTimerFromBlock(liveBlock)
+    if (!timer.running || timer.startedAt == null) {
+      continue
+    }
+
+    return {
+      taskId,
+      sourceBlockId: sourceBlock.id,
+      taskTitle: resolveTaskTitle(liveBlock, sourceBlock),
+      elapsedMs: timer.elapsedMs,
+      startedAt: timer.startedAt,
+      completedCyclesNotified: Math.floor(timer.elapsedMs / POMODORO_DURATION_MS),
+    }
+  }
+
+  return null
+}
+
+function resolveLiveTaskBlock(sourceBlock: Block): Block {
+  return orca.state.blocks[getMirrorId(sourceBlock.id)] ?? sourceBlock
+}
+
+function resolveTaskTitle(liveBlock: Block, sourceBlock: Block): string {
+  return liveBlock.text?.trim() || sourceBlock.text?.trim() || ""
+}
+
+function resolveRunningSessionElapsedMs(session: RunningPomodoroSession, nowMs: number): number {
+  return Math.max(session.elapsedMs, session.elapsedMs + nowMs - session.startedAt)
 }
 
 function renderBlockTimerUi(
