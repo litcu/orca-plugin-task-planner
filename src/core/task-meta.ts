@@ -4,7 +4,7 @@ import type { TaskReviewType } from "./task-review"
 const PROP_TYPE_JSON = 0
 
 export const TASK_META_PROPERTY_NAME = "_mlo_task_meta"
-export const TASK_META_SCHEMA_VERSION = 1
+export const TASK_META_SCHEMA_VERSION = 2
 
 export interface TaskMetaPriority {
   importance: number | null
@@ -24,11 +24,16 @@ export interface TaskMetaRecurrence {
   repeatRule: string
 }
 
+export interface TaskMetaSubtasks {
+  sequential: boolean
+}
+
 export interface TaskMetaData {
   schema: number
   priority: TaskMetaPriority
   review: TaskMetaReview
   recurrence: TaskMetaRecurrence
+  subtasks: TaskMetaSubtasks
 }
 
 export function createDefaultTaskMetaData(): TaskMetaData {
@@ -48,6 +53,9 @@ export function createDefaultTaskMetaData(): TaskMetaData {
     },
     recurrence: {
       repeatRule: "",
+    },
+    subtasks: {
+      sequential: false,
     },
   }
 }
@@ -80,6 +88,7 @@ function normalizeTaskMetaData(raw: unknown): TaskMetaData {
   const priorityRaw = isRecord(raw.priority) ? raw.priority : {}
   const reviewRaw = isRecord(raw.review) ? raw.review : {}
   const recurrenceRaw = isRecord(raw.recurrence) ? raw.recurrence : {}
+  const subtasksRaw = isRecord(raw.subtasks) ? raw.subtasks : {}
 
   const reviewEnabled = reviewRaw.enabled === true
   const reviewType = normalizeTaskReviewType(reviewRaw.type)
@@ -104,6 +113,9 @@ function normalizeTaskMetaData(raw: unknown): TaskMetaData {
       repeatRule: normalizeString(
         recurrenceRaw.repeatRule ?? recurrenceRaw.rule,
       ),
+    },
+    subtasks: {
+      sequential: subtasksRaw.sequential === true,
     },
   }
 }

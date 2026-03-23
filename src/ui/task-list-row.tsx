@@ -18,6 +18,13 @@ import {
 
 const POMODORO_DURATION_MS = 25 * 60 * 1000
 
+export interface TaskSubtaskProgress {
+  total: number
+  closed: number
+  done: number
+  canceled: number
+}
+
 export interface TaskListRowItem {
   blockId: DbId
   sourceBlockId: DbId
@@ -33,6 +40,7 @@ export interface TaskListRowItem {
   blockProperties?: BlockProperty[]
   parentTaskNames?: string[]
   taskTagRef?: BlockRef | null
+  subtaskProgress?: TaskSubtaskProgress | null
 }
 
 interface TaskListRowProps {
@@ -50,6 +58,7 @@ interface TaskListRowProps {
   showReviewAction: boolean
   showReviewSelection?: boolean
   reviewSelected?: boolean
+  showSubtaskProgressBar?: boolean
   starUpdating: boolean
   timerEnabled: boolean
   timerMode: TaskTimerMode
@@ -113,6 +122,22 @@ export function TaskListRow(props: TaskListRowProps) {
   const parentTaskChainLabel = parentTaskNames.join(" > ")
   const visibleLabels = taskLabels.slice(0, hasParentContext ? 2 : 3)
   const hiddenLabelCount = Math.max(0, taskLabels.length - visibleLabels.length)
+  const subtaskProgress = props.showSubtaskProgressBar === true
+    ? props.item.subtaskProgress ?? null
+    : null
+  const hasSubtaskProgress = subtaskProgress != null && subtaskProgress.total > 0
+  const subtaskProgressRatio = hasSubtaskProgress
+    ? Math.max(0, Math.min(1, subtaskProgress.closed / subtaskProgress.total))
+    : 0
+  const subtaskProgressLabel = hasSubtaskProgress
+    ? `${subtaskProgress.closed}/${subtaskProgress.total}`
+    : ""
+  const subtaskProgressTitle = hasSubtaskProgress
+    ? t("Subtask progress: ${closed}/${total} closed", {
+        closed: String(subtaskProgress.closed),
+        total: String(subtaskProgress.total),
+      })
+    : ""
   const timerData = readTaskTimerFromProperties(props.item.blockProperties)
   const timerElapsedMs = resolveTaskTimerElapsedMs(timerData, props.timerNowMs)
   const hasTimerRecord = hasTaskTimerRecord(timerData)
@@ -483,102 +508,175 @@ export function TaskListRow(props: TaskListRowProps) {
             )
           : null,
       ),
-      hasParentContext
+      hasParentContext || hasSubtaskProgress
         ? React.createElement(
             "div",
             {
               style: {
-                display: "inline-flex",
+                display: "flex",
                 alignItems: "center",
+                gap: "6px",
                 minWidth: 0,
                 maxWidth: "100%",
+                flexWrap: "wrap",
               },
             },
-            React.createElement(
-              "span",
-              {
-                key: `${props.item.blockId}-parent`,
-                title: t("Parent: ${name}", { name: parentTaskChainLabel }),
-                style: {
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "3px",
-                  minWidth: 0,
-                  maxWidth: "100%",
-                  flex: "0 1 auto",
-                  padding: "0 6px",
-                  height: "16px",
-                  borderRadius: "999px",
-                  border: "1px solid rgba(148, 163, 184, 0.3)",
-                  background: "rgba(148, 163, 184, 0.08)",
-                  color: "var(--orca-color-text-2)",
-                  fontSize: "10px",
-                  lineHeight: 1,
-                },
-              },
-              React.createElement(
-                "span",
-                {
-                  style: {
-                    fontSize: "9px",
-                    opacity: 0.75,
-                    lineHeight: 1,
-                    flexShrink: 0,
+            hasParentContext
+              ? React.createElement(
+                  "div",
+                  {
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      minWidth: 0,
+                      maxWidth: "100%",
+                    },
                   },
-                },
-                "\u21B3",
-              ),
-              React.createElement(
-                "span",
-                {
-                  style: {
-                    display: "inline-flex",
-                    alignItems: "center",
-                    minWidth: 0,
-                    maxWidth: "100%",
-                    flex: "0 1 auto",
-                    overflow: "hidden",
-                  },
-                },
-                ...visibleParentTaskNames.flatMap((name, index) => {
-                  const nodes: React.ReactNode[] = []
-                  if (index > 0) {
-                    nodes.push(
-                      React.createElement(
-                        "span",
-                        {
-                          key: `${props.item.blockId}-parent-separator-${index}`,
-                          style: {
-                            flexShrink: 0,
-                            opacity: 0.65,
-                            padding: "0 2px",
-                          },
-                        },
-                        ">",
-                      ),
-                    )
-                  }
-
-                  nodes.push(
+                  React.createElement(
+                    "span",
+                    {
+                      key: `${props.item.blockId}-parent`,
+                      title: t("Parent: ${name}", { name: parentTaskChainLabel }),
+                      style: {
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "3px",
+                        minWidth: 0,
+                        maxWidth: "100%",
+                        flex: "0 1 auto",
+                        padding: "0 6px",
+                        height: "16px",
+                        borderRadius: "999px",
+                        border: "1px solid rgba(148, 163, 184, 0.3)",
+                        background: "rgba(148, 163, 184, 0.08)",
+                        color: "var(--orca-color-text-2)",
+                        fontSize: "10px",
+                        lineHeight: 1,
+                      },
+                    },
                     React.createElement(
                       "span",
                       {
-                        key: `${props.item.blockId}-parent-name-${index}`,
                         style: {
-                          minWidth: 0,
-                          flex: "0 1 auto",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
+                          fontSize: "9px",
+                          opacity: 0.75,
+                          lineHeight: 1,
+                          flexShrink: 0,
                         },
                       },
-                      name,
+                      "\u21B3",
                     ),
-                  )
-                  return nodes
-                }),
-              ),
-            ),
+                    React.createElement(
+                      "span",
+                      {
+                        style: {
+                          display: "inline-flex",
+                          alignItems: "center",
+                          minWidth: 0,
+                          maxWidth: "100%",
+                          flex: "0 1 auto",
+                          overflow: "hidden",
+                        },
+                      },
+                      ...visibleParentTaskNames.flatMap((name, index) => {
+                        const nodes: React.ReactNode[] = []
+                        if (index > 0) {
+                          nodes.push(
+                            React.createElement(
+                              "span",
+                              {
+                                key: `${props.item.blockId}-parent-separator-${index}`,
+                                style: {
+                                  flexShrink: 0,
+                                  opacity: 0.65,
+                                  padding: "0 2px",
+                                },
+                              },
+                              ">",
+                            ),
+                          )
+                        }
+
+                        nodes.push(
+                          React.createElement(
+                            "span",
+                            {
+                              key: `${props.item.blockId}-parent-name-${index}`,
+                              style: {
+                                minWidth: 0,
+                                flex: "0 1 auto",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              },
+                            },
+                            name,
+                          ),
+                        )
+                        return nodes
+                      }),
+                    ),
+                  ),
+                )
+              : null,
+            hasSubtaskProgress
+              ? React.createElement(
+                  "div",
+                  {
+                    title: subtaskProgressTitle,
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      minWidth: 0,
+                      width: "min(180px, 100%)",
+                      padding: "0 6px",
+                      height: "18px",
+                      borderRadius: "999px",
+                      border: "1px solid rgba(15, 118, 110, 0.22)",
+                      background: "rgba(15, 118, 110, 0.06)",
+                    },
+                  },
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        flex: 1,
+                        minWidth: "56px",
+                        height: "5px",
+                        borderRadius: "999px",
+                        background: "rgba(15, 118, 110, 0.12)",
+                        overflow: "hidden",
+                      },
+                    },
+                    React.createElement("div", {
+                      style: {
+                        width: `${subtaskProgressRatio * 100}%`,
+                        height: "100%",
+                        borderRadius: "inherit",
+                        background: subtaskProgressRatio >= 1
+                          ? "linear-gradient(90deg, #15803d, #22c55e)"
+                          : "linear-gradient(90deg, #0f766e, #0ea5a5)",
+                        transition: "width 220ms ease",
+                      },
+                    }),
+                  ),
+                  React.createElement(
+                    "span",
+                    {
+                      style: {
+                        flexShrink: 0,
+                        color: "var(--orca-color-text-teal, #0f766e)",
+                        fontSize: "10px",
+                        fontWeight: 600,
+                        lineHeight: 1,
+                        fontVariantNumeric: "tabular-nums",
+                      },
+                    },
+                    subtaskProgressLabel,
+                  ),
+                )
+              : null,
           )
         : null,
     ),

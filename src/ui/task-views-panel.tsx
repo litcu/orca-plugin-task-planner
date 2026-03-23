@@ -102,7 +102,11 @@ import {
   MyDayScheduleBoard,
   type MyDayScheduleTaskItem,
 } from "./my-day-schedule-board"
-import { TaskListRow, type TaskListRowItem } from "./task-list-row"
+import {
+  TaskListRow,
+  type TaskListRowItem,
+  type TaskSubtaskProgress,
+} from "./task-list-row"
 import { openTaskPropertyPopup } from "./task-property-panel"
 
 interface TaskViewsPanelProps extends PanelProps {
@@ -192,6 +196,7 @@ type AllTasksQuickFilter = TaskDashboardQuickFilter | "doing" | null
 const DASHBOARD_ACTIONABLE_BLOCKED_REASON_SET = new Set<NextActionBlockedReason>([
   "dependency-unmet",
   "has-open-children",
+  "previous-subtask-unfinished",
   "not-started",
   "dependency-delayed",
   "ancestor-dependency-unmet",
@@ -1960,29 +1965,39 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const isAllTasksTab = tab === "all-tasks"
   const isCustomViewTab = isCustomTaskViewsTab(tab)
   const showParentTaskContext = tab === "next-actions"
+  const subtaskProgressByTaskId = React.useMemo(() => {
+    return buildSubtaskProgressMap(allTaskItems, props.schema)
+  }, [allTaskItems, props.schema])
   const flatVisibleItems = React.useMemo((): TaskListRowItem[] => {
+    const attachSubtaskProgress = (items: AllTaskItem[]): TaskListRowItem[] => {
+      return items.map((item) => {
+        const subtaskProgress = subtaskProgressByTaskId.get(item.blockId) ?? null
+        return subtaskProgress == null ? item : { ...item, subtaskProgress }
+      })
+    }
+
     if (tab === "my-day") {
-      return filteredMyDayTaskItems
+      return attachSubtaskProgress(filteredMyDayTaskItems)
     }
 
     if (tab === "next-actions") {
-      return filteredNextActionItems
+      return attachSubtaskProgress(filteredNextActionItems)
     }
 
     if (tab === "starred-tasks") {
-      return filteredStarredTaskItems
+      return attachSubtaskProgress(filteredStarredTaskItems)
     }
 
     if (tab === "due-soon") {
-      return filteredDueSoonTaskItems
+      return attachSubtaskProgress(filteredDueSoonTaskItems)
     }
 
     if (tab === "review-due") {
-      return filteredReviewDueTaskItems
+      return attachSubtaskProgress(filteredReviewDueTaskItems)
     }
 
     if (isCustomTaskViewsTab(tab)) {
-      return filteredCustomViewTaskItems
+      return attachSubtaskProgress(filteredCustomViewTaskItems)
     }
 
     return []
@@ -1993,6 +2008,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     filteredNextActionItems,
     filteredReviewDueTaskItems,
     filteredStarredTaskItems,
+    subtaskProgressByTaskId,
     tab,
   ])
   const selectedReviewItems = React.useMemo(() => {
@@ -3243,6 +3259,10 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
           parentTaskNames,
         }
       : row.node.item
+    const enrichedRowItem = (() => {
+      const subtaskProgress = subtaskProgressByTaskId.get(row.node.item.blockId) ?? null
+      return subtaskProgress == null ? rowItem : { ...rowItem, subtaskProgress }
+    })()
 
     return React.createElement(
       "div",
@@ -3276,7 +3296,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         },
       },
       React.createElement(TaskListRow, {
-        item: rowItem,
+        item: enrichedRowItem,
         schema: props.schema,
         isChinese,
         rowIndex: index,
@@ -3290,6 +3310,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         showReviewAction: false,
         showReviewSelection: false,
         reviewSelected: false,
+        showSubtaskProgressBar: panelSettings.showSubtaskProgressBar,
         starUpdating: starringIds.has(row.node.item.blockId),
         timerEnabled: panelSettings.taskTimerEnabled,
         timerMode: panelSettings.taskTimerMode,
@@ -4494,6 +4515,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                       showReviewAction: reviewSelectionEnabled,
                       showReviewSelection: reviewSelectionEnabled,
                       reviewSelected: reviewSelectionEnabled && selectedReviewIds.has(item.blockId),
+                      showSubtaskProgressBar: panelSettings.showSubtaskProgressBar,
                       starUpdating: starringIds.has(item.blockId),
                       timerEnabled: panelSettings.taskTimerEnabled,
                       timerMode: panelSettings.taskTimerMode,
@@ -4975,6 +4997,7 @@ function buildDashboardBlockerItems(
 ): TaskDashboardData["blockerItems"] {
   const reasonOrder: NextActionBlockedReason[] = [
     "dependency-unmet",
+    "previous-subtask-unfinished",
     "has-open-children",
     "not-started",
     "dependency-delayed",
@@ -5012,6 +5035,9 @@ function resolveBlockedReasonLabel(reason: NextActionBlockedReason): string {
   }
   if (reason === "has-open-children") {
     return t("Blocked by open subtasks")
+  }
+  if (reason === "previous-subtask-unfinished") {
+    return t("Blocked by previous subtasks")
   }
 
   return t("Blocked by ancestor dependencies")
@@ -6786,6 +6812,61 @@ function buildTaskTree(items: AllTaskItem[]): TaskTreeNode[] {
   return roots.concat(detached)
 }
 
+function buildSubtaskProgressMap(
+  items: AllTaskItem[],
+  schema: TaskSchemaDefinition,
+): Map<DbId, TaskSubtaskProgress> {
+  const progressByTaskId = new Map<DbId, TaskSubtaskProgress>()
+  const roots = buildTaskTree(items)
+
+  const walk = (node: TaskTreeNode): TaskSubtaskProgress => {
+    let total = 0
+    let closed = 0
+    let done = 0
+    let canceled = 0
+
+    for (const child of node.children) {
+      const childProgress = walk(child)
+      const childDone = isTaskDoneStatus(child.item.status, schema)
+      const childCanceled = isTaskCanceledStatus(child.item.status)
+
+      total += 1 + childProgress.total
+      closed += childProgress.closed
+      done += childProgress.done
+      canceled += childProgress.canceled
+
+      if (childDone || childCanceled) {
+        closed += 1
+      }
+      if (childDone) {
+        done += 1
+      }
+      if (childCanceled) {
+        canceled += 1
+      }
+    }
+
+    if (total > 0) {
+      progressByTaskId.set(node.item.blockId, {
+        total,
+        closed,
+        done,
+        canceled,
+      })
+    }
+
+    return {
+      total,
+      closed,
+      done,
+      canceled,
+    }
+  }
+
+  roots.forEach(walk)
+  return progressByTaskId
+}
+
 function resolveTaskAncestorNames(
   item: Pick<AllTaskItem, "parentId">,
   itemById: Map<DbId, Pick<AllTaskItem, "text" | "parentId">>,
@@ -7006,5 +7087,3 @@ function collectCollapsibleNodeIds(nodes: TaskTreeNode[]): DbId[] {
   nodes.forEach(walk)
   return ids
 }
-
-

@@ -1,5 +1,6 @@
 import type { Block } from "./orca.d.ts"
 import { invalidateNextActionEvaluationCache } from "./core/dependency-engine"
+import { setupTaskBlockMenu } from "./core/task-block-menu"
 import { ensureTaskTagSchema, TASK_TAG_ALIAS, type TaskSchemaDefinition } from "./core/task-schema"
 import { setupTaskQuickActions } from "./core/task-service"
 import { setupTaskPopupEntry } from "./core/task-popup-entry"
@@ -17,6 +18,7 @@ import zhCN from "./translations/zhCN"
 const DAY_MS = 24 * 60 * 60 * 1000
 let pluginName: string
 let taskQuickActionsDisposer: (() => Promise<void>) | null = null
+let taskBlockMenuDisposer: (() => void) | null = null
 let taskPopupEntryDisposer: (() => void) | null = null
 let nextActionsEntryDisposer: (() => void) | null = null
 let settingsUnsubscribe: (() => void) | null = null
@@ -228,10 +230,12 @@ async function setupRuntimeWithSchema(schema: TaskSchemaDefinition): Promise<voi
   await disposeRuntime()
 
   const taskQuickActions = await setupTaskQuickActions(pluginName, schema)
+  const taskBlockMenu = setupTaskBlockMenu(pluginName, schema)
   const taskPopupEntry = setupTaskPopupEntry(pluginName, schema)
   const nextActionsEntry = setupNextActionsEntry(pluginName, schema)
 
   taskQuickActionsDisposer = taskQuickActions.dispose
+  taskBlockMenuDisposer = taskBlockMenu.dispose
   taskPopupEntryDisposer = taskPopupEntry.dispose
   nextActionsEntryDisposer = nextActionsEntry.dispose
   setActiveTaskRuntimeSchema(schema)
@@ -292,6 +296,11 @@ async function notifyStartupTaskSummary(
 }
 
 async function disposeRuntime(): Promise<void> {
+  if (taskBlockMenuDisposer != null) {
+    taskBlockMenuDisposer()
+    taskBlockMenuDisposer = null
+  }
+
   if (taskPopupEntryDisposer != null) {
     taskPopupEntryDisposer()
     taskPopupEntryDisposer = null
@@ -307,4 +316,3 @@ async function disposeRuntime(): Promise<void> {
     taskQuickActionsDisposer = null
   }
 }
-

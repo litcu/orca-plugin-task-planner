@@ -17,6 +17,7 @@ import {
   type TaskScoreContext,
 } from "./score-engine"
 import { resolveEffectiveNextReview, type TaskReviewType } from "./task-review"
+import { readTaskMetaFromBlock } from "./task-meta"
 
 const TAG_REF_TYPE = 2
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -51,6 +52,7 @@ export type NextActionBlockedReason =
   | "dependency-unmet"
   | "dependency-delayed"
   | "has-open-children"
+  | "previous-subtask-unfinished"
   | "ancestor-dependency-unmet"
 
 export interface NextActionEvaluation {
@@ -72,7 +74,9 @@ interface DependencyCycleContext {
 interface SubtaskContext {
   statusByTaskId: Map<DbId, string>
   childTaskIdsByParentId: Map<DbId, DbId[]>
+  orderedChildTaskIdsByParentId: Map<DbId, DbId[]>
   parentTaskIdByTaskId: Map<DbId, DbId | null>
+  sequentialParentTaskIdSet: Set<DbId>
 }
 
 interface TaskScoringContext {
@@ -200,6 +204,10 @@ export function evaluateNextAction(
 
   if (hasOpenSubtask(block, schema, subtaskContext)) {
     blockedReason.push("has-open-children")
+  }
+
+  if (hasUnfinishedPreviousSubtask(taskId, schema, subtaskContext)) {
+    blockedReason.push("previous-subtask-unfinished")
   }
 
   if (
@@ -525,10 +533,13 @@ async function buildSubtaskContext(
 
   const statusByTaskId = new Map<DbId, string>()
   const childTaskIdsByParentId = new Map<DbId, DbId[]>()
+  const orderedChildTaskIdsByParentId = new Map<DbId, DbId[]>()
   const parentTaskIdByTaskId = new Map<DbId, DbId | null>()
   const parentBlockIdByTaskId = new Map<DbId, DbId | null>()
   const taskIdByAliasId = new Map<DbId, DbId>()
   const blockCacheById = new Map<DbId, Block | null>()
+  const liveBlockByTaskId = new Map<DbId, Block>()
+  const sequentialParentTaskIdSet = new Set<DbId>()
 
   for (const block of taskBlocks) {
     cacheBlockByKnownIds(block, blockCacheById)
@@ -547,6 +558,12 @@ async function buildSubtaskContext(
     parentBlockIdByTaskId.set(taskId, parentBlockId)
     registerTaskAliasIds(taskIdByAliasId, taskId, block, liveBlock)
     childTaskIdsByParentId.set(taskId, [])
+    orderedChildTaskIdsByParentId.set(taskId, [])
+    liveBlockByTaskId.set(taskId, liveBlock)
+
+    if (readTaskMetaFromBlock(liveBlock).subtasks.sequential) {
+      sequentialParentTaskIdSet.add(taskId)
+    }
   }
 
   for (const [taskId, parentBlockId] of parentBlockIdByTaskId.entries()) {
@@ -572,10 +589,20 @@ async function buildSubtaskContext(
     childTaskIdsByParentId.set(parentTaskId, childTaskIds)
   }
 
+  const taskIds = new Set(statusByTaskId.keys())
+  for (const [taskId, liveBlock] of liveBlockByTaskId.entries()) {
+    orderedChildTaskIdsByParentId.set(
+      taskId,
+      collectVisibleChildTaskIds(liveBlock, taskId, taskIds),
+    )
+  }
+
   return {
     statusByTaskId,
     childTaskIdsByParentId,
+    orderedChildTaskIdsByParentId,
     parentTaskIdByTaskId,
+    sequentialParentTaskIdSet,
   }
 }
 
@@ -702,6 +729,68 @@ function cacheBlockByKnownIds(
     }
 
     blockCacheById.set(aliasId, block)
+  }
+}
+
+function collectVisibleChildTaskIds(
+  taskBlock: Block,
+  taskId: DbId,
+  taskIds: Set<DbId>,
+): DbId[] {
+  const result: DbId[] = []
+  const seen = new Set<DbId>()
+  const visited = new Set<DbId>()
+
+  for (const childId of taskBlock.children) {
+    collectFirstTaskDescendants(
+      getMirrorId(childId),
+      taskId,
+      taskIds,
+      result,
+      seen,
+      visited,
+    )
+  }
+
+  return result
+}
+
+function collectFirstTaskDescendants(
+  blockId: DbId,
+  sourceTaskId: DbId,
+  taskIds: Set<DbId>,
+  result: DbId[],
+  seen: Set<DbId>,
+  visited: Set<DbId>,
+) {
+  if (visited.has(blockId)) {
+    return
+  }
+  visited.add(blockId)
+
+  const normalizedBlockId = getMirrorId(blockId)
+  if (taskIds.has(normalizedBlockId)) {
+    if (normalizedBlockId !== sourceTaskId && !seen.has(normalizedBlockId)) {
+      seen.add(normalizedBlockId)
+      result.push(normalizedBlockId)
+    }
+    return
+  }
+
+  const block = orca.state.blocks[normalizedBlockId]
+  if (block == null) {
+    return
+  }
+
+  for (const childId of block.children) {
+    collectFirstTaskDescendants(
+      getMirrorId(childId),
+      sourceTaskId,
+      taskIds,
+      result,
+      seen,
+      visited,
+    )
   }
 }
 
@@ -906,6 +995,41 @@ function hasOpenSubtaskByTaskId(
       if (!visited.has(grandChildId)) {
         queue.push(grandChildId)
       }
+    }
+  }
+
+  return false
+}
+
+function hasUnfinishedPreviousSubtask(
+  taskId: DbId,
+  schema: TaskSchemaDefinition,
+  subtaskContext: SubtaskContext | null,
+): boolean {
+  if (subtaskContext == null) {
+    return false
+  }
+
+  const parentTaskId = subtaskContext.parentTaskIdByTaskId.get(taskId) ?? null
+  if (parentTaskId == null || !subtaskContext.sequentialParentTaskIdSet.has(parentTaskId)) {
+    return false
+  }
+
+  const siblingTaskIds = subtaskContext.orderedChildTaskIdsByParentId.get(parentTaskId) ?? []
+  const currentIndex = siblingTaskIds.indexOf(taskId)
+  if (currentIndex <= 0) {
+    return false
+  }
+
+  for (let index = 0; index < currentIndex; index += 1) {
+    const previousTaskId = siblingTaskIds[index]
+    const previousStatus = subtaskContext.statusByTaskId.get(previousTaskId)
+    const previousCompleted = previousStatus != null &&
+      isTaskDoneStatus(previousStatus, schema) &&
+      !hasOpenSubtaskByTaskId(previousTaskId, schema, subtaskContext)
+
+    if (!previousCompleted) {
+      return true
     }
   }
 
