@@ -15,6 +15,8 @@ const TIMELINE_AUTO_SCROLL_EDGE_PX = 52
 const TIMELINE_AUTO_SCROLL_MAX_STEP_PX = 22
 const DRAG_DATA_TYPE = "application/x-mlo-my-day-task"
 const COMPACT_LAYOUT_BREAKPOINT_PX = 980
+const MINUTE_MS = 60 * 1000
+const NEXT_MINUTE_REFRESH_BUFFER_MS = 32
 
 export interface MyDayScheduleTaskItem {
   blockId: DbId
@@ -88,6 +90,8 @@ interface OverflowTitleBinding<T extends HTMLElement> {
 
 export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   const React = window.React
+  const useCompatibleLayoutEffect =
+    typeof React.useLayoutEffect === "function" ? React.useLayoutEffect : React.useEffect
   const boardRef = React.useRef<HTMLDivElement | null>(null)
   const timelineRef = React.useRef<HTMLDivElement | null>(null)
   const timelineScrollRef = React.useRef<HTMLDivElement | null>(null)
@@ -95,6 +99,9 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   const [compactLayout, setCompactLayout] = React.useState(false)
   const [draggingTaskId, setDraggingTaskId] = React.useState<DbId | null>(null)
   const [dropMinute, setDropMinute] = React.useState<number | null>(null)
+  const [currentScheduleMinute, setCurrentScheduleMinute] = React.useState<number>(() =>
+    resolveCurrentScheduleMinute(new Date()),
+  )
   const [timelinePointerDragState, setTimelinePointerDragState] =
     React.useState<TimelinePointerDragState | null>(null)
   const timelinePointerDragStateRef = React.useRef<TimelinePointerDragState | null>(null)
@@ -143,7 +150,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
     }
   }, [])
 
-  React.useEffect(() => {
+  useCompatibleLayoutEffect(() => {
     ensureMyDayScheduleStyles()
   }, [])
 
@@ -235,6 +242,18 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
     420,
     Math.round((timelineEndMinute - timelineStartMinute) * PIXELS_PER_MINUTE),
   )
+  const currentTimelineMinute = React.useMemo(() => {
+    return scheduleMinuteToTimelineMinute(currentScheduleMinute, timelineStartOffsetMinute)
+  }, [currentScheduleMinute, timelineStartOffsetMinute])
+  const currentTimeTop = React.useMemo(() => {
+    return resolveTimelinePositionTop(
+      currentScheduleMinute,
+      timelineStartMinute,
+      timelineStartOffsetMinute,
+    )
+  }, [currentScheduleMinute, timelineStartMinute, timelineStartOffsetMinute])
+  const showCurrentTimeMarker =
+    currentTimelineMinute >= timelineStartMinute && currentTimelineMinute <= timelineEndMinute
 
   const timelineSlots = React.useMemo(() => {
     const result: number[] = []
@@ -326,6 +345,28 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   }, [timelineEndMinute, timelineStartMinute])
 
   React.useEffect(() => {
+    let refreshTimerId: number | null = null
+
+    const scheduleRefresh = () => {
+      const now = new Date()
+      const delayMs = resolveDelayUntilNextMinuteBoundaryMs(now)
+      refreshTimerId = window.setTimeout(() => {
+        setCurrentScheduleMinute(resolveCurrentScheduleMinute(new Date()))
+        scheduleRefresh()
+      }, delayMs)
+    }
+
+    setCurrentScheduleMinute(resolveCurrentScheduleMinute(new Date()))
+    scheduleRefresh()
+
+    return () => {
+      if (refreshTimerId != null) {
+        window.clearTimeout(refreshTimerId)
+      }
+    }
+  }, [])
+
+  React.useEffect(() => {
     disabledRef.current = props.disabled
   }, [props.disabled])
 
@@ -340,6 +381,40 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   React.useEffect(() => {
     timelinePointerDragStateRef.current = timelinePointerDragState
   }, [timelinePointerDragState])
+
+  const centerTimelineOnCurrentTime = React.useCallback(() => {
+    const scrollElement = timelineScrollRef.current
+    if (scrollElement == null) {
+      return
+    }
+
+    const currentTop = resolveTimelinePositionTop(
+      resolveCurrentScheduleMinute(new Date()),
+      timelineStartMinute,
+      timelineStartOffsetMinute,
+    )
+    const maxScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight)
+    const centeredScrollTop = clampNumber(
+      Math.round(currentTop - scrollElement.clientHeight / 2),
+      0,
+      maxScrollTop,
+    )
+
+    scrollElement.scrollTop = centeredScrollTop
+  }, [timelineStartMinute, timelineStartOffsetMinute])
+
+  useCompatibleLayoutEffect(() => {
+    let frameId = 0
+    frameId = window.requestAnimationFrame(() => {
+      centerTimelineOnCurrentTime()
+    })
+
+    return () => {
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId)
+      }
+    }
+  }, [centerTimelineOnCurrentTime, compactLayout])
 
   const isPointerOverUnscheduledPanel = React.useCallback((clientX: number, clientY: number) => {
     const panelElement = unscheduledPanelRef.current
@@ -912,6 +987,24 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                   : null,
               )
             }),
+            showCurrentTimeMarker
+              ? React.createElement(
+                  "div",
+                  {
+                    className: "mlo-my-day-now-marker",
+                    style: {
+                      top: `${currentTimeTop}px`,
+                    },
+                    "aria-hidden": true,
+                  },
+                  React.createElement("div", {
+                    className: "mlo-my-day-now-line",
+                  }),
+                  React.createElement("div", {
+                    className: "mlo-my-day-now-dot",
+                  }),
+                )
+              : null,
             dropMinute != null
               ? React.createElement("div", {
                   className: "mlo-my-day-drop-line",
@@ -1898,6 +1991,18 @@ function normalizeTimelineStartHour(rawValue: unknown): number {
   return rounded
 }
 
+function resolveCurrentScheduleMinute(now: Date = new Date()): number {
+  return clampNumber(now.getHours() * 60 + now.getMinutes(), 0, DAY_MINUTES - 1)
+}
+
+function resolveDelayUntilNextMinuteBoundaryMs(now: Date = new Date()): number {
+  const elapsedMs = now.getSeconds() * 1000 + now.getMilliseconds()
+  return Math.max(
+    NEXT_MINUTE_REFRESH_BUFFER_MS,
+    MINUTE_MS - elapsedMs + NEXT_MINUTE_REFRESH_BUFFER_MS,
+  )
+}
+
 function scheduleMinuteToTimelineMinute(
   scheduleMinute: number,
   timelineStartOffsetMinute: number,
@@ -1949,6 +2054,15 @@ function timelineMinuteToLabelMinute(
   }
 
   return timelineMinuteToScheduleMinute(normalizedTimelineMinute, normalizedOffsetMinute)
+}
+
+function resolveTimelinePositionTop(
+  scheduleMinute: number,
+  timelineStartMinute: number,
+  timelineStartOffsetMinute: number,
+): number {
+  const timelineMinute = scheduleMinuteToTimelineMinute(scheduleMinute, timelineStartOffsetMinute)
+  return (timelineMinute - timelineStartMinute) * PIXELS_PER_MINUTE
 }
 
 function resolveScheduleRangeFromTimelineRange(
@@ -2568,6 +2682,9 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-timeline {
+  --mlo-myday-track-line-left: 57px;
+  --mlo-myday-time-marker-left: 56px;
+  --mlo-myday-time-marker-right: 10px;
   position: relative;
   min-height: 220px;
   padding-left: 68px;
@@ -2577,7 +2694,7 @@ function ensureMyDayScheduleStyles() {
 .mlo-my-day-timeline::before {
   content: "";
   position: absolute;
-  left: 57px;
+  left: var(--mlo-myday-track-line-left);
   top: 0;
   bottom: 0;
   width: 1px;
@@ -2613,10 +2730,42 @@ function ensureMyDayScheduleStyles() {
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
+.mlo-my-day-now-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.mlo-my-day-now-line {
+  position: absolute;
+  left: var(--mlo-myday-time-marker-left);
+  right: var(--mlo-myday-time-marker-right);
+  top: 0;
+  border-top: 2px solid rgba(220, 38, 38, 0.9);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.64);
+}
+
+.mlo-my-day-now-dot {
+  position: absolute;
+  left: var(--mlo-myday-track-line-left);
+  top: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(220, 38, 38, 0.95);
+  transform: translate(-50%, -50%);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 0 0 5px rgba(220, 38, 38, 0.12);
+}
+
 .mlo-my-day-drop-line {
   position: absolute;
-  left: 56px;
-  right: 10px;
+  left: var(--mlo-myday-time-marker-left);
+  right: var(--mlo-myday-time-marker-right);
   height: 0;
   border-top: 2px solid var(--mlo-myday-accent);
   box-shadow: 0 0 0 4px var(--mlo-myday-accent-soft);
@@ -2839,6 +2988,9 @@ function ensureMyDayScheduleStyles() {
 .mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-timeline {
   min-height: 320px;
   padding-left: 58px;
+  --mlo-myday-track-line-left: 49px;
+  --mlo-myday-time-marker-left: 50px;
+  --mlo-myday-time-marker-right: 8px;
 }
 
 .mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-timeline::before {
@@ -2854,10 +3006,6 @@ function ensureMyDayScheduleStyles() {
   --mlo-timeline-track-left: 62px;
   --mlo-timeline-track-right: 8px;
   --mlo-timeline-lane-gap: 6px;
-}
-
-.mlo-my-day-board.mlo-my-day-board-compact .mlo-my-day-drop-line {
-  left: 50px;
 }
 
 @media (max-width: 980px) {
@@ -2882,6 +3030,9 @@ function ensureMyDayScheduleStyles() {
   .mlo-my-day-timeline {
     min-height: 320px;
     padding-left: 58px;
+    --mlo-myday-track-line-left: 49px;
+    --mlo-myday-time-marker-left: 50px;
+    --mlo-myday-time-marker-right: 8px;
   }
 
   .mlo-my-day-timeline::before {
@@ -2897,10 +3048,6 @@ function ensureMyDayScheduleStyles() {
     --mlo-timeline-track-left: 62px;
     --mlo-timeline-track-right: 8px;
     --mlo-timeline-lane-gap: 6px;
-  }
-
-  .mlo-my-day-drop-line {
-    left: 50px;
   }
 }
 `
