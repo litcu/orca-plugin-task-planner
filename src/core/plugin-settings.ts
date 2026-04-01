@@ -17,6 +17,8 @@ export interface TaskPlannerSettings {
   taskTimerEnabled: boolean
   taskTimerAutoStartOnDoing: boolean
   taskTimerMode: TaskTimerMode
+  pomodoroCompletionNotificationEnabled: boolean
+  pomodoroCompletionSoundEnabled: boolean
 }
 
 const TASK_TAG_NAME_SETTING = "taskTagName"
@@ -31,6 +33,8 @@ const SHOW_SUBTASK_PROGRESS_BAR_SETTING = "showSubtaskProgressBar"
 const TASK_TIMER_ENABLED_SETTING = "taskTimerEnabled"
 const TASK_TIMER_AUTO_START_ON_DOING_SETTING = "taskTimerAutoStartOnDoing"
 const TASK_TIMER_MODE_SETTING = "taskTimerMode"
+const POMODORO_COMPLETION_NOTIFICATION_ENABLED_SETTING = "pomodoroCompletionNotificationEnabled"
+const POMODORO_COMPLETION_SOUND_ENABLED_SETTING = "pomodoroCompletionSoundEnabled"
 const DEFAULT_MY_DAY_RESET_HOUR = 5
 const DEFAULT_DUE_SOON_DAYS = 7
 const DEFAULT_TASK_VIEWS_TAB: BuiltinTaskViewsTab = "next-actions"
@@ -160,6 +164,18 @@ export async function ensurePluginSettingsSchema(
     ],
     defaultValue: DEFAULT_TASK_TIMER_MODE,
   }
+  schema[POMODORO_COMPLETION_NOTIFICATION_ENABLED_SETTING] = {
+    label: t("Pomodoro completion notification"),
+    description: t("Show an in-app notification when each Pomodoro is completed."),
+    type: "boolean",
+    defaultValue: true,
+  }
+  schema[POMODORO_COMPLETION_SOUND_ENABLED_SETTING] = {
+    label: t("Pomodoro completion sound"),
+    description: t("Play a reminder sound when each Pomodoro is completed."),
+    type: "boolean",
+    defaultValue: true,
+  }
 
   await orca.plugins.setSettingsSchema(pluginName, schema)
 }
@@ -200,6 +216,12 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
   const taskTimerMode = normalizeTaskTimerMode(
     pluginSettings?.[TASK_TIMER_MODE_SETTING],
   )
+  const pomodoroCompletionNotificationEnabled = normalizePomodoroCompletionNotificationEnabled(
+    pluginSettings?.[POMODORO_COMPLETION_NOTIFICATION_ENABLED_SETTING],
+  )
+  const pomodoroCompletionSoundEnabled = normalizePomodoroCompletionSoundEnabled(
+    pluginSettings?.[POMODORO_COMPLETION_SOUND_ENABLED_SETTING],
+  )
 
   return {
     taskTagName,
@@ -214,6 +236,8 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
     taskTimerEnabled,
     taskTimerAutoStartOnDoing,
     taskTimerMode,
+    pomodoroCompletionNotificationEnabled,
+    pomodoroCompletionSoundEnabled,
   }
 }
 
@@ -301,4 +325,12 @@ function normalizeTaskTimerAutoStartOnDoing(rawValue: unknown): boolean {
 
 function normalizeTaskTimerMode(rawValue: unknown): TaskTimerMode {
   return rawValue === "pomodoro" ? "pomodoro" : DEFAULT_TASK_TIMER_MODE
+}
+
+function normalizePomodoroCompletionNotificationEnabled(rawValue: unknown): boolean {
+  return rawValue !== false
+}
+
+function normalizePomodoroCompletionSoundEnabled(rawValue: unknown): boolean {
+  return rawValue !== false
 }
