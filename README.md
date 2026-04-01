@@ -1,98 +1,96 @@
 # orca-task-planner
 
-[![English](https://img.shields.io/badge/README-English-1f6feb)](README.md)
-[![简体中文](https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-2ea44f)](README_zh.md)
+[![English](https://img.shields.io/badge/README-English-1f6feb)](README_en.md)
+[![简体中文](https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-2ea44f)](README.md)
 
-`orca-task-planner` is an all-in-one planning and execution plugin for Orca Note.
+`orca-task-planner` 是 Orca Note 的一体化任务规划与执行插件。
 
-## Plugin Overview
+## 插件简介
 
-A task command center for Orca Note. It helps you:
+面向 Orca Note 的任务中枢。它可以帮助你：
 
-- capture ideas as tasks in seconds
-- run planning, scheduling, execution, and review in one flow
-- focus only on actionable work in **Active Tasks**
-- shape today with **My Day** (list and schedule)
-- track real effort with built-in timer
-- reduce priority decision fatigue with scoring and views
+- 把“想到的事”在几秒内收集成任务
+- 从清单、日程、回顾到复盘形成完整闭环
+- 在 **激活任务** 中只看当前可推进事项
+- 用 **我的一天** 快速安排今天的执行节奏
+- 用内置计时器沉淀真实投入时长
+- 用评分与视图减少优先级决策成本
 
-## Key Features
+## 主要功能
 
-### 0) Quick capture (fast task collection)
+### 0）任务快速收集（快速新增任务块）
 
-The first step of task management is not perfect planning, but not losing input.  
-The plugin supports immediate task capture inside notes:
+任务管理的第一步不是“计划得多好”，而是“先不丢”。  
+插件支持在笔记中即时收集任务，尽量降低记录阻力：
 
-- convert the current block into a task with `Alt+Enter`
-- create a new task block quickly from the task management panel (`Add task`)
-- fill time/dependency/priority details later in the property panel
+- 在编辑区可直接把当前块快速转为任务（`Alt+Enter`）；
+- 在任务管理面板可通过“添加任务”快速新增任务块；
+- 新增后可继续在属性面板补充时间、依赖、优先级等信息。
 
-Capture first, refine later, without breaking your writing flow.
+你可以先把任务记下来，随后再批量补齐计划信息，不打断当前思路。
 
-### 1) Fast task status switching
+### 1）任务状态快速切换
 
-Status switching is designed as a low-friction editor action:
+插件把状态切换做成“零跳转、低心智负担”的编辑动作：
 
-- press `Alt+Enter` to create a task and cycle status
-- status sequence: `TODO -> Doing -> Done -> TODO`
-- `Waiting` can be set manually in task properties (not included in the `Alt+Enter` cycle)
-- click the left status icon for the same status cycle
-- when switching to `Doing`, start time is recorded automatically
-- if timer auto-start is enabled, switching to `Doing` also starts task timer
+- 在任意块按 `Alt+Enter` 可直接创建任务，并循环切换状态；
+- 中文状态顺序为：`待开始 -> 进行中 -> 已完成 -> 待开始`；
+- 可在任务属性面板手动设置“等待中”状态（不包含在 `Alt+Enter` 循环中）；
+- 点击任务左侧状态图标也可执行同样切换；
+- 切换为“进行中”时，会自动记录开始时间，便于后续跟踪；
+- 若开启计时自动启动，切换到“进行中”时会自动开始计时。
 
-Progress and execution records stay inside the editor, so workflow stays continuous.
+状态推进和执行记录都发生在编辑器里，连续工作流更顺。
 
-### 2) Task Property Panel: fast task editing
+### 2）任务属性面板：快速编辑任务属性
 
-Click the task tag to open a single editing surface for "fill in -> save -> continue":
+点击任务标签即可打开属性面板，在一个入口完成“补全信息 -> 保存 -> 继续执行”：
 
-- basic fields: status, start time, due time, labels, notes, star
-- planning fields: importance, urgency, effort
-- dependency fields: dependency targets, dependency mode (`ALL` / `ANY`), dependency delay
-- cycle fields: review rules, recurrence rules
+- 基础字段：状态、开始时间、到期时间、标签、备注、收藏；
+- 计划字段：重要性、紧急度、工作量；
+- 依赖字段：依赖任务、依赖模式（`ALL` / `ANY`）、依赖延迟；
+- 周期字段：回顾规则、重复规则。
 
-The panel includes validation and quick save. Dependency targets can be selected by block references, making complex task graphs manageable without context switching.
+面板支持数值校验与快速保存；依赖任务可通过块引用选择。相比分散编辑，这种集中式方式更适合频繁调整的真实项目任务。
 
-### 3) Task Management Panel: one place to manage all tasks
+### 3）任务管理面板：统一查看与管理所有任务
 
-The task panel is the plugin's operations hub for viewing, filtering, editing, and executing tasks.  
-Included views:
+任务管理面板是插件的“操作中枢”，把查看、筛选、执行和维护放在一起。  
+主要视图包括：
 
-- **Dashboard**: global snapshot (completion, due pressure, blockers, top priorities)
-- **My Day**: daily focus list and schedule board (list/schedule mode)
-- **Active Tasks**: executable tasks right now (primary execution entry)
-- **All Tasks**: full task tree (hierarchy and drag/drop management)
-- **Starred Tasks**: manually highlighted tasks
-- **Due Soon**: tasks due within configured window
-- **Review**: review queue and batch review actions
-- **Custom Views**: scenario-specific saved rule-based views
+- **仪表盘**：全局概览（完成率、到期压力、阻塞项、优先任务）；
+- **我的一天**：当日聚焦任务清单与日程排期（列表/日程双模式）；
+- **激活任务**：当前可执行任务清单（主执行入口）；
+- **全部任务**：完整任务树（支持层级整理与拖拽）；
+- **收藏任务**：人工标记的重点任务；
+- **即将到期**：时间窗口内到期任务；
+- **回顾**：待回顾任务与批量回顾操作；
+- **自定义视图**：按规则保存的场景化视图。
 
-It supports the full loop of **inspect -> adjust -> execute -> review** in one place.
+在同一处即可完成“发现问题 -> 调整计划 -> 执行落地 -> 周期复盘”。
 
-### 4) Active Tasks: GTD-oriented execution list
+### 4）激活任务：基于 GTD 思路的执行清单
 
-`Active Tasks` is designed to answer one question instantly: "What should I do right now?"
+`激活任务` 的目标是：每次打开面板，都直接看到“现在就能做、且最该先做”的任务。
 
-#### Eligibility rules
+#### 判定规则
 
-A task enters `Active Tasks` only if all checks pass:
+任务进入 `激活任务` 需要同时满足：
 
-1. task is not completed and not canceled
-2. start time is reached (or not set)
-3. no unfinished subtasks exist
-4. ancestor dependency chain does not block
-5. own dependency condition is satisfied (`ALL` / `ANY` + delay)
+1. 任务未完成且未取消；
+2. 已到开始时间（或未设置开始时间）；
+3. 不存在未完成子任务；
+4. 祖先依赖链不阻塞；
+5. 本任务依赖条件满足（`ALL` / `ANY` + 延迟）。
 
-#### Priority score formula
+#### 优先级评分公式
 
-Active tasks are scored and ranked with:
+激活任务按以下公式评分并排序：
 
 ```text
 base = 0.40*I + 0.22*U + 0.20*D + 0.10*S + 0.08*C
 score = base * criticalBoost * deadlineBoost * startByBoost * agingBoost / timePenalty
 ```
-
-Where:
 
 - `timePenalty = 1 + 0.9*EffN`
 - `criticalBoost = 1 + 0.3*Criticality`
@@ -100,254 +98,250 @@ Where:
 - `startByBoost = 1 + 0.22*StartBy`
 - `agingBoost = 1 + 0.12*AgingN`
 
-And key factors are:
+- `I/U`：Importance / Urgency 的非线性映射（`50` 为中性点）
+- `D`：到期因子（无截止日为 `45`，逾期为 `100`，其余按指数衰减）
+- `S`：开始时间因子（到达开始时间为 `100`，未来任务按二次曲线衰减，最低 `10`）
+- `C`：上下文因子（收藏任务 `80`，否则 `50`）
+- `EffN`：工作量归一化（`effort/100`）
+- `Criticality`：依赖关键性（`0.6*descendants + 0.4*dependencyDemand`）
+- `OverdueN`：逾期天数归一化（`daysOverdue/7`）
+- `StartBy`：最晚开工压力（由工作量与剩余天数共同决定）
+- `AgingN`：任务沉淀时长因子（基于创建时间，`waitingDays/14`）
+- `dependencyDemand`：下游任务需求强度（下游任务越重要/紧急，值越高）
 
-- `I/U`: non-linear mapping of importance/urgency (neutral at `50`)
-- `D`: due factor (`45` if no due date, `100` if overdue, otherwise exponential decay by due distance)
-- `S`: start factor (`100` when start is reached, quadratic decay for future tasks, floor at `10`)
-- `C`: context factor (`80` for starred tasks, otherwise `50`)
-- `EffN`: normalized effort (`effort/100`)
-- `Criticality`: dependency criticality from dependency graph (`0.6*descendants + 0.4*dependencyDemand`)
-- `OverdueN`: normalized overdue days (`daysOverdue/7`)
-- `StartBy`: latest-start pressure using effort and remaining days
-- `AgingN`: waiting-time factor (`waitingDays/14`)
-- `dependencyDemand`: downstream task demand intensity (higher when dependent tasks are high importance/urgency)
+排序规则：
 
-Sort order:
+1. 已逾期任务优先；
+2. 分数降序；
+3. 到期时间升序；
+4. 内部稳定 ID 顺序。
 
-1. overdue tasks first
-2. score descending
-3. due time ascending
-4. stable internal ID order
+你不需要手动反复比较任务，列表会自动把注意力拉到当前最值得推进的事项。
 
-You do not need to manually compare tasks repeatedly. The list keeps attention on what is most worth pushing now.
+#### 建议使用方式
 
-#### Recommended usage
+- 每日开始工作时，先查看 `激活任务`；
+- 优先处理列表前部任务，减少切换成本；
+- 配合 `即将到期` 视图做短期排程，配合 `仪表盘` 做全局校准。
 
-- start each work session from `Active Tasks`
-- execute from top to bottom to reduce context switching
-- combine `Due Soon` for short-term scheduling and `Dashboard` for macro calibration
+### 5）重复任务功能
 
-### 5) Recurring tasks
+把例行工作从“反复新建任务”升级为“规则自动推进”：
 
-Recurring rules turn repeated planning into automatic progression:
+- 支持按天/周/月重复；
+- 支持间隔、指定周几（按周）、最大次数、结束日期；
+- 任务完成后，系统会自动推进到下一周期；
+- 对有层级的任务，可同步推进相关子任务状态与时间节奏。
 
-- daily / weekly / monthly recurrence
-- interval, weekday (weekly), max count, end date
-- automatic roll-forward to next cycle when completed
-- coordinated timeline progression for related subtasks in task hierarchies
+适合晨间例会、周报、巡检、复盘等固定节奏工作。
 
-Great for standups, weekly reports, maintenance checks, and other cadence-based work.
+### 6）任务回顾功能
 
-### 6) Task review
+回顾功能让长期任务持续被看见，不再“开了头就沉底”：
 
-Review keeps long-running work visible so tasks do not disappear after kickoff:
+- 支持单次回顾和周期回顾；
+- 可配置回顾频率（如每 N 天/周/月）；
+- 在 `回顾` 视图中集中处理待回顾任务；
+- 支持批量“标记已回顾”，自动推进下一次回顾时间。
 
-- single review and cyclic review
-- configurable review interval (e.g., every N days/weeks/months)
-- centralized review handling in `Review` view
-- batch `Mark reviewed` action with automatic next-review progression
+### 7）自定义视图功能
 
-### 7) Custom views
+自定义视图把高频筛选场景固化成按钮，一键回到你的工作上下文：
 
-Custom views save high-frequency filters as reusable entry points:
+- 支持创建、编辑、删除视图；
+- 支持 AND/OR 组合条件；
+- 可按状态、时间、依赖、标签等字段组合筛选；
+- 视图会持久保存，重启后仍可直接使用。
 
-- create, edit, and delete custom views
-- combine rules with AND/OR logic
-- filter by status, time, dependencies, labels, and more
-- persistent across restarts
+适用于“工作/家庭/项目阶段/周计划”等长期场景分组。
 
-Useful for recurring contexts such as work/home/project phase/weekly planning.
+### 8）任务仪表盘
 
-### 8) Task dashboard
+`仪表盘` 提供任务系统的“经营视角”：
 
-`Dashboard` gives an operating view of your task system:
+- 关键指标：任务总量、激活任务、回顾任务、超期任务；
+- 结构指标：状态分布、到期压力；
+- 风险指标：主要阻塞原因；
+- 执行指标：高优先激活任务列表。
 
-- key metrics: total tasks, active tasks, review tasks, overdue tasks
-- structure metrics: status distribution, due pressure
-- risk metrics: major blocker categories
-- execution metrics: top-priority active tasks
+适合每天开工前 1 分钟做节奏校准。
 
-Use it for a quick daily calibration before execution starts.
+### 9）我的一天（My Day）视图
 
-### 9) My Day view
+`我的一天` 聚焦“今天要完成什么”，把日计划做成可执行界面：
 
-`My Day` turns "today's plan" into an executable workspace:
+- 支持把任务加入“我的一天”清单；
+- 支持列表模式与日程模式切换；
+- 日程模式支持时间轴拖拽排期与拖动时长；
+- 任务卡片支持右键菜单操作；
+- 支持自动同步到今日日志分区；
+- 当今日日志已存在该任务时，不会重复插入镜像块。
 
-- keep a dedicated "today list" of tasks
-- switch between list mode and schedule mode
-- drag and resize task cards on timeline for time blocking
-- use right-click menu on cards for quick actions
-- sync My Day tasks to today journal section automatically
-- avoid duplicate mirror insertion when the task already exists in today's journal
+你可以从“任务列表”直接进入“时间安排”，把计划变成具体时间块。
 
-Move directly from priority list to concrete time blocks without duplicating task sources.
+### 10）任务计时功能
 
-### 10) Task timer
+任务计时器帮助你把“做了很久”变成可量化的投入数据：
 
-The built-in task timer turns "I worked on it for a while" into measurable effort:
+- 支持 `直接计时` 与 `番茄钟计时` 两种展示模式；
+- 支持在任务行与行内控件中开始/停止计时；
+- 全局仅允许一个任务处于计时中（启动新的会停止旧的）；
+- 可配置切换到“进行中”自动开始计时；
+- 在“等待中”状态下开始计时，会自动切换为“进行中”；
+- 切换到“已完成”或“等待中”自动停止计时；
+- 计时数据会持久化保存。
 
-- timer modes: `Direct timer` and `Pomodoro timer`
-- start/stop timer from task rows and inline task widgets
-- only one running task timer at a time (starting one stops others)
-- optional auto-start when status switches to `Doing`
-- starting timer from `Waiting` auto-switches task status to `Doing`
-- auto-stop when status switches to `Done` or `Waiting`
-- elapsed time persists across restarts
+适合复盘估时偏差、沉淀个人节奏。
 
-Useful for effort review and better estimation over time.
+### 11）启动任务汇总通知
 
-### 11) Startup task summary notification
+每次启动插件时，可先看到“今天工作盘面”的快照，包含：
 
-On startup, the plugin can show a quick snapshot of today's workload:
+- 激活任务数；
+- 超期任务数；
+- 临期任务数（按即将到期窗口计算）。
 
-- active task count
-- overdue task count
-- due-soon task count within configured due-soon window
+通知开关可控，不需要时可以关闭。
 
-This notification is optional and can be toggled in settings.
+## 安装方式
 
-## Installation
+### 从源码安装
 
-### Install from source
-
-1. Place this project under Orca plugin directory, for example:  
-   `C:\Users\<your-name>\Documents\orca\plugins\orca-task-planner`
-2. Build:
+1. 将项目放到 Orca 插件目录，例如：  
+   `C:\Users\<你的用户名>\Documents\orca\plugins\orca-task-planner`
+2. 构建：
 
 ```bash
 npm install
 npm run build
 ```
 
-3. Start/restart Orca Note.
-4. Enable `orca-task-planner` in plugin settings.
+3. 启动/重启 Orca Note。
+4. 在插件设置中启用 `orca-task-planner`。
 
-Build output: `dist/index.js`.
+构建产物：`dist/index.js`。
 
-### Install from GitHub Release
+### 从 GitHub Release 安装
 
-1. Download `orca-task-planner-vX.Y.Z.zip` from GitHub `Releases` assets.
-2. Extract it to your Orca plugins folder:  
-   `C:\Users\<your-name>\Documents\orca\plugins\`
-3. Ensure the final structure is:  
+1. 从 GitHub `Releases` 资产下载 `orca-task-planner-vX.Y.Z.zip`。
+2. 解压到 Orca 插件目录：  
+   `C:\Users\<你的用户名>\Documents\orca\plugins\`
+3. 确认最终目录结构为：  
    `...\plugins\orca-task-planner\dist\index.js`
-4. Start/restart Orca Note and enable `orca-task-planner`.
+4. 启动/重启 Orca Note，并启用 `orca-task-planner`。
 
-### Marketplace submission readiness
+### 插件市场提交准备
 
-This repository is updated to match the latest `awesome-orcanote` contribution requirements:
+本仓库已按 `awesome-orcanote` 最新贡献要求完成对齐：
 
-- `package.json` includes the required metadata fields: `name`, `description`, `version`, `keywords`, `license`, `author`
-- `author` is set to the GitHub username `litcu`
-- the release package explicitly includes `LICENSE` and excludes `package-lock.json`
-- the marketplace icon now follows the `80x80` size limit
-- run `npm run check:marketplace` to validate metadata and print a ready-to-paste `plugins.json` entry for your `awesome-orcanote` PR
+- `package.json` 已补齐必填元数据：`name`、`description`、`version`、`keywords`、`license`、`author`
+- `author` 已使用 GitHub 用户名 `litcu`
+- 发布包根目录已显式包含 `LICENSE`，并排除 `package-lock.json`
+- 插件市场图标已对齐 `80x80` 尺寸要求
+- 执行 `npm run check:marketplace` 可校验元数据，并输出后续提交 `awesome-orcanote` PR 时可直接粘贴到 `plugins.json` 的条目内容
 
+## 快速上手
 
-## Quick Start
+1. 打开命令面板，执行 `Open task management panel`（进入统一工作台）。
+2. 创建任务：
+   - 把光标放到任意块
+   - 按 `Alt+Enter`
+   - 状态循环：`待开始 -> 进行中 -> 已完成 -> 待开始`
+3. 打开任务属性：
+   - 点击任务标签，或
+   - 执行 `Open task property popup`
+4. 配置核心字段：
+   - 开始时间 / 到期时间
+   - 依赖模式（`ALL` 或 `ANY`）
+   - 依赖延迟（如需要）
+   - 重要性 / 紧急度 / 工作量
+5. 切到 **激活任务**，按列表顺序执行。
+6. 在 `全部任务` 管理层级与拖拽结构。
+7. 使用 `我的一天` 做当日聚焦和时间排程。
+8. 在 `回顾` 做周期回顾并批量标记。
+9. 在 `即将到期` 和 `仪表盘` 做周期计划与总览。
 
-1. Open Command Palette and run `Open task management panel` (your unified workspace).
-2. Create a task:
-   - place cursor on any block
-   - press `Alt+Enter`
-   - status cycle: `TODO -> Doing -> Done -> TODO`
-3. Open task properties:
-   - click the task tag, or
-   - run `Open task property popup`
-4. Set core fields:
-   - start time / due time
-   - dependency mode (`ALL` or `ANY`)
-   - dependency delay (if needed)
-   - importance / urgency / effort
-5. Switch to **Active Tasks** and execute in order.
-6. Use `All Tasks` for hierarchy and drag/drop structure management.
-7. Use `My Day` for daily focus and schedule planning.
-8. Use `Review` for periodic review and batch review actions.
-9. Use `Due Soon` and `Dashboard` for planning and global overview.
+## 命令与快捷键
 
-## Commands and Shortcut
+- `Alt+Enter`：创建任务 / 循环切换任务状态
+- `Open task management panel`：打开任务管理面板
+- `Open task property popup`：打开任务属性面板
 
-- `Alt+Enter`: create/cycle task status
-- `Open task management panel`: open task management panel
-- `Open task property popup`: open task property panel
+## 数据与持久化
 
-## Data and Persistence
+- 面向用户的任务字段存储在任务标签属性中
+- 扩展规划字段存储在块属性 `_mlo_task_meta`
+- 任务计时数据存储在块属性 `_mlo_task_timer`
+- 自定义视图和“我的一天”状态存储在插件本地数据中
+- 默认本地持久化，不依赖外部服务
 
-- task-facing fields are stored in task tag properties
-- extended planning fields are persisted in block property `_mlo_task_meta`
-- task timer data is persisted in block property `_mlo_task_timer`
-- custom views and My Day state are persisted in plugin local data
-- local-first persistence, with no external service required
+## 常见问题
 
-## FAQ
+### 为什么任务没出现在激活任务？
 
-### Why is a task missing from Active Tasks?
+最常见原因：
 
-Most common reasons:
+- 开始时间还没到
+- 依赖任务未完成
+- 依赖延迟尚未结束
+- 祖先依赖仍阻塞
+- 仍有未完成子任务
+- 任务已完成/已取消
 
-- start time not reached yet
-- dependency not completed
-- dependency delay not elapsed
-- ancestor dependency still blocks
-- unfinished subtasks exist
-- task is already done/canceled
+### 为什么激活任务排序会变化？
 
-### Why did Active Tasks order change?
+当真正影响评分或阻塞条件的字段变化时（如到期时间、紧急度、依赖完成状态），排序会自动更新。
+切换到“进行中”只会记录开始时间；仅这一动作本身不应改变激活任务顺序。
 
-When task fields or dependency state changes (for example due date, urgency, dependency completion), scoring updates and order changes accordingly.
+### 依赖模式 `ALL` 和 `ANY` 如何选择？
 
-### How should I choose `ALL` vs `ANY` dependency mode?
+- `ALL`：所有前置都完成后才能开始
+- `ANY`：任一前置完成即可开始
 
-- `ALL`: start only after all prerequisites are completed
-- `ANY`: start when any prerequisite is completed
+### 可以修改任务标签名称吗？
 
-### Can I change the task tag name?
+可以，在插件设置里修改 **任务标签名称**。
 
-Yes. Update **Task tag name** in plugin settings.
+### 如何调整“即将到期”范围？
 
-### How do I adjust Due Soon range?
+在插件设置中调整：
 
-Use plugin settings:
+- **即将到期天数**
+- **即将到期包含超期任务**
 
-- **Due soon days**
-- **Include overdue in Due Soon**
+### 如何设置任务面板首次打开的默认视图？
 
-### How do I set the initial task panel view?
+在插件设置中调整：
 
-Use plugin setting:
+- **任务面板默认视图**（用于首次打开任务面板时展示的视图）
 
-- **Default task panel view** (used when opening the task panel for the first time)
+### 可以隐藏顶部任务面板图标吗？
 
-### Can I hide the top task panel icon?
+可以，在插件设置中调整：
 
-Yes. In plugin settings:
+- **显示任务面板图标**（默认勾选）
 
-- **Show task panel icon** (enabled by default)
+### 如何启用“我的一天”视图？
 
-### How do I use My Day view?
+在插件设置中开启 **Enable My Day**，然后在任务面板切换到 `My Day` 视图。
 
-Enable it in plugin settings via **Enable My Day**, then switch to `My Day` tab in task panel.
+### “我的一天”跨天边界怎么计算？
 
-### How does My Day day boundary work?
+通过 **My Day start hour** 设置（0-23），系统按该本地小时切分“新的一天”。
 
-Use **My Day start hour** to define when a new My Day starts (0-23 local hour).
+### 任务计时与状态切换有什么联动？
 
-### How does task timer work with status switching?
+如果开启 **Auto start timer when status becomes Doing**，切换到“进行中”会自动开始计时；在“等待中”状态下开始计时会自动切换为“进行中”；切换到“已完成”或“等待中”会自动停止计时。
 
-If **Auto start timer when status becomes Doing** is enabled, switching to `Doing` starts timer automatically.  
-Starting timer from `Waiting` auto-switches the task to `Doing`.  
-Switching to `Done` or `Waiting` stops running timer automatically.
+### 为什么开始一个任务计时后，另一个任务计时会停止？
 
-### Why does starting one task timer stop another running timer?
+插件采用“全局单任务计时”策略，避免多任务同时计时导致时长统计失真。
 
-The plugin enforces a single running task timer globally to keep elapsed time records consistent.
+### 可以关闭启动任务汇总通知吗？
 
-### Can I disable startup task summary notification?
+可以，在插件设置中关闭 **Notify task summary on startup**。
 
-Yes. Disable **Notify task summary on startup** in plugin settings.
-
-## Development
+## 开发
 
 ```bash
 npm install
@@ -355,15 +349,15 @@ npm run dev
 npm run build
 ```
 
-## Release
+## 发布
 
-One-click release commands:
+一键发布命令：
 
 ```bash
 npm run release
 ```
 
-Version level options:
+按版本级别发布：
 
 ```bash
 npm run release:dry-run
@@ -372,20 +366,20 @@ npm run release:minor
 npm run release:major
 ```
 
-`release:dry-run` will only build and package locally (no version bump, no commit/tag, no push).  
-Local artifact path:
+`release:dry-run` 只会在本地执行构建和打包，不会改版本号，也不会提交、打标签或推送。  
+本地产物路径：
 
 ```text
 release/orca-task-planner-vX.Y.Z.zip
 ```
 
-`release` / `release:patch` / `release:minor` / `release:major` will:
+`release` / `release:patch` / `release:minor` / `release:major` 会执行：
 
-1. ensure git working tree is clean
-2. ensure current branch is `main`
-3. run `npm run build`
-4. run `npm version <patch|minor|major> --tag-version-prefix v` (creates commit + tag)
-5. run `git push origin main`
-6. run `git push origin vX.Y.Z`
+1. 确保 git 工作区干净
+2. 确保当前分支为 `main`
+3. 执行 `npm run build`
+4. 执行 `npm version <patch|minor|major> --tag-version-prefix v`（生成提交和 tag）
+5. 执行 `git push origin main`
+6. 执行 `git push origin vX.Y.Z`
 
-After push, GitHub Actions will auto-create (or update) Release and upload `orca-task-planner-vX.Y.Z.zip`.
+推送后，GitHub Actions 会自动创建（或更新）Release，并上传 `orca-task-planner-vX.Y.Z.zip`。

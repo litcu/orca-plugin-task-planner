@@ -1,7 +1,7 @@
 # orca-task-planner
 
-[![English](https://img.shields.io/badge/README-English-1f6feb)](README.md)
-[![简体中文](https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-2ea44f)](README_zh.md)
+[![English](https://img.shields.io/badge/README-English-1f6feb)](README_en.md)
+[![简体中文](https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-2ea44f)](README.md)
 
 `orca-task-planner` 是 Orca Note 的一体化任务规划与执行插件。
 
@@ -106,7 +106,7 @@ score = base * criticalBoost * deadlineBoost * startByBoost * agingBoost / timeP
 - `Criticality`：依赖关键性（`0.6*descendants + 0.4*dependencyDemand`）
 - `OverdueN`：逾期天数归一化（`daysOverdue/7`）
 - `StartBy`：最晚开工压力（由工作量与剩余天数共同决定）
-- `AgingN`：等待时长因子（`waitingDays/14`）
+- `AgingN`：任务沉淀时长因子（基于创建时间，`waitingDays/14`）
 - `dependencyDemand`：下游任务需求强度（下游任务越重要/紧急，值越高）
 
 排序规则：
@@ -290,7 +290,8 @@ npm run build
 
 ### 为什么激活任务排序会变化？
 
-当任务字段或依赖状态变化时（如到期时间、紧急度、依赖完成状态），评分会自动更新，排序会随之变化。
+当真正影响评分或阻塞条件的字段变化时（如到期时间、紧急度、依赖完成状态），排序会自动更新。
+切换到“进行中”只会记录开始时间；仅这一动作本身不应改变激活任务顺序。
 
 ### 依赖模式 `ALL` 和 `ANY` 如何选择？
 
@@ -347,3 +348,38 @@ npm install
 npm run dev
 npm run build
 ```
+
+## 发布
+
+一键发布命令：
+
+```bash
+npm run release
+```
+
+按版本级别发布：
+
+```bash
+npm run release:dry-run
+npm run release:patch
+npm run release:minor
+npm run release:major
+```
+
+`release:dry-run` 只会在本地执行构建和打包，不会改版本号，也不会提交、打标签或推送。  
+本地产物路径：
+
+```text
+release/orca-task-planner-vX.Y.Z.zip
+```
+
+`release` / `release:patch` / `release:minor` / `release:major` 会执行：
+
+1. 确保 git 工作区干净
+2. 确保当前分支为 `main`
+3. 执行 `npm run build`
+4. 执行 `npm version <patch|minor|major> --tag-version-prefix v`（生成提交和 tag）
+5. 执行 `git push origin main`
+6. 执行 `git push origin vX.Y.Z`
+
+推送后，GitHub Actions 会自动创建（或更新）Release，并上传 `orca-task-planner-vX.Y.Z.zip`。

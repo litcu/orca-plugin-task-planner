@@ -360,6 +360,7 @@ function buildTaskScoringContext(
     const values = getTaskPropertiesFromRef(taskRef?.data, schema, liveTaskBlock)
 
     dependentsByTaskId.set(taskId, new Set<DbId>())
+    // Aging should reflect task age, not the time since the last incidental edit.
     waitingDaysByTaskId.set(taskId, resolveTaskWaitingDays(liveTaskBlock, now))
     valuesByTaskId.set(taskId, values)
     taskDemandByTaskId.set(taskId, resolveTaskDemand(values))
@@ -493,9 +494,8 @@ function normalizeDescendantCount(descendantCount: number): number {
 }
 
 function resolveTaskWaitingDays(taskBlock: Block, now: Date): number {
-  const modifiedAtMs = normalizeDateTimeToTimestamp(taskBlock.modified)
   const createdAtMs = normalizeDateTimeToTimestamp(taskBlock.created)
-  const anchorMs = modifiedAtMs ?? createdAtMs
+  const anchorMs = createdAtMs
   if (anchorMs == null) {
     return 0
   }
