@@ -12,11 +12,16 @@ import { getMirrorId, isValidDbId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import { getPluginSettings } from "./plugin-settings"
 import {
+  buildTaskCustomRefData,
+  collectTaskCustomPropertyDescriptors,
+  createTaskCustomPropertyStateMap,
   getTaskPropertiesFromRef,
   mergeTaskRefData,
   normalizeTaskValuesForStatus,
   toTaskMetaPropertyForSave,
+  type TaskPropertyValues,
 } from "./task-properties"
+import { TASK_META_PROPERTY_NAME } from "./task-meta"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
 import {
   setupTaskTimerInlineWidgets,
@@ -29,6 +34,15 @@ const DATE_TIME_PROP_TYPE = 5
 const TEXT_CHOICES_PROP_TYPE = 6
 const TASK_STATUS_SHORTCUT = "alt+enter"
 const COMMAND_PREFIX = "task-planner"
+const TASK_TAG_INSERT_PENDING_TTL_MS = 10_000
+
+type PendingTaskTagInsertState = {
+  createdAt: number
+  hadTaskTag: boolean
+}
+
+const pendingTaskTagInsertStates = new Map<string, PendingTaskTagInsertState[]>()
+let suppressedTaskTagInsertHookDepth = 0
 
 export interface TaskQuickActionsHandle {
   commandId: string
@@ -53,6 +67,12 @@ export async function setupTaskQuickActions(
 
   // 命令用于 Alt+Enter 和左侧状态图标点击，共享同一条状态流转逻辑。
   registerCycleTaskStatusCommand(commandId, schema, pluginName)
+
+  pendingTaskTagInsertStates.clear()
+  const beforeInsertTagHook = createTaskTagInsertBeforeHook(schema)
+  const afterInsertTagHook = createTaskTagInsertAfterHook(schema)
+  orca.commands.registerBeforeCommand("core.editor.insertTag", beforeInsertTagHook)
+  orca.commands.registerAfterCommand("core.editor.insertTag", afterInsertTagHook)
 
   // 统一将 Alt+Enter 绑定到任务状态循环。
   if (orca.state.shortcuts[TASK_STATUS_SHORTCUT] !== commandId) {
@@ -118,6 +138,9 @@ export async function setupTaskQuickActions(
       unmountTimerInlineWidgets()
       document.body.removeEventListener("click", clickListener)
       removeTaskStatusStyles(pluginName)
+      pendingTaskTagInsertStates.clear()
+      orca.commands.unregisterBeforeCommand("core.editor.insertTag", beforeInsertTagHook)
+      orca.commands.unregisterAfterCommand("core.editor.insertTag", afterInsertTagHook)
       await orca.shortcuts.reset(commandId)
       orca.commands.unregisterEditorCommand(commandId)
 
@@ -201,52 +224,10 @@ export async function initializeTaskTagForBlock(
   schema: TaskSchemaDefinition,
   cursor: CursorData | null = null,
 ) {
-  const propertyNames = schema.propertyNames
-  const todoStatus = getDefaultTaskStatus(schema)
-  const [defaultDependsMode] = schema.dependencyModeChoices
-
-  // 首次转任务时只写入 A-01 约定字段，避免残留旧字段。
-  await orca.commands.invokeEditorCommand(
-    "core.editor.insertTag",
+  await ensureTaskTagDefaultsForBlock(blockId, schema, {
     cursor,
-    blockId,
-    schema.tagAlias,
-    [
-      { name: propertyNames.status, value: todoStatus },
-      { name: propertyNames.startTime, value: null },
-      { name: propertyNames.endTime, value: null },
-      {
-        name: propertyNames.dependsMode,
-        value: defaultDependsMode,
-      },
-    ],
-  )
-
-  await orca.commands.invokeEditorCommand(
-    "core.editor.setProperties",
-    null,
-    [blockId],
-    [toTaskMetaPropertyForSave({
-      status: todoStatus,
-      startTime: null,
-      endTime: null,
-      reviewEnabled: false,
-      reviewType: "single",
-      nextReview: null,
-      reviewEvery: "",
-      lastReviewed: null,
-      importance: DEFAULT_TASK_SCORE,
-      urgency: DEFAULT_TASK_SCORE,
-      effort: DEFAULT_TASK_SCORE,
-      star: false,
-      repeatRule: "",
-      labels: [],
-      remark: "",
-      dependsOn: [],
-      dependsMode: defaultDependsMode,
-      dependencyDelay: null,
-    })],
-  )
+    createTagWhenMissing: true,
+  })
 }
 
 async function cycleTaskTagStatus(
@@ -383,6 +364,431 @@ function findTaskTagRef(block: Block, taskTagAlias: string) {
   return block.refs.find(
     (ref) => ref.type === TAG_REF_TYPE && ref.alias === taskTagAlias,
   )
+}
+
+function createTaskTagInsertBeforeHook(schema: TaskSchemaDefinition) {
+  return (
+    _commandId: string,
+    rawBlockId?: DbId,
+    rawTagAlias?: string,
+    refData?: BlockProperty[],
+  ) => {
+    if (
+      suppressedTaskTagInsertHookDepth > 0 ||
+      !isValidDbId(rawBlockId) ||
+      !isTaskTagAliasMatch(rawTagAlias, schema.tagAlias)
+    ) {
+      return true
+    }
+
+    const tagAlias = rawTagAlias as string
+    const pendingKey = buildPendingTaskTagInsertKey(rawBlockId, tagAlias, refData)
+    const pendingList = pendingTaskTagInsertStates.get(pendingKey) ?? []
+    pruneExpiredPendingTaskTagInsertStates(pendingList)
+    pendingList.push({
+      createdAt: Date.now(),
+      hadTaskTag: resolveTaskTagRefFromState(rawBlockId, schema.tagAlias) != null,
+    })
+    pendingTaskTagInsertStates.set(pendingKey, pendingList)
+    return true
+  }
+}
+
+function createTaskTagInsertAfterHook(schema: TaskSchemaDefinition) {
+  return async (
+    _commandId: string,
+    rawBlockId?: DbId,
+    rawTagAlias?: string,
+    refData?: BlockProperty[],
+  ) => {
+    if (
+      suppressedTaskTagInsertHookDepth > 0 ||
+      !isValidDbId(rawBlockId) ||
+      !isTaskTagAliasMatch(rawTagAlias, schema.tagAlias)
+    ) {
+      return
+    }
+
+    const tagAlias = rawTagAlias as string
+    const pendingKey = buildPendingTaskTagInsertKey(rawBlockId, tagAlias, refData)
+    const pending = shiftPendingTaskTagInsertState(pendingKey)
+    if (pending?.hadTaskTag !== false) {
+      return
+    }
+
+    try {
+      await ensureTaskTagDefaultsForBlock(rawBlockId, schema)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+}
+
+async function ensureTaskTagDefaultsForBlock(
+  blockId: DbId,
+  schema: TaskSchemaDefinition,
+  options?: {
+    cursor?: CursorData | null
+    createTagWhenMissing?: boolean
+  },
+): Promise<void> {
+  const schemaProperties = await getTaskTagSchemaProperties(schema)
+  let taskTarget = await resolveTaskTagTarget(blockId, schema.tagAlias)
+  let updated = false
+
+  if (taskTarget == null) {
+    return
+  }
+
+  if (taskTarget.taskRef == null) {
+    if (options?.createTagWhenMissing !== true) {
+      return
+    }
+
+    const initialRefData = buildMissingTaskDefaultRefData(
+      undefined,
+      schema,
+      schemaProperties,
+    )
+    await invokeInsertTaskTagWithSuppressedHook(
+      options?.cursor ?? null,
+      taskTarget.block.id,
+      schema.tagAlias,
+      initialRefData,
+    )
+    updated = true
+    taskTarget = await resolveTaskTagTarget(taskTarget.block.id, schema.tagAlias)
+    if (taskTarget == null || taskTarget.taskRef == null) {
+      return
+    }
+  }
+
+  const missingRefData = buildMissingTaskDefaultRefData(
+    taskTarget.taskRef.data,
+    schema,
+    schemaProperties,
+  )
+  if (missingRefData.length > 0) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setRefData",
+        null,
+        taskTarget.taskRef,
+        missingRefData,
+      )
+    } catch (error) {
+      console.error(error)
+      await invokeInsertTaskTagWithSuppressedHook(
+        null,
+        taskTarget.taskRef.from,
+        schema.tagAlias,
+        mergeTaskRefData(taskTarget.taskRef.data, missingRefData),
+      )
+    }
+    updated = true
+  }
+
+  const metaProperty = buildMissingDefaultTaskMetaProperty(taskTarget.block, schema)
+  if (metaProperty != null) {
+    await orca.commands.invokeEditorCommand(
+      "core.editor.setProperties",
+      null,
+      [taskTarget.block.id],
+      [metaProperty],
+    )
+    updated = true
+  }
+
+  if (updated) {
+    invalidateNextActionEvaluationCache()
+  }
+}
+
+async function resolveTaskTagTarget(
+  blockId: DbId,
+  tagAlias: string,
+): Promise<{
+  block: Block
+  taskRef: BlockRef | null
+} | null> {
+  const candidateBlocks = await loadCandidateBlocks(blockId)
+  if (candidateBlocks.length === 0) {
+    return null
+  }
+
+  for (const block of candidateBlocks) {
+    const taskRef = findTaskTagRef(block, tagAlias)
+    if (taskRef != null) {
+      return {
+        block,
+        taskRef,
+      }
+    }
+  }
+
+  return {
+    block: candidateBlocks[0],
+    taskRef: null,
+  }
+}
+
+async function loadCandidateBlocks(blockId: DbId): Promise<Block[]> {
+  const blocks: Block[] = []
+  const seen = new Set<DbId>()
+  for (const candidateId of collectCandidateBlockIds(blockId)) {
+    const stateBlock = orca.state.blocks[candidateId]
+    if (stateBlock != null && !seen.has(stateBlock.id)) {
+      seen.add(stateBlock.id)
+      blocks.push(stateBlock)
+      continue
+    }
+
+    try {
+      const backendBlock = (await orca.invokeBackend("get-block", candidateId)) as Block | null
+      if (backendBlock != null && !seen.has(backendBlock.id)) {
+        seen.add(backendBlock.id)
+        blocks.push(backendBlock)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  return blocks
+}
+
+function collectCandidateBlockIds(blockId: DbId): DbId[] {
+  const candidateIds = [getMirrorId(blockId), blockId]
+  const seen = new Set<DbId>()
+  const normalized: DbId[] = []
+
+  for (const candidateId of candidateIds) {
+    if (!isValidDbId(candidateId) || seen.has(candidateId)) {
+      continue
+    }
+
+    seen.add(candidateId)
+    normalized.push(candidateId)
+  }
+
+  return normalized
+}
+
+async function getTaskTagSchemaProperties(
+  schema: TaskSchemaDefinition,
+): Promise<BlockProperty[]> {
+  try {
+    const tagBlock = (await orca.invokeBackend(
+      "get-block-by-alias",
+      schema.tagAlias,
+    )) as Block | null
+    return Array.isArray(tagBlock?.properties) ? tagBlock.properties : []
+  } catch (error) {
+    console.error(error)
+    return []
+  }
+}
+
+function buildMissingTaskDefaultRefData(
+  existingRefData: BlockProperty[] | undefined,
+  schema: TaskSchemaDefinition,
+  schemaProperties: BlockProperty[],
+): BlockProperty[] {
+  const defaultTaskValues = createDefaultTaskValues(schema)
+  const coreDefaults: BlockProperty[] = [
+    {
+      name: schema.propertyNames.status,
+      type: TEXT_CHOICES_PROP_TYPE,
+      value: defaultTaskValues.status,
+    },
+    {
+      name: schema.propertyNames.startTime,
+      type: DATE_TIME_PROP_TYPE,
+      value: defaultTaskValues.startTime,
+    },
+    {
+      name: schema.propertyNames.endTime,
+      type: DATE_TIME_PROP_TYPE,
+      value: defaultTaskValues.endTime,
+    },
+    {
+      name: schema.propertyNames.dependsMode,
+      type: TEXT_CHOICES_PROP_TYPE,
+      value: defaultTaskValues.dependsMode,
+    },
+  ]
+
+  const customPropertyDescriptors = collectTaskCustomPropertyDescriptors(
+    schemaProperties,
+    schema,
+    {
+      refData: existingRefData,
+      includeSchemaDefaults: true,
+    },
+  )
+  const customDefaults = buildTaskCustomRefData(
+    customPropertyDescriptors,
+    createTaskCustomPropertyStateMap(customPropertyDescriptors),
+  )
+
+  return filterMissingTaskProperties(existingRefData, [
+    ...coreDefaults,
+    ...customDefaults,
+  ])
+}
+
+function filterMissingTaskProperties(
+  existingRefData: BlockProperty[] | undefined,
+  defaults: BlockProperty[],
+): BlockProperty[] {
+  const existingKeys = new Set(
+    (existingRefData ?? [])
+      .map((property) => normalizeTaskPropertyKey(property.name))
+      .filter((key) => key !== ""),
+  )
+
+  return defaults.filter((property) => {
+    return !existingKeys.has(normalizeTaskPropertyKey(property.name))
+  })
+}
+
+function buildMissingDefaultTaskMetaProperty(
+  block: Block,
+  schema: TaskSchemaDefinition,
+): BlockProperty | null {
+  const hasTaskMeta = block.properties.some((property) => {
+    return normalizeTaskPropertyKey(property.name) === normalizeTaskPropertyKey(TASK_META_PROPERTY_NAME)
+  })
+  if (hasTaskMeta) {
+    return null
+  }
+
+  return toTaskMetaPropertyForSave(createDefaultTaskValues(schema), block)
+}
+
+function createDefaultTaskValues(schema: TaskSchemaDefinition): TaskPropertyValues {
+  const todoStatus = getDefaultTaskStatus(schema)
+  const [defaultDependsMode] = schema.dependencyModeChoices
+
+  return {
+    status: todoStatus,
+    startTime: null,
+    endTime: null,
+    reviewEnabled: false,
+    reviewType: "single",
+    nextReview: null,
+    reviewEvery: "",
+    lastReviewed: null,
+    importance: DEFAULT_TASK_SCORE,
+    urgency: DEFAULT_TASK_SCORE,
+    effort: DEFAULT_TASK_SCORE,
+    star: false,
+    repeatRule: "",
+    labels: [],
+    remark: "",
+    dependsOn: [],
+    dependsMode: defaultDependsMode,
+    dependencyDelay: null,
+  }
+}
+
+async function invokeInsertTaskTagWithSuppressedHook(
+  cursor: CursorData | null,
+  blockId: DbId,
+  tagAlias: string,
+  refData: BlockProperty[],
+): Promise<void> {
+  suppressedTaskTagInsertHookDepth += 1
+  try {
+    await orca.commands.invokeEditorCommand(
+      "core.editor.insertTag",
+      cursor,
+      blockId,
+      tagAlias,
+      refData,
+    )
+  } finally {
+    suppressedTaskTagInsertHookDepth = Math.max(0, suppressedTaskTagInsertHookDepth - 1)
+  }
+}
+
+function resolveTaskTagRefFromState(
+  blockId: DbId,
+  tagAlias: string,
+): BlockRef | null {
+  for (const candidateId of collectCandidateBlockIds(blockId)) {
+    const block = orca.state.blocks[candidateId]
+    if (block == null) {
+      continue
+    }
+
+    const taskRef = findTaskTagRef(block, tagAlias)
+    if (taskRef != null) {
+      return taskRef
+    }
+  }
+
+  return null
+}
+
+function buildPendingTaskTagInsertKey(
+  blockId: DbId,
+  tagAlias: string,
+  refData: BlockProperty[] | undefined,
+): string {
+  return `${blockId}|${normalizeTaskPropertyKey(tagAlias)}|${serializeRefDataSignature(refData)}`
+}
+
+function serializeRefDataSignature(refData: BlockProperty[] | undefined): string {
+  if (!Array.isArray(refData)) {
+    return "null"
+  }
+
+  return JSON.stringify(refData, (_key, value) => {
+    if (value instanceof Date) {
+      return {
+        __type: "date",
+        value: value.getTime(),
+      }
+    }
+    return value
+  })
+}
+
+function shiftPendingTaskTagInsertState(
+  pendingKey: string,
+): PendingTaskTagInsertState | null {
+  const pendingList = pendingTaskTagInsertStates.get(pendingKey)
+  if (pendingList == null || pendingList.length === 0) {
+    return null
+  }
+
+  pruneExpiredPendingTaskTagInsertStates(pendingList)
+  const next = pendingList.shift() ?? null
+  if (pendingList.length === 0) {
+    pendingTaskTagInsertStates.delete(pendingKey)
+  }
+
+  return next
+}
+
+function pruneExpiredPendingTaskTagInsertStates(
+  pendingList: PendingTaskTagInsertState[],
+): void {
+  const threshold = Date.now() - TASK_TAG_INSERT_PENDING_TTL_MS
+  while (pendingList.length > 0 && pendingList[0].createdAt < threshold) {
+    pendingList.shift()
+  }
+}
+
+function isTaskTagAliasMatch(left: unknown, right: string): boolean {
+  return typeof left === "string" && normalizeTaskPropertyKey(left) === normalizeTaskPropertyKey(right)
+}
+
+function normalizeTaskPropertyKey(value: unknown): string {
+  return typeof value === "string"
+    ? value.replace(/\s+/g, " ").trim().toLowerCase()
+    : ""
 }
 
 function createStatusIconClickListener(
