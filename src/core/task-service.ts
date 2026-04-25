@@ -10,7 +10,7 @@ import {
 } from "./task-schema"
 import { getMirrorId, isValidDbId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
-import { getPluginSettings } from "./plugin-settings"
+import { getPluginSettings, getTaskTimerPomodoroSettings } from "./plugin-settings"
 import {
   buildTaskCustomRefData,
   collectTaskCustomPropertyDescriptors,
@@ -309,6 +309,8 @@ async function cycleTaskTagStatus(
       previousStatus: currentValues.status,
       nextStatus: nextValues.status,
       autoStartOnDoing: settings.taskTimerEnabled && settings.taskTimerAutoStartOnDoing,
+      timerMode: settings.taskTimerMode,
+      pomodoroSettings: getTaskTimerPomodoroSettings(settings),
     })
   } catch (error) {
     console.error(error)

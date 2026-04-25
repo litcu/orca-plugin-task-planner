@@ -11,12 +11,12 @@ import {
   formatTaskTimerDuration,
   hasTaskTimerRecord,
   readTaskTimerFromProperties,
-  resolveTaskPomodoroProgress,
+  resolveTaskPomodoroPhaseProgress,
+  resolveTaskTimerPrimaryAction,
   resolveTaskTimerElapsedMs,
   type TaskTimerMode,
+  type TaskTimerPomodoroSettings,
 } from "../core/task-timer"
-
-const POMODORO_DURATION_MS = 25 * 60 * 1000
 
 export interface TaskSubtaskProgress {
   total: number
@@ -62,6 +62,7 @@ interface TaskListRowProps {
   starUpdating: boolean
   timerEnabled: boolean
   timerMode: TaskTimerMode
+  timerPomodoroSettings: TaskTimerPomodoroSettings
   timerNowMs: number
   timerUpdating: boolean
   reviewUpdating: boolean
@@ -142,28 +143,27 @@ export function TaskListRow(props: TaskListRowProps) {
   const timerElapsedMs = resolveTaskTimerElapsedMs(timerData, props.timerNowMs)
   const hasTimerRecord = hasTaskTimerRecord(timerData)
   const timerDurationText = formatTaskTimerDuration(timerElapsedMs)
-  const timerProgress = resolveTaskPomodoroProgress(timerElapsedMs)
+  const pomodoroProgress = resolveTaskPomodoroPhaseProgress(timerData, props.timerNowMs)
+  const timerAction = resolveTaskTimerPrimaryAction(
+    timerData,
+    props.timerMode,
+    props.timerNowMs,
+  )
   const timerButtonDisabled =
     props.loading ||
     props.updating ||
     props.timerUpdating ||
-    (!timerData.running && isClosed)
+    (timerAction !== "stop" && isClosed)
   const timerButtonTitle =
-    !timerData.running && isClosed
+    timerAction !== "stop" && isClosed
       ? t("Closed task cannot start timer")
-      : timerData.running
-        ? t("Stop timer")
-        : t("Start timer")
-  const timerDisplayText =
-    hasTimerRecord && props.timerMode === "pomodoro"
-      ? t("Pomodoro ${cycle} ${elapsed}/${duration}", {
-          cycle: String(timerProgress.cycle),
-          elapsed: formatTaskTimerDuration(timerProgress.cycleElapsedMs),
-          duration: formatTaskTimerDuration(POMODORO_DURATION_MS),
-        })
-      : hasTimerRecord
-        ? t("Elapsed ${time}", { time: timerDurationText })
-        : t("Start timer")
+      : resolveTaskButtonTitle(timerAction, props.timerMode)
+  const timerActionLabel = resolveTaskButtonLabel(timerAction, props.timerMode)
+  const timerDisplayText = props.timerMode === "pomodoro"
+    ? resolvePomodoroDisplayText(timerData, pomodoroProgress, timerDurationText)
+    : hasTimerRecord
+      ? t("Elapsed ${time}", { time: timerDurationText })
+      : t("Start timer")
   const timerButtonTone =
     timerData.running
       ? "running"
@@ -816,20 +816,43 @@ export function TaskListRow(props: TaskListRowProps) {
             },
           },
           React.createElement("i", {
-            className: timerData.running ? "ti ti-player-stop-filled" : "ti ti-player-play-filled",
+            className: resolveTaskButtonIcon(timerAction, props.timerMode),
             style: { fontSize: "12px", lineHeight: 1, flexShrink: 0 },
           }),
           React.createElement(
             "span",
             {
               style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
                 minWidth: 0,
               },
             },
-            timerDisplayText,
+            React.createElement(
+              "span",
+              {
+                style: {
+                  flexShrink: 0,
+                },
+              },
+              timerActionLabel,
+            ),
+            React.createElement(
+              "span",
+              {
+                style: {
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  minWidth: 0,
+                },
+              },
+              timerDisplayText,
+            ),
           ),
         )
       : null,
@@ -1223,8 +1246,90 @@ function StatusIcon(props: { state: StatusVisualState }) {
             fill: "currentColor",
             stroke: "none",
           })
-        : null,
+      : null,
   )
+}
+
+function resolveTaskButtonLabel(
+  action: "start" | "stop" | "resume" | "next",
+  mode: TaskTimerMode,
+): string {
+  if (mode !== "pomodoro") {
+    return action === "stop" ? t("Stop") : t("Timer")
+  }
+
+  switch (action) {
+    case "stop":
+      return t("Pause")
+    case "resume":
+      return t("Resume")
+    case "next":
+      return t("Next")
+    default:
+      return t("Start Pomodoro")
+  }
+}
+
+function resolveTaskButtonTitle(
+  action: "start" | "stop" | "resume" | "next",
+  mode: TaskTimerMode,
+): string {
+  if (mode !== "pomodoro") {
+    return action === "stop" ? t("Stop timer") : t("Start timer")
+  }
+
+  switch (action) {
+    case "stop":
+      return t("Pause pomodoro")
+    case "resume":
+      return t("Resume pomodoro")
+    case "next":
+      return t("Advance to next phase")
+    default:
+      return t("Start pomodoro")
+  }
+}
+
+function resolveTaskButtonIcon(
+  action: "start" | "stop" | "resume" | "next",
+  mode: TaskTimerMode,
+): string {
+  switch (action) {
+    case "stop":
+      return mode === "pomodoro" ? "ti ti-player-pause-filled" : "ti ti-player-stop-filled"
+    case "next":
+      return "ti ti-arrow-right"
+    default:
+      return "ti ti-player-play-filled"
+  }
+}
+
+function resolvePomodoroDisplayText(
+  timer: ReturnType<typeof readTaskTimerFromProperties>,
+  progress: ReturnType<typeof resolveTaskPomodoroPhaseProgress>,
+  elapsedText: string,
+): string {
+  if (progress == null || timer.phase == null) {
+    return t("Focused ${time}", { time: elapsedText })
+  }
+
+  const phaseLabel = timer.phase === "focus"
+    ? t("Focus session")
+    : timer.phase === "short-break"
+      ? t("Short break")
+      : t("Long break")
+
+  if (progress.completed) {
+    return t("${phase} completed ${time}", {
+      phase: phaseLabel,
+      time: formatTaskTimerDuration(progress.durationMs),
+    })
+  }
+
+  return t("${phase} remaining ${time}", {
+    phase: phaseLabel,
+    time: formatTaskTimerDuration(progress.remainingMs),
+  })
 }
 
 function resolveStatusColor(status: string, schema: TaskSchemaDefinition): string {

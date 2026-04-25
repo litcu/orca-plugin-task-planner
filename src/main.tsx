@@ -119,13 +119,14 @@ async function syncSettingsSchemaVisibility(settings: TaskPlannerSettings): Prom
   await ensurePluginSettingsSchema(pluginName, {
     myDayEnabled: settings.myDayEnabled,
     taskTimerEnabled: settings.taskTimerEnabled,
+    taskTimerMode: settings.taskTimerMode,
   })
 
   appliedSettingsVisibilityKey = nextVisibilityKey
 }
 
 function resolveSettingsVisibilityKey(settings: TaskPlannerSettings): string {
-  return `${settings.myDayEnabled ? "1" : "0"}|${settings.taskTimerEnabled ? "1" : "0"}`
+  return `${settings.myDayEnabled ? "1" : "0"}|${settings.taskTimerEnabled ? "1" : "0"}|${settings.taskTimerMode}`
 }
 
 async function applyTaskTagNameChange(nextTaskTagName: string): Promise<void> {

@@ -23,7 +23,7 @@ import {
 } from "../core/task-properties"
 import { invalidateNextActionEvaluationCache } from "../core/dependency-engine"
 import { createRecurringTaskInTodayJournal } from "../core/task-recurrence"
-import { getPluginSettings } from "../core/plugin-settings"
+import { getPluginSettings, getTaskTimerPomodoroSettings } from "../core/plugin-settings"
 import { applyTaskTimerForStatusChange } from "../core/task-timer"
 
 import { t } from "../libs/l10n"
@@ -812,6 +812,9 @@ function TaskPropertyPopupView(props: {
     const timerAutoStartOnDoing = timerSettings != null &&
       timerSettings.taskTimerEnabled &&
       timerSettings.taskTimerAutoStartOnDoing
+    const pomodoroSettings = timerSettings != null
+      ? getTaskTimerPomodoroSettings(timerSettings)
+      : undefined
 
     const importance = validateNumericField(labels.importance, importanceText)
     if (importance.error != null) {
@@ -993,6 +996,8 @@ function TaskPropertyPopupView(props: {
               previousStatus: getDefaultTaskStatus(props.schema),
               nextStatus: createdTaskStatus,
               autoStartOnDoing: timerAutoStartOnDoing,
+              timerMode: timerSettings?.taskTimerMode,
+              pomodoroSettings,
             })
           } catch (error) {
             console.error(error)
@@ -1119,6 +1124,8 @@ function TaskPropertyPopupView(props: {
           previousStatus: previousValuesWithMeta.status,
           nextStatus: valuesToSave.status,
           autoStartOnDoing: timerAutoStartOnDoing,
+          timerMode: timerSettings?.taskTimerMode,
+          pomodoroSettings,
         })
       } catch (error) {
         console.error(error)

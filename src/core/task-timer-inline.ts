@@ -1,15 +1,22 @@
 ﻿import type { Block, DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import { getMirrorId, isValidDbId } from "./block-utils"
-import { getPluginSettings } from "./plugin-settings"
-import { isTaskDoneStatus, type TaskSchemaDefinition } from "./task-schema"
+import { getPluginSettings, getTaskTimerPomodoroSettings } from "./plugin-settings"
 import {
+  isTaskClosedStatus,
+  isTaskWaitingStatus,
+  type TaskSchemaDefinition,
+} from "./task-schema"
+import {
+  advanceTaskPomodoroPhase,
   checkpointAllRunningTaskTimers,
+  completeTaskPomodoroPhaseIfNeeded,
   formatTaskTimerDuration,
   hasTaskTimerRecord,
   readTaskTimerFromBlock,
-  resolveTaskPomodoroProgress,
+  resolveTaskPomodoroPhaseProgress,
   resolveTaskStatusFromBlock,
+  resolveTaskTimerPrimaryAction,
   resolveTaskTimerElapsedMs,
   startTaskTimer,
   stopAllRunningTaskTimers,
@@ -17,7 +24,6 @@ import {
 } from "./task-timer"
 
 const TAG_REF_TYPE = 2
-const POMODORO_DURATION_MS = 25 * 60 * 1000
 const TICK_INTERVAL_MS = 1000
 const CHECKPOINT_INTERVAL_MS = 15000
 const REFRESH_DEBOUNCE_MS = 120
@@ -97,7 +103,12 @@ export function setupTaskTimerInlineWidgets(
       return
     }
 
-    const action = actionButton.dataset.action === "stop" ? "stop" : "start"
+    const action = actionButton.dataset.action === "stop"
+      ? "stop"
+      : actionButton.dataset.action === "next"
+        ? "next"
+        : "start"
+    const pomodoroSettings = getTaskTimerPomodoroSettings(settings)
     pendingTaskIds.add(taskId)
     scheduleRefresh(0)
 
@@ -109,11 +120,20 @@ export function setupTaskTimerInlineWidgets(
             sourceBlockId: rawBlockId,
             schema,
           })
+        } else if (action === "next") {
+          await advanceTaskPomodoroPhase({
+            blockId: taskId,
+            sourceBlockId: rawBlockId,
+            schema,
+            pomodoroSettings,
+          })
         } else {
           await startTaskTimer({
             blockId: taskId,
             sourceBlockId: rawBlockId,
             schema,
+            mode: settings.taskTimerMode,
+            pomodoroSettings,
           })
         }
       } catch (error) {
@@ -166,6 +186,101 @@ export function setupTaskTimerInlineWidgets(
     void checkpointNow()
   }
 
+  const notifyPomodoroPhaseCompleted = (
+    rawBlockId: DbId,
+    timer: ReturnType<typeof readTaskTimerFromBlock>,
+    settings: ReturnType<typeof getPluginSettings>,
+  ) => {
+    const progress = resolveTaskPomodoroPhaseProgress(timer)
+    if (progress == null || timer.phase == null) {
+      return
+    }
+
+    const phaseLabel = timer.phase === "focus"
+      ? t("Focus session")
+      : timer.phase === "short-break"
+        ? t("Short break")
+        : t("Long break")
+    const message = timer.phase === "focus"
+      ? t("${phase} completed. Take a break when you're ready.", { phase: phaseLabel })
+      : t("${phase} completed. Start the next focus session when ready.", { phase: phaseLabel })
+
+    orca.notify("info", message, {
+      title: t("Pomodoro phase completed"),
+      action: async () => {
+        const taskId = getMirrorId(rawBlockId)
+        if (pendingTaskIds.has(taskId)) {
+          return
+        }
+
+        pendingTaskIds.add(taskId)
+        scheduleRefresh(0)
+        try {
+          await advanceTaskPomodoroPhase({
+            blockId: taskId,
+            sourceBlockId: rawBlockId,
+            schema,
+            pomodoroSettings: getTaskTimerPomodoroSettings(settings),
+          })
+        } catch (error) {
+          console.error(error)
+          const message = error instanceof Error ? error.message : t("Failed to start timer")
+          orca.notify("error", message)
+        } finally {
+          pendingTaskIds.delete(taskId)
+          scheduleRefresh(0)
+        }
+      },
+    })
+  }
+
+  const maybeCompletePomodoroPhases = () => {
+    const seenTaskIds = new Set<DbId>()
+    const settings = getPluginSettings(pluginName)
+
+    for (const block of Object.values(orca.state.blocks)) {
+      if (block == null || !hasTaskTagRef(block, schema.tagAlias)) {
+        continue
+      }
+
+      const taskId = getMirrorId(block.id)
+      if (!isValidDbId(taskId) || seenTaskIds.has(taskId) || pendingTaskIds.has(taskId)) {
+        continue
+      }
+      seenTaskIds.add(taskId)
+
+      const timer = readTaskTimerFromBlock(block)
+      const progress = resolveTaskPomodoroPhaseProgress(timer)
+      if (
+        !timer.running ||
+        timer.sessionKind !== "pomodoro" ||
+        progress == null ||
+        !progress.completed
+      ) {
+        continue
+      }
+
+      pendingTaskIds.add(taskId)
+      void completeTaskPomodoroPhaseIfNeeded({
+        blockId: taskId,
+        sourceBlockId: block.id,
+        schema,
+      })
+        .then((nextTimer) => {
+          if (!nextTimer.running) {
+            notifyPomodoroPhaseCompleted(block.id, nextTimer, settings)
+          }
+        })
+        .catch((error) => {
+          console.error(error)
+        })
+        .finally(() => {
+          pendingTaskIds.delete(taskId)
+          scheduleRefresh(0)
+        })
+    }
+  }
+
   const tick = () => {
     if (disposed) {
       return
@@ -177,6 +292,7 @@ export function setupTaskTimerInlineWidgets(
     }
 
     maybeCheckpoint()
+    maybeCompletePomodoroPhases()
 
     const blocks = Array.from(document.querySelectorAll(".orca-block[data-id]"))
     for (const blockNode of blocks) {
@@ -199,12 +315,17 @@ export function setupTaskTimerInlineWidgets(
       const timer = readTaskTimerFromBlock(block)
       const taskId = getMirrorId(rawBlockId)
 
-      if (timer.running && isTaskDoneStatus(status, schema) && !autoStoppingTaskIds.has(taskId)) {
+      if (
+        timer.running &&
+        (isTaskClosedStatus(status, schema) || isTaskWaitingStatus(status, schema)) &&
+        !autoStoppingTaskIds.has(taskId)
+      ) {
         autoStoppingTaskIds.add(taskId)
         void stopTaskTimer({
           blockId: taskId,
           sourceBlockId: rawBlockId,
           schema,
+          clearPomodoroPhase: true,
         })
           .catch((error) => {
             console.error(error)
@@ -280,7 +401,9 @@ export function setupTaskTimerInlineWidgets(
     settingsUnsubscribe = subscribe(pluginState, () => {
       const nextSettings = getPluginSettings(pluginName)
       if (previousSettings.taskTimerEnabled && !nextSettings.taskTimerEnabled) {
-        void stopAllRunningTaskTimers(schema).finally(() => {
+        void stopAllRunningTaskTimers(schema, undefined, Date.now(), {
+          clearPomodoroPhase: true,
+        }).finally(() => {
           scheduleRefresh(0)
         })
       }
@@ -335,15 +458,14 @@ function renderBlockTimerUi(
   const hasRecord = hasTaskTimerRecord(timer)
   const elapsedMs = resolveTaskTimerElapsedMs(timer)
   const elapsedText = formatTaskTimerDuration(elapsedMs)
-  const startDisabled = !timer.running && isTaskDoneStatus(status, schema)
-  const action = timer.running ? "stop" : "start"
-  const actionLabel = action === "stop" ? t("Stop") : t("Timer")
+  const pomodoroProgress = resolveTaskPomodoroPhaseProgress(timer)
+  const action = resolveTaskTimerPrimaryAction(timer, settings.taskTimerMode)
+  const startDisabled = action !== "stop" && isTaskClosedStatus(status, schema)
+  const actionLabel = resolveInlineTimerActionLabel(action, settings.taskTimerMode)
   const buttonDisabled = pending || startDisabled
   const buttonTitle = startDisabled
-    ? t("Completed task cannot start timer")
-    : action === "stop"
-      ? t("Stop timer")
-      : t("Start timer")
+    ? t("Closed task cannot start timer")
+    : resolveInlineTimerActionTitle(action, settings.taskTimerMode)
 
   const tagButton = ensureTagButton(blockEl, schema.tagAlias)
   if (tagButton != null) {
@@ -353,9 +475,7 @@ function renderBlockTimerUi(
     tagButton.title = buttonTitle
     tagButton.className = `mlo-task-timer-tag-button ${timer.running ? "is-running" : ""}`
     const iconEl = ensureTagButtonIcon(tagButton)
-    iconEl.className = `${TAG_BUTTON_ICON_ROLE} ${
-      timer.running ? "ti ti-player-stop-filled" : "ti ti-player-play-filled"
-    }`
+    iconEl.className = `${TAG_BUTTON_ICON_ROLE} ${resolveInlineTimerActionIcon(action, settings.taskTimerMode)}`
     const textEl = ensureTagButtonText(tagButton)
     if (textEl.textContent !== actionLabel) {
       textEl.textContent = actionLabel
@@ -374,19 +494,93 @@ function renderBlockTimerUi(
 
   detailEl.className = `mlo-task-timer-detail ${timer.running ? "is-running" : ""}`
   applyDetailAlignment(detailEl, blockEl, rawBlockId)
-  let detailText = settings.taskTimerMode === "pomodoro"
-    ? ""
+  const detailText = settings.taskTimerMode === "pomodoro"
+    ? resolveInlinePomodoroDetailText(timer, pomodoroProgress, elapsedText)
     : t("Elapsed ${time}", { time: elapsedText })
-  if (settings.taskTimerMode === "pomodoro") {
-    const progress = resolveTaskPomodoroProgress(elapsedMs)
-    detailText = t("Pomodoro ${cycle} ${elapsed}/${duration}", {
-      cycle: String(progress.cycle),
-      elapsed: formatTaskTimerDuration(progress.cycleElapsedMs),
-      duration: formatTaskTimerDuration(POMODORO_DURATION_MS),
-    })
-  }
   detailEl.textContent = detailText
   detailEl.dataset.blockId = String(taskId)
+}
+
+function resolveInlineTimerActionLabel(
+  action: "start" | "stop" | "resume" | "next",
+  mode: "direct" | "pomodoro",
+): string {
+  if (mode !== "pomodoro") {
+    return action === "stop" ? t("Stop") : t("Timer")
+  }
+
+  switch (action) {
+    case "stop":
+      return t("Pause")
+    case "resume":
+      return t("Resume")
+    case "next":
+      return t("Next")
+    default:
+      return t("Start Pomodoro")
+  }
+}
+
+function resolveInlineTimerActionTitle(
+  action: "start" | "stop" | "resume" | "next",
+  mode: "direct" | "pomodoro",
+): string {
+  if (mode !== "pomodoro") {
+    return action === "stop" ? t("Stop timer") : t("Start timer")
+  }
+
+  switch (action) {
+    case "stop":
+      return t("Pause pomodoro")
+    case "resume":
+      return t("Resume pomodoro")
+    case "next":
+      return t("Advance to next phase")
+    default:
+      return t("Start pomodoro")
+  }
+}
+
+function resolveInlineTimerActionIcon(
+  action: "start" | "stop" | "resume" | "next",
+  mode: "direct" | "pomodoro",
+): string {
+  switch (action) {
+    case "stop":
+      return mode === "pomodoro" ? "ti ti-player-pause-filled" : "ti ti-player-stop-filled"
+    case "next":
+      return "ti ti-arrow-right"
+    default:
+      return "ti ti-player-play-filled"
+  }
+}
+
+function resolveInlinePomodoroDetailText(
+  timer: ReturnType<typeof readTaskTimerFromBlock>,
+  progress: ReturnType<typeof resolveTaskPomodoroPhaseProgress>,
+  elapsedText: string,
+): string {
+  if (progress == null || timer.phase == null) {
+    return t("Focused ${time}", { time: elapsedText })
+  }
+
+  const phaseLabel = timer.phase === "focus"
+    ? t("Focus session")
+    : timer.phase === "short-break"
+      ? t("Short break")
+      : t("Long break")
+
+  if (progress.completed) {
+    return t("${phase} completed ${time}", {
+      phase: phaseLabel,
+      time: formatTaskTimerDuration(progress.durationMs),
+    })
+  }
+
+  return t("${phase} remaining ${time}", {
+    phase: phaseLabel,
+    time: formatTaskTimerDuration(progress.remainingMs),
+  })
 }
 
 function ensureTagButton(

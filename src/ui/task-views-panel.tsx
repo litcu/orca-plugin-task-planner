@@ -47,6 +47,7 @@ import {
 } from "../core/all-tasks-engine"
 import {
   getPluginSettings,
+  getTaskTimerPomodoroSettings,
   type TaskPlannerSettings,
 } from "../core/plugin-settings"
 import {
@@ -292,6 +293,10 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const [timerNowMs, setTimerNowMs] = React.useState<number>(() => Date.now())
   const [panelSettings, setPanelSettings] = React.useState<TaskPlannerSettings>(() =>
     getPluginSettings(props.pluginName)
+  )
+  const pomodoroSettings = React.useMemo(
+    () => getTaskTimerPomodoroSettings(panelSettings),
+    [panelSettings],
   )
   const [myDayState, setMyDayState] = React.useState<MyDayState | null>(null)
   const [myDayLoaded, setMyDayLoaded] = React.useState(false)
@@ -959,6 +964,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
           {
             timerAutoStartOnDoing:
               panelSettings.taskTimerEnabled && panelSettings.taskTimerAutoStartOnDoing,
+            timerMode: panelSettings.taskTimerMode,
+            pomodoroSettings,
           },
         )
         setErrorText("")
@@ -978,6 +985,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       loadByTab,
       panelSettings.taskTimerAutoStartOnDoing,
       panelSettings.taskTimerEnabled,
+      panelSettings.taskTimerMode,
+      pomodoroSettings,
       props.schema,
       tab,
     ],
@@ -1006,6 +1015,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
             blockId: item.blockId,
             sourceBlockId: item.sourceBlockId,
             schema: props.schema,
+            mode: panelSettings.taskTimerMode,
+            pomodoroSettings,
           })
         }
 
@@ -1025,11 +1036,16 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         })
       }
     },
-    [loadByTab, props.schema, tab],
+    [loadByTab, panelSettings.taskTimerMode, pomodoroSettings, props.schema, tab],
   )
 
   const clearTaskTimerForItem = React.useCallback(
     async (item: TaskListRowItem) => {
+      const confirmed = window.confirm(t("Clear timer and pomodoro state for this task?"))
+      if (!confirmed) {
+        return
+      }
+
       setTimingIds((prev: Set<DbId>) => {
         const next = new Set(prev)
         next.add(item.blockId)
@@ -3314,6 +3330,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         starUpdating: starringIds.has(row.node.item.blockId),
         timerEnabled: panelSettings.taskTimerEnabled,
         timerMode: panelSettings.taskTimerMode,
+        timerPomodoroSettings: pomodoroSettings,
         timerNowMs,
         timerUpdating: timingIds.has(row.node.item.blockId),
         reviewUpdating: reviewingIds.has(row.node.item.blockId),
@@ -4519,6 +4536,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                       starUpdating: starringIds.has(item.blockId),
                       timerEnabled: panelSettings.taskTimerEnabled,
                       timerMode: panelSettings.taskTimerMode,
+                      timerPomodoroSettings: pomodoroSettings,
                       timerNowMs,
                       timerUpdating: timingIds.has(item.blockId),
                       reviewUpdating: reviewingIds.has(item.blockId),

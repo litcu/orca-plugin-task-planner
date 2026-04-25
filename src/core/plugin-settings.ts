@@ -1,7 +1,12 @@
 import { t } from "../libs/l10n"
 import type { PluginSettingsSchema } from "../orca.d.ts"
 import { TASK_TAG_ALIAS } from "./task-schema"
-import type { TaskTimerMode } from "./task-timer"
+import {
+  getDefaultTaskTimerPomodoroSettings,
+  normalizeTaskTimerPomodoroSettings,
+  type TaskTimerMode,
+  type TaskTimerPomodoroSettings,
+} from "./task-timer"
 import type { BuiltinTaskViewsTab } from "./task-views-state"
 
 export interface TaskPlannerSettings {
@@ -17,6 +22,10 @@ export interface TaskPlannerSettings {
   taskTimerEnabled: boolean
   taskTimerAutoStartOnDoing: boolean
   taskTimerMode: TaskTimerMode
+  taskTimerPomodoroFocusMinutes: number
+  taskTimerPomodoroShortBreakMinutes: number
+  taskTimerPomodoroLongBreakMinutes: number
+  taskTimerPomodoroLongBreakEvery: number
 }
 
 const TASK_TAG_NAME_SETTING = "taskTagName"
@@ -31,19 +40,24 @@ const SHOW_SUBTASK_PROGRESS_BAR_SETTING = "showSubtaskProgressBar"
 const TASK_TIMER_ENABLED_SETTING = "taskTimerEnabled"
 const TASK_TIMER_AUTO_START_ON_DOING_SETTING = "taskTimerAutoStartOnDoing"
 const TASK_TIMER_MODE_SETTING = "taskTimerMode"
+const TASK_TIMER_POMODORO_FOCUS_MINUTES_SETTING = "taskTimerPomodoroFocusMinutes"
+const TASK_TIMER_POMODORO_SHORT_BREAK_MINUTES_SETTING = "taskTimerPomodoroShortBreakMinutes"
+const TASK_TIMER_POMODORO_LONG_BREAK_MINUTES_SETTING = "taskTimerPomodoroLongBreakMinutes"
+const TASK_TIMER_POMODORO_LONG_BREAK_EVERY_SETTING = "taskTimerPomodoroLongBreakEvery"
 const DEFAULT_MY_DAY_RESET_HOUR = 5
 const DEFAULT_DUE_SOON_DAYS = 7
 const DEFAULT_TASK_VIEWS_TAB: BuiltinTaskViewsTab = "next-actions"
 const DEFAULT_TASK_TIMER_MODE: TaskTimerMode = "direct"
+const DEFAULT_TASK_TIMER_POMODORO_SETTINGS = getDefaultTaskTimerPomodoroSettings()
 
 type PluginSettingsSchemaVisibility = Pick<
   TaskPlannerSettings,
-  "myDayEnabled" | "taskTimerEnabled"
+  "myDayEnabled" | "taskTimerEnabled" | "taskTimerMode"
 >
 
 export async function ensurePluginSettingsSchema(
   pluginName: string,
-  _visibility?: Partial<PluginSettingsSchemaVisibility>,
+  visibility?: Partial<PluginSettingsSchemaVisibility>,
 ): Promise<void> {
   const schema: PluginSettingsSchema = {
     [TASK_TAG_NAME_SETTING]: {
@@ -161,6 +175,33 @@ export async function ensurePluginSettingsSchema(
     defaultValue: DEFAULT_TASK_TIMER_MODE,
   }
 
+  if (visibility?.taskTimerEnabled === true && visibility.taskTimerMode === "pomodoro") {
+    schema[TASK_TIMER_POMODORO_FOCUS_MINUTES_SETTING] = {
+      label: t("Pomodoro focus minutes"),
+      description: t("Length of one focus session in minutes."),
+      type: "number",
+      defaultValue: DEFAULT_TASK_TIMER_POMODORO_SETTINGS.focusMinutes,
+    }
+    schema[TASK_TIMER_POMODORO_SHORT_BREAK_MINUTES_SETTING] = {
+      label: t("Pomodoro short break minutes"),
+      description: t("Length of one short break in minutes."),
+      type: "number",
+      defaultValue: DEFAULT_TASK_TIMER_POMODORO_SETTINGS.shortBreakMinutes,
+    }
+    schema[TASK_TIMER_POMODORO_LONG_BREAK_MINUTES_SETTING] = {
+      label: t("Pomodoro long break minutes"),
+      description: t("Length of one long break in minutes."),
+      type: "number",
+      defaultValue: DEFAULT_TASK_TIMER_POMODORO_SETTINGS.longBreakMinutes,
+    }
+    schema[TASK_TIMER_POMODORO_LONG_BREAK_EVERY_SETTING] = {
+      label: t("Pomodoro long break every"),
+      description: t("Start a long break after this many completed focus sessions."),
+      type: "number",
+      defaultValue: DEFAULT_TASK_TIMER_POMODORO_SETTINGS.longBreakEvery,
+    }
+  }
+
   await orca.plugins.setSettingsSchema(pluginName, schema)
 }
 
@@ -200,6 +241,12 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
   const taskTimerMode = normalizeTaskTimerMode(
     pluginSettings?.[TASK_TIMER_MODE_SETTING],
   )
+  const pomodoroSettings = normalizeTaskTimerPomodoroSettings({
+    focusMinutes: pluginSettings?.[TASK_TIMER_POMODORO_FOCUS_MINUTES_SETTING] as number | undefined,
+    shortBreakMinutes: pluginSettings?.[TASK_TIMER_POMODORO_SHORT_BREAK_MINUTES_SETTING] as number | undefined,
+    longBreakMinutes: pluginSettings?.[TASK_TIMER_POMODORO_LONG_BREAK_MINUTES_SETTING] as number | undefined,
+    longBreakEvery: pluginSettings?.[TASK_TIMER_POMODORO_LONG_BREAK_EVERY_SETTING] as number | undefined,
+  })
 
   return {
     taskTagName,
@@ -214,7 +261,28 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
     taskTimerEnabled,
     taskTimerAutoStartOnDoing,
     taskTimerMode,
+    taskTimerPomodoroFocusMinutes: pomodoroSettings.focusMinutes,
+    taskTimerPomodoroShortBreakMinutes: pomodoroSettings.shortBreakMinutes,
+    taskTimerPomodoroLongBreakMinutes: pomodoroSettings.longBreakMinutes,
+    taskTimerPomodoroLongBreakEvery: pomodoroSettings.longBreakEvery,
   }
+}
+
+export function getTaskTimerPomodoroSettings(
+  settings: Pick<
+    TaskPlannerSettings,
+    | "taskTimerPomodoroFocusMinutes"
+    | "taskTimerPomodoroShortBreakMinutes"
+    | "taskTimerPomodoroLongBreakMinutes"
+    | "taskTimerPomodoroLongBreakEvery"
+  >,
+): TaskTimerPomodoroSettings {
+  return normalizeTaskTimerPomodoroSettings({
+    focusMinutes: settings.taskTimerPomodoroFocusMinutes,
+    shortBreakMinutes: settings.taskTimerPomodoroShortBreakMinutes,
+    longBreakMinutes: settings.taskTimerPomodoroLongBreakMinutes,
+    longBreakEvery: settings.taskTimerPomodoroLongBreakEvery,
+  })
 }
 
 function normalizeTaskTagName(rawValue: unknown): string {

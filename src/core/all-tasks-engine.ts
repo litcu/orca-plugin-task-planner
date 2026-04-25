@@ -356,6 +356,13 @@ export async function cycleTaskStatusInView(
   sourceBlockId?: DbId | null,
   options?: {
     timerAutoStartOnDoing?: boolean
+    timerMode?: "direct" | "pomodoro"
+    pomodoroSettings?: {
+      focusMinutes: number
+      shortBreakMinutes: number
+      longBreakMinutes: number
+      longBreakEvery: number
+    }
   },
 ): Promise<void> {
   const targetIds = collectCandidateIds(
@@ -438,6 +445,8 @@ export async function cycleTaskStatusInView(
           previousStatus: values.status,
           nextStatus: nextValues.status,
           autoStartOnDoing: options?.timerAutoStartOnDoing === true,
+          timerMode: options?.timerMode,
+          pomodoroSettings: options?.pomodoroSettings,
         })
       } catch (error) {
         console.error(error)
@@ -479,6 +488,8 @@ export async function cycleTaskStatusInView(
           previousStatus: values.status,
           nextStatus: nextValues.status,
           autoStartOnDoing: options?.timerAutoStartOnDoing === true,
+          timerMode: options?.timerMode,
+          pomodoroSettings: options?.pomodoroSettings,
         })
       } catch (error) {
         console.error(error)
