@@ -222,7 +222,7 @@
   "Task Dashboard": "任务仪表盘",
   "Task Command Center": "任务指挥中心",
   "Live metrics across your tasks": "实时展示你的任务全局指标",
-  "Plan your day with list and schedule": "用列表与日程两种方式规划今天",
+  "Plan your day with schedule": "用日程规划今天",
   "Total ${count} tasks": "共 ${count} 个任务",
   "Loading dashboard...": "仪表盘加载中...",
   "No task data yet": "暂无任务数据",

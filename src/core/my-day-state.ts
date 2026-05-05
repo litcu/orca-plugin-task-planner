@@ -19,7 +19,7 @@ const MY_DAY_INSERT_TOKEN_PATTERN = /(?:__)?mlo_myday_\d+_[a-z0-9]+(?:__)?\s*/gi
 
 export const DEFAULT_MY_DAY_RESET_HOUR = 5
 
-export type MyDayDisplayMode = "list" | "schedule"
+export type MyDayDisplayMode = "schedule"
 
 export interface MyDayTaskEntry {
   taskId: DbId
@@ -79,7 +79,7 @@ export function createDefaultMyDayState(dayKey: string): MyDayState {
   return {
     schema: MY_DAY_SCHEMA_VERSION,
     dayKey,
-    displayMode: "list",
+    displayMode: "schedule",
     journalSectionBlockId: null,
     tasks: [],
     updatedAt: Date.now(),
@@ -128,7 +128,7 @@ export function setMyDayDisplayMode(
   state: MyDayState,
   mode: MyDayDisplayMode,
 ): MyDayState {
-  const normalizedMode: MyDayDisplayMode = mode === "schedule" ? "schedule" : "list"
+  const normalizedMode: MyDayDisplayMode = "schedule"
   if (state.displayMode === normalizedMode) {
     return state
   }
@@ -585,7 +585,7 @@ function normalizeMyDayState(raw: unknown, currentDayKey: string): NormalizeResu
     changed = true
   }
 
-  const displayMode: MyDayDisplayMode = raw.displayMode === "schedule" ? "schedule" : "list"
+  const displayMode: MyDayDisplayMode = "schedule"
   if (displayMode !== raw.displayMode) {
     changed = true
   }

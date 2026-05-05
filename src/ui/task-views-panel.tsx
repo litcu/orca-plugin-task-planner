@@ -60,11 +60,9 @@ import {
   removeTaskFromMyDayState,
   resolveMyDayKey,
   saveMyDayState,
-  setMyDayDisplayMode,
   setMyDayJournalSectionBlockId,
   setMyDayTaskMirrorBlockId,
   updateMyDayTaskSchedule,
-  type MyDayDisplayMode,
   type MyDayState,
   type MyDayTaskEntry,
 } from "../core/my-day-state"
@@ -1411,15 +1409,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     [runMyDayStateMutation],
   )
 
-  const updateMyDayDisplayMode = React.useCallback(
-    async (mode: MyDayDisplayMode) => {
-      await runMyDayStateMutation((baseState: MyDayState) => {
-        return setMyDayDisplayMode(baseState, mode)
-      })
-    },
-    [runMyDayStateMutation],
-  )
-
   const addTask = React.useCallback(() => {
     openTaskPropertyPopup({
       pluginName: props.pluginName,
@@ -1957,10 +1946,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   }, [allTaskItems, doneStatus, matchesItem, myDayCompletedTaskIds, myDayState])
   const isDashboardTab = tab === "dashboard"
   const isMyDayTab = tab === "my-day"
-  const myDayDisplayMode: MyDayDisplayMode = myDayState?.displayMode === "schedule"
-    ? "schedule"
-    : "list"
-  const isMyDayScheduleMode = isMyDayTab && myDayDisplayMode === "schedule"
+  const isMyDayScheduleMode = isMyDayTab
   const isReviewDueTab = tab === "review-due"
   const isAllTasksTab = tab === "all-tasks"
   const isCustomViewTab = isCustomTaskViewsTab(tab)
@@ -3985,28 +3971,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
             minWidth: "160px",
           },
         }),
-        isMyDayTab
-          ? React.createElement(Segmented, {
-              selected: myDayDisplayMode,
-              options: [
-                {
-                  value: "list",
-                  label: t("List"),
-                },
-                {
-                  value: "schedule",
-                  label: t("Schedule"),
-                },
-              ],
-              onChange: (value: string) => {
-                const mode = value === "schedule" ? "schedule" : "list"
-                void updateMyDayDisplayMode(mode)
-              },
-              style: {
-                minWidth: "200px",
-              },
-            })
-          : null,
+        null,
         isAllTasksTab && allTasksQuickFilter != null
           ? React.createElement(
               "div",
@@ -4162,7 +4127,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                   color: "var(--orca-color-text-2)",
                 },
               },
-              t("Plan your day with list and schedule"),
+              t("Plan your day with schedule"),
             )
         : null,
       React.createElement(

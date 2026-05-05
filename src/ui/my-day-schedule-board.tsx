@@ -120,6 +120,9 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
   const timelineStartOffsetMinute = timelineStartHour * 60
   const timelinePointerDropToUnscheduled =
     timelinePointerDragState?.mode === "move" && timelinePointerDragState.dropToUnscheduled
+  const themeClassName = orca.state.themeMode === "dark"
+    ? "mlo-my-day-board-theme-dark"
+    : "mlo-my-day-board-theme-light"
 
   const maybeAutoScrollTimeline = React.useCallback((pointerClientY: number) => {
     const scrollElement = timelineScrollRef.current
@@ -841,7 +844,9 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
     "div",
     {
       ref: boardRef,
-      className: compactLayout ? "mlo-my-day-board mlo-my-day-board-compact" : "mlo-my-day-board",
+      className: compactLayout
+        ? `mlo-my-day-board ${themeClassName} mlo-my-day-board-compact`
+        : `mlo-my-day-board ${themeClassName}`,
     },
     React.createElement(
       "div",
@@ -2270,10 +2275,10 @@ function ensureMyDayScheduleStyles() {
 @keyframes mloMyDayDropPulse {
   0%,
   100% {
-    box-shadow: 0 0 0 4px rgba(11, 95, 255, 0.14);
+    box-shadow: 0 0 0 4px var(--mlo-myday-accent-soft);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(11, 95, 255, 0.24);
+    box-shadow: 0 0 0 6px var(--mlo-myday-accent-soft);
   }
 }
 
@@ -2281,27 +2286,46 @@ function ensureMyDayScheduleStyles() {
   0%,
   100% {
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.84),
-      0 0 0 3px rgba(11, 95, 255, 0.2),
-      0 14px 28px rgba(15, 23, 42, 0.1);
+      inset 0 1px 0 var(--mlo-myday-panel-highlight),
+      0 0 0 3px var(--mlo-myday-accent-soft),
+      var(--mlo-myday-shadow);
   }
   50% {
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.9),
-      0 0 0 6px rgba(11, 95, 255, 0.26),
-      0 16px 32px rgba(15, 23, 42, 0.13);
+      inset 0 1px 0 var(--mlo-myday-panel-highlight),
+      0 0 0 6px var(--mlo-myday-accent-soft),
+      var(--mlo-myday-shadow);
   }
 }
 
 .mlo-my-day-board {
-  --mlo-myday-ink: #1f2937;
-  --mlo-myday-muted: #556278;
-  --mlo-myday-card-bg: linear-gradient(148deg, rgba(255, 255, 255, 0.9), rgba(247, 250, 255, 0.82));
-  --mlo-myday-card-border: rgba(16, 44, 84, 0.16);
-  --mlo-myday-accent: #0b5fff;
-  --mlo-myday-accent-soft: rgba(11, 95, 255, 0.13);
-  --mlo-myday-danger: #b42318;
-  --mlo-myday-danger-soft: rgba(180, 35, 24, 0.12);
+  --mlo-myday-ink: var(--orca-color-text-1, var(--orca-color-text, #1f2937));
+  --mlo-myday-muted: var(--orca-color-text-2, #556278);
+  --mlo-myday-line: var(--orca-color-border-1, var(--orca-color-border, rgba(16, 44, 84, 0.16)));
+  --mlo-myday-bg: linear-gradient(162deg, var(--orca-color-bg-1), var(--orca-color-bg-2));
+  --mlo-myday-panel-bg: linear-gradient(176deg, var(--orca-color-bg-1), var(--orca-color-bg-2));
+  --mlo-myday-surface-bg: var(--orca-color-bg-1);
+  --mlo-myday-soft-bg: var(--orca-color-bg-2);
+  --mlo-myday-card-bg: var(--orca-color-bg-1);
+  --mlo-myday-card-completed-bg: linear-gradient(150deg, var(--orca-color-bg-1), var(--orca-color-bg-2));
+  --mlo-myday-card-border: var(--mlo-myday-line);
+  --mlo-myday-pill-bg: var(--orca-color-bg-2);
+  --mlo-myday-stack-bg: var(--orca-color-bg-1);
+  --mlo-myday-accent: var(--orca-color-text-blue, #2563eb);
+  --mlo-myday-accent-soft: color-mix(in srgb, var(--mlo-myday-accent) 14%, transparent);
+  --mlo-myday-now: var(--orca-color-text-red, #dc2626);
+  --mlo-myday-now-soft: color-mix(in srgb, var(--mlo-myday-now) 14%, transparent);
+  --mlo-myday-danger: var(--orca-color-text-red, #c53030);
+  --mlo-myday-success: var(--orca-color-text-green, #2f855a);
+  --mlo-myday-warning: var(--orca-color-text-yellow, #b7791f);
+  --mlo-myday-shadow: 0 12px 26px rgba(15, 23, 42, 0.1);
+  --mlo-myday-card-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --mlo-myday-card-hover-shadow: 0 6px 14px rgba(15, 23, 42, 0.1);
+  --mlo-myday-panel-highlight: rgba(255, 255, 255, 0.52);
+  --mlo-myday-stripe: rgba(15, 23, 42, 0.018);
+  --mlo-myday-track-line: rgba(16, 44, 84, 0.28);
+  --mlo-myday-track-line-soft: rgba(16, 44, 84, 0.1);
+  --mlo-myday-scrollbar: rgba(36, 84, 148, 0.34);
   height: 100%;
   min-height: 0;
   display: flex;
@@ -2309,20 +2333,36 @@ function ensureMyDayScheduleStyles() {
   gap: 12px;
   padding: 12px;
   border-radius: 14px;
-  border: 1px solid rgba(16, 44, 84, 0.16);
-  background:
-    radial-gradient(circle at 0% 0%, rgba(11, 95, 255, 0.14), transparent 42%),
-    radial-gradient(circle at 100% 100%, rgba(247, 37, 133, 0.12), transparent 40%),
-    linear-gradient(162deg, rgba(247, 251, 255, 0.96), rgba(238, 245, 255, 0.9));
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
+  border: 1px solid var(--mlo-myday-line);
+  background: var(--mlo-myday-bg);
+  box-shadow: var(--mlo-myday-shadow);
   overflow: hidden;
+}
+
+.mlo-my-day-board.mlo-my-day-board-theme-dark {
+  --mlo-myday-bg: linear-gradient(162deg, var(--orca-color-bg-1), var(--orca-color-bg-2));
+  --mlo-myday-panel-bg: linear-gradient(176deg, var(--orca-color-bg-2), var(--orca-color-bg-1));
+  --mlo-myday-surface-bg: var(--orca-color-bg-2);
+  --mlo-myday-soft-bg: var(--orca-color-bg-1);
+  --mlo-myday-card-bg: var(--orca-color-bg-2);
+  --mlo-myday-card-completed-bg: linear-gradient(150deg, var(--orca-color-bg-2), var(--orca-color-bg-1));
+  --mlo-myday-pill-bg: var(--orca-color-bg-1);
+  --mlo-myday-stack-bg: var(--orca-color-bg-2);
+  --mlo-myday-shadow: 0 16px 30px rgba(2, 6, 23, 0.34);
+  --mlo-myday-card-shadow: 0 6px 16px rgba(2, 6, 23, 0.32);
+  --mlo-myday-card-hover-shadow: 0 8px 18px rgba(2, 6, 23, 0.4);
+  --mlo-myday-panel-highlight: rgba(255, 255, 255, 0.08);
+  --mlo-myday-stripe: rgba(148, 163, 184, 0.045);
+  --mlo-myday-track-line: rgba(148, 163, 184, 0.34);
+  --mlo-myday-track-line-soft: rgba(148, 163, 184, 0.16);
+  --mlo-myday-scrollbar: rgba(148, 163, 184, 0.34);
 }
 
 .mlo-my-day-board-head {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  border-bottom: 1px solid rgba(16, 44, 84, 0.12);
+  border-bottom: 1px solid var(--mlo-myday-line);
   padding-bottom: 9px;
 }
 
@@ -2353,10 +2393,10 @@ function ensureMyDayScheduleStyles() {
 .mlo-my-day-timeline-panel {
   min-height: 0;
   border-radius: 14px;
-  border: 1px solid rgba(16, 44, 84, 0.18);
+  border: 1px solid var(--mlo-myday-line);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.76),
-    0 12px 26px rgba(15, 23, 42, 0.08);
+    inset 0 1px 0 var(--mlo-myday-panel-highlight),
+    var(--mlo-myday-shadow);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -2376,30 +2416,28 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-unscheduled-panel {
-  background:
-    radial-gradient(circle at 12% 0%, rgba(0, 123, 255, 0.2), transparent 52%),
-    linear-gradient(176deg, rgba(255, 255, 255, 0.92), rgba(240, 247, 255, 0.9));
+  background: var(--mlo-myday-panel-bg);
 }
 
 .mlo-my-day-unscheduled-panel::before {
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, transparent 45%),
-    radial-gradient(circle at 100% 100%, rgba(0, 123, 255, 0.11), transparent 42%);
+    linear-gradient(135deg, var(--mlo-myday-panel-highlight) 0%, transparent 45%),
+    linear-gradient(180deg, var(--mlo-myday-accent-soft), transparent 58%);
 }
 
 .mlo-my-day-unscheduled-panel-drop-target {
-  border-color: rgba(11, 95, 255, 0.44);
+  border-color: var(--mlo-myday-accent);
   animation: mloMyDayDropTargetGlow 940ms ease-in-out infinite;
 }
 
 .mlo-my-day-unscheduled-panel-drop-target .mlo-my-day-card-stack {
-  border-color: rgba(11, 95, 255, 0.36);
+  border-color: var(--mlo-myday-accent);
   background:
-    linear-gradient(180deg, rgba(11, 95, 255, 0.12), rgba(255, 255, 255, 0.24)),
+    linear-gradient(180deg, var(--mlo-myday-accent-soft), transparent),
     repeating-linear-gradient(
       180deg,
-      rgba(15, 23, 42, 0.018) 0px,
-      rgba(15, 23, 42, 0.018) 1px,
+      var(--mlo-myday-stripe) 0px,
+      var(--mlo-myday-stripe) 1px,
       transparent 1px,
       transparent 12px
     );
@@ -2424,11 +2462,11 @@ function ensureMyDayScheduleStyles() {
   text-align: center;
   padding: 14px;
   border-radius: 12px;
-  border: 2px dashed rgba(11, 95, 255, 0.46);
+  border: 2px dashed var(--mlo-myday-accent);
   background:
-    linear-gradient(180deg, rgba(11, 95, 255, 0.18), rgba(11, 95, 255, 0.09)),
-    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.72), transparent 58%);
-  color: #0f4fb5;
+    linear-gradient(180deg, var(--mlo-myday-accent-soft), transparent),
+    var(--mlo-myday-surface-bg);
+  color: var(--mlo-myday-accent);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -2438,15 +2476,13 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-timeline-panel {
-  background:
-    radial-gradient(circle at 0% 100%, rgba(28, 125, 255, 0.17), transparent 45%),
-    linear-gradient(176deg, rgba(252, 254, 255, 0.94), rgba(237, 245, 255, 0.9));
+  background: var(--mlo-myday-panel-bg);
 }
 
 .mlo-my-day-timeline-panel::before {
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.48), transparent 44%),
-    radial-gradient(circle at 100% 0%, rgba(88, 28, 255, 0.08), transparent 46%);
+    linear-gradient(145deg, var(--mlo-myday-panel-highlight), transparent 44%),
+    linear-gradient(180deg, var(--mlo-myday-accent-soft), transparent 56%);
 }
 
 .mlo-my-day-panel-title {
@@ -2458,14 +2494,14 @@ function ensureMyDayScheduleStyles() {
   min-height: 23px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(16, 44, 84, 0.16);
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.82), rgba(245, 250, 255, 0.86));
+  border: 1px solid var(--mlo-myday-line);
+  background: var(--mlo-myday-pill-bg);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: #21425d;
-  box-shadow: 0 5px 12px rgba(15, 23, 42, 0.08);
+  color: var(--mlo-myday-ink);
+  box-shadow: var(--mlo-myday-card-shadow);
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
@@ -2474,8 +2510,8 @@ function ensureMyDayScheduleStyles() {
   z-index: 1;
   font-size: 12px;
   color: var(--mlo-myday-muted);
-  background: linear-gradient(150deg, rgba(11, 95, 255, 0.09), rgba(11, 95, 255, 0.03));
-  border: 1px dashed rgba(11, 95, 255, 0.28);
+  background: var(--mlo-myday-soft-bg);
+  border: 1px dashed var(--mlo-myday-line);
   border-radius: 10px;
   padding: 10px 11px;
 }
@@ -2491,16 +2527,16 @@ function ensureMyDayScheduleStyles() {
   gap: 10px;
   padding: 6px 4px 6px 2px;
   border-radius: 12px;
-  border: 1px dashed rgba(16, 44, 84, 0.18);
+  border: 1px dashed var(--mlo-myday-line);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.54), rgba(255, 255, 255, 0.14)),
     repeating-linear-gradient(
       180deg,
-      rgba(15, 23, 42, 0.018) 0px,
-      rgba(15, 23, 42, 0.018) 1px,
+      var(--mlo-myday-stripe) 0px,
+      var(--mlo-myday-stripe) 1px,
       transparent 1px,
       transparent 12px
-    );
+    ),
+    var(--mlo-myday-stack-bg);
 }
 
 .mlo-my-day-card-stack::-webkit-scrollbar,
@@ -2514,15 +2550,15 @@ function ensureMyDayScheduleStyles() {
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
-  background: rgba(36, 84, 148, 0.34);
+  background: var(--mlo-myday-scrollbar);
 }
 
 .mlo-my-day-card {
   --mlo-myday-card-hue: 214;
   border-radius: 10px;
-  border: 1px solid hsla(var(--mlo-myday-card-hue), 54%, 40%, 0.2);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--mlo-myday-card-border);
+  background: var(--mlo-myday-card-bg);
+  box-shadow: var(--mlo-myday-card-shadow);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -2538,14 +2574,14 @@ function ensureMyDayScheduleStyles() {
 
 .mlo-my-day-card-completed {
   --mlo-myday-card-hue: 142;
-  border-color: rgba(34, 197, 94, 0.32);
-  background: linear-gradient(150deg, rgba(240, 253, 244, 0.95), rgba(220, 252, 231, 0.9));
+  border-color: var(--mlo-myday-success);
+  background: var(--mlo-myday-card-completed-bg);
 }
 
 .mlo-my-day-card-completed .mlo-my-day-card-title {
-  color: #1f5f3b;
+  color: var(--mlo-myday-success);
   text-decoration: line-through;
-  text-decoration-color: rgba(22, 101, 52, 0.55);
+  text-decoration-color: var(--mlo-myday-success);
 }
 
 .mlo-my-day-card-disabled {
@@ -2554,8 +2590,8 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-card:hover {
-  border-color: hsla(var(--mlo-myday-card-hue), 70%, 44%, 0.34);
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.1);
+  border-color: var(--mlo-myday-accent);
+  box-shadow: var(--mlo-myday-card-hover-shadow);
 }
 
 .mlo-my-day-card:active {
@@ -2607,9 +2643,9 @@ function ensureMyDayScheduleStyles() {
   padding: 0 7px;
   height: 18px;
   border-radius: 999px;
-  border: 1px solid hsla(var(--mlo-myday-card-hue), 52%, 46%, 0.22);
-  background: hsla(var(--mlo-myday-card-hue), 72%, 54%, 0.09);
-  color: hsl(var(--mlo-myday-card-hue), 50%, 34%);
+  border: 1px solid var(--mlo-myday-line);
+  background: var(--mlo-myday-pill-bg);
+  color: var(--mlo-myday-muted);
   font-size: 10px;
   white-space: nowrap;
   max-width: 100px;
@@ -2622,8 +2658,8 @@ function ensureMyDayScheduleStyles() {
   align-items: center;
   height: 17px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.32);
-  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid var(--mlo-myday-line);
+  background: var(--mlo-myday-pill-bg);
   color: var(--orca-color-text-2);
   font-size: 10px;
   line-height: 1;
@@ -2638,8 +2674,8 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-action-danger {
-  border: 1px solid rgba(16, 44, 84, 0.18);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--mlo-myday-line);
+  background: var(--mlo-myday-surface-bg);
   cursor: pointer;
   font-size: 10px;
   padding: 2px 8px;
@@ -2654,8 +2690,8 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-action-danger:hover:not(:disabled) {
-  background: #fff;
-  border-color: rgba(180, 35, 24, 0.36);
+  background: var(--mlo-myday-soft-bg);
+  border-color: var(--mlo-myday-danger);
 }
 
 .mlo-my-day-action-danger:disabled {
@@ -2668,17 +2704,17 @@ function ensureMyDayScheduleStyles() {
   min-height: 220px;
   overflow: auto;
   border-radius: 12px;
-  border: 1px solid rgba(16, 44, 84, 0.2);
+  border: 1px solid var(--mlo-myday-line);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(244, 248, 255, 0.9)),
     repeating-linear-gradient(
       180deg,
-      rgba(15, 23, 42, 0.015) 0px,
-      rgba(15, 23, 42, 0.015) 1px,
+      var(--mlo-myday-stripe) 0px,
+      var(--mlo-myday-stripe) 1px,
       transparent 1px,
       transparent 12px
-    );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    ),
+    var(--mlo-myday-surface-bg);
+  box-shadow: inset 0 1px 0 var(--mlo-myday-panel-highlight);
 }
 
 .mlo-my-day-timeline {
@@ -2700,8 +2736,8 @@ function ensureMyDayScheduleStyles() {
   width: 1px;
   background: linear-gradient(
     180deg,
-    rgba(16, 44, 84, 0.36),
-    rgba(16, 44, 84, 0.12)
+    var(--mlo-myday-track-line),
+    var(--mlo-myday-track-line-soft)
   );
 }
 
@@ -2709,12 +2745,12 @@ function ensureMyDayScheduleStyles() {
   position: absolute;
   left: 0;
   right: 0;
-  border-top: 1px dashed rgba(16, 44, 84, 0.14);
+  border-top: 1px dashed var(--mlo-myday-track-line-soft);
 }
 
 .mlo-my-day-slot-major {
   border-top-style: solid;
-  border-top-color: rgba(16, 44, 84, 0.3);
+  border-top-color: var(--mlo-myday-track-line);
 }
 
 .mlo-my-day-slot-label {
@@ -2724,7 +2760,7 @@ function ensureMyDayScheduleStyles() {
   width: 48px;
   text-align: right;
   font-size: 10px;
-  color: #35506f;
+  color: var(--mlo-myday-muted);
   font-weight: 600;
   letter-spacing: 0.02em;
   font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -2744,8 +2780,8 @@ function ensureMyDayScheduleStyles() {
   left: var(--mlo-myday-time-marker-left);
   right: var(--mlo-myday-time-marker-right);
   top: 0;
-  border-top: 2px solid rgba(220, 38, 38, 0.9);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.64);
+  border-top: 2px solid var(--mlo-myday-now);
+  box-shadow: 0 0 0 1px var(--mlo-myday-surface-bg);
 }
 
 .mlo-my-day-now-dot {
@@ -2755,11 +2791,11 @@ function ensureMyDayScheduleStyles() {
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: rgba(220, 38, 38, 0.95);
+  background: var(--mlo-myday-now);
   transform: translate(-50%, -50%);
   box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.9),
-    0 0 0 5px rgba(220, 38, 38, 0.12);
+    0 0 0 2px var(--mlo-myday-surface-bg),
+    0 0 0 5px var(--mlo-myday-now-soft);
 }
 
 .mlo-my-day-drop-line {
@@ -2787,9 +2823,9 @@ function ensureMyDayScheduleStyles() {
   left: calc(var(--mlo-timeline-track-left) + (var(--mlo-timeline-lane-index) * (var(--mlo-timeline-column-width) + var(--mlo-timeline-lane-gap))));
   width: var(--mlo-timeline-column-width);
   border-radius: 10px;
-  border: 1px solid hsla(var(--mlo-myday-card-hue), 54%, 42%, 0.25);
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 5px 14px rgba(15, 23, 42, 0.1);
+  border: 1px solid var(--mlo-myday-card-border);
+  background: var(--mlo-myday-card-bg);
+  box-shadow: var(--mlo-myday-card-shadow);
   padding: 8px 9px;
   display: flex;
   flex-direction: column;
@@ -2818,14 +2854,14 @@ function ensureMyDayScheduleStyles() {
 
 .mlo-my-day-timeline-card-completed {
   --mlo-myday-card-hue: 142;
-  border-color: rgba(34, 197, 94, 0.34);
-  background: linear-gradient(155deg, rgba(240, 253, 244, 0.97), rgba(220, 252, 231, 0.92));
+  border-color: var(--mlo-myday-success);
+  background: var(--mlo-myday-card-completed-bg);
 }
 
 .mlo-my-day-timeline-card-completed .mlo-my-day-timeline-title {
-  color: #1f5f3b;
+  color: var(--mlo-myday-success);
   text-decoration: line-through;
-  text-decoration-color: rgba(22, 101, 52, 0.55);
+  text-decoration-color: var(--mlo-myday-success);
 }
 
 .mlo-my-day-timeline-card-disabled {
@@ -2838,8 +2874,8 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-timeline-card:hover {
-  border-color: hsla(var(--mlo-myday-card-hue), 70%, 44%, 0.35);
-  box-shadow: 0 7px 16px rgba(15, 23, 42, 0.12);
+  border-color: var(--mlo-myday-accent);
+  box-shadow: var(--mlo-myday-card-hover-shadow);
 }
 
 .mlo-my-day-timeline-card-disabled:active {
@@ -2854,7 +2890,7 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-timeline-title {
-  color: hsl(var(--mlo-myday-card-hue), 36%, 23%);
+  color: var(--mlo-myday-ink);
 }
 
 .mlo-my-day-timeline-title-wrap {
@@ -2867,9 +2903,9 @@ function ensureMyDayScheduleStyles() {
   align-items: center;
   height: 17px;
   border-radius: 999px;
-  border: 1px solid hsla(var(--mlo-myday-card-hue), 52%, 46%, 0.22);
-  background: hsla(var(--mlo-myday-card-hue), 72%, 54%, 0.09);
-  color: hsl(var(--mlo-myday-card-hue), 50%, 34%);
+  border: 1px solid var(--mlo-myday-line);
+  background: var(--mlo-myday-pill-bg);
+  color: var(--mlo-myday-muted);
   font-size: 10px;
   padding: 0 6px;
   max-width: 100px;
@@ -2885,9 +2921,9 @@ function ensureMyDayScheduleStyles() {
   height: 18px;
   min-width: 18px;
   border-radius: 999px;
-  border: 1px solid rgba(212, 162, 18, 0.34);
-  background: linear-gradient(145deg, rgba(248, 219, 145, 0.26), rgba(212, 162, 18, 0.16));
-  color: #8f6200;
+  border: 1px solid var(--mlo-myday-line);
+  background: var(--mlo-myday-pill-bg);
+  color: var(--mlo-myday-warning);
   font-size: 10px;
 }
 
@@ -2913,7 +2949,7 @@ function ensureMyDayScheduleStyles() {
   width: 22px;
   height: 2px;
   border-radius: 999px;
-  background: hsla(var(--mlo-myday-card-hue), 48%, 38%, 0.38);
+  background: var(--mlo-myday-muted);
   opacity: 0;
   transition: opacity 120ms ease;
 }
@@ -2926,7 +2962,7 @@ function ensureMyDayScheduleStyles() {
 }
 
 .mlo-my-day-timeline-resize-handle:hover {
-  background: hsla(var(--mlo-myday-card-hue), 58%, 44%, 0.1);
+  background: var(--mlo-myday-soft-bg);
 }
 
 @media (hover: none) {
@@ -2951,9 +2987,9 @@ function ensureMyDayScheduleStyles() {
   padding: 0 7px;
   display: inline-flex;
   align-items: center;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid hsla(var(--mlo-myday-card-hue), 60%, 44%, 0.3);
-  color: hsl(var(--mlo-myday-card-hue), 50%, 31%);
+  background: var(--mlo-myday-pill-bg);
+  border: 1px solid var(--mlo-myday-line);
+  color: var(--mlo-myday-muted);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
