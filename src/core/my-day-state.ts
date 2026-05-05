@@ -1,4 +1,4 @@
-﻿import type { Block, DbId } from "../orca.d.ts"
+﻿import type { Block, BlockRef, DbId } from "../orca.d.ts"
 import { dedupeDbIds, getMirrorId, isValidDbId } from "./block-utils"
 
 const MY_DAY_DATA_KEY = "taskMyDay.v1"
@@ -7,7 +7,8 @@ const PROP_TYPE_TEXT = 1
 const PROP_TYPE_NUMBER = 3
 const PROP_TYPE_BOOLEAN = 4
 const INLINE_REF_TYPE = 1
-const CONTENT_TYPE_LINK = "r"
+const TAG_REF_TYPE = 2
+const CONTENT_TYPE_REFERENCE = "r"
 const MINUTE_PER_DAY = 24 * 60
 const DEFAULT_SCHEDULE_DURATION_MINUTES = 60
 const MIN_SCHEDULE_DURATION_MINUTES = 15
@@ -444,6 +445,14 @@ export async function ensureMyDayMirrorInTodayJournal(options: {
     options.dayKey,
   )
   if (existingTaskBlockId != null) {
+    const existingTaskBlock = await getBlockById(existingTaskBlockId)
+    if (existingTaskBlock != null && hasMyDayEntryMarker(existingTaskBlock)) {
+      await normalizeMyDayJournalEntryReference(
+        existingTaskBlockId,
+        existingTaskBlock,
+        normalizedTaskId,
+      )
+    }
     await cleanupDuplicateMyDayJournalEntries(
       journalSectionBlockId,
       normalizedTaskId,
@@ -456,7 +465,7 @@ export async function ensureMyDayMirrorInTodayJournal(options: {
     }
   }
 
-  const mirrorBlockId = await insertMyDayMirrorBlock(
+  const mirrorBlockId = await insertMyDayReferenceBlock(
     journalSectionBlockId,
     normalizedTaskId,
     options.dayKey,
@@ -544,10 +553,7 @@ export async function removeMyDayMirrorBlock(
   }
 
   const hasMyDayMarker = block.properties.some((property) => {
-    return (
-      property.name === MY_DAY_ENTRY_TASK_ID_PROPERTY ||
-      property.name === MY_DAY_ENTRY_DAY_KEY_PROPERTY
-    )
+    return isMyDayEntryMarkerProperty(property.name)
   })
   if (!hasMyDayMarker) {
     return
@@ -1000,7 +1006,7 @@ async function findMyDaySectionInJournal(
   return null
 }
 
-async function insertMyDayMirrorBlock(
+async function insertMyDayReferenceBlock(
   sectionBlockId: DbId,
   taskId: DbId,
   dayKey: string,
@@ -1025,7 +1031,13 @@ async function insertMyDayMirrorBlock(
       existingSectionId,
     )
     const existingEntryBlock = await getBlockById(normalizedExistingEntryId)
-    if (existingEntryBlock != null && isMirrorBlockForTask(existingEntryBlock, taskId)) {
+    if (
+      existingEntryBlock != null &&
+      (
+        isMirrorBlockForTask(existingEntryBlock, taskId) ||
+        blockContainsInlineTaskReference(existingEntryBlock, taskId)
+      )
+    ) {
       await cleanupDuplicateMyDayJournalEntries(
         existingSectionId,
         taskId,
@@ -1046,7 +1058,7 @@ async function insertMyDayMirrorBlock(
     }
   }
 
-  let createdBlockId = await insertMirrorChildBlock(
+  let createdBlockId = await insertTaskReferenceChildBlock(
     existingSectionId,
     sectionBlock,
     taskId,
@@ -1055,7 +1067,7 @@ async function insertMyDayMirrorBlock(
     await delayMs(80)
     const refreshedSectionBlock = await getBlockById(existingSectionId)
     if (refreshedSectionBlock != null) {
-      createdBlockId = await insertMirrorChildBlock(
+      createdBlockId = await insertTaskReferenceChildBlock(
         existingSectionId,
         refreshedSectionBlock,
         taskId,
@@ -1121,8 +1133,8 @@ async function normalizeMyDayJournalEntryReference(
   }
 
   if (blockHasTaskReferenceFragment(effectiveEntryBlock, taskId)) {
-    await ensureInlineTaskRef(entryBlockId, taskId)
-    return true
+    const taskLabel = await resolveTaskReferenceLabel(taskId)
+    return await setBlockTaskReferenceContent(entryBlockId, taskId, taskLabel)
   }
 
   const taskLabel = await resolveTaskReferenceLabel(taskId)
@@ -1135,12 +1147,7 @@ async function normalizeMyDayJournalEntryReference(
     return false
   }
 
-  const normalizedBlock = await getBlockById(entryBlockId)
-  if (normalizedBlock == null) {
-    return false
-  }
-
-  return blockHasTaskReferenceFragment(normalizedBlock, taskId)
+  return true
 }
 
 async function ensureMyDayEntryUnderParent(
@@ -1342,73 +1349,38 @@ function isMirrorBlockForTask(
   return getMirrorId(block.id) === taskId
 }
 
+function hasMyDayEntryMarker(block: Block): boolean {
+  return block.properties.some((property) => {
+    return isMyDayEntryMarkerProperty(property.name)
+  })
+}
+
+function isMyDayEntryMarkerProperty(propertyName: string): boolean {
+  return (
+    propertyName === MY_DAY_ENTRY_TASK_ID_PROPERTY ||
+    propertyName === MY_DAY_ENTRY_DAY_KEY_PROPERTY
+  )
+}
+
 async function insertTaskReferenceChildBlock(
   parentBlockId: DbId,
   parentBlock: Block,
   taskId: DbId,
 ): Promise<DbId | null> {
   const taskLabel = await resolveTaskReferenceLabel(taskId)
-  const referenceContentVariants = createTaskReferenceContentVariants(taskId, taskLabel)
   const parentCandidates: Array<Block | DbId> = [parentBlock, parentBlockId]
 
   for (const parent of parentCandidates) {
-    for (const referenceContent of referenceContentVariants) {
-      const childIdsBeforeInsert = await readChildBlockIdSet(parentBlockId)
-      try {
-        const insertedResult = await orca.commands.invokeEditorCommand(
-          "core.editor.insertBlock",
-          null,
-          parent,
-          "lastChild",
-          referenceContent,
-        )
-
-        const insertedId = await resolveInsertedChildBlockId(
-          parentBlockId,
-          childIdsBeforeInsert,
-          pickDbIdFromResult(insertedResult),
-        )
-        if (insertedId == null) {
-          continue
-        }
-
-        const normalized = await setBlockTaskReferenceContent(
-          insertedId,
-          taskId,
-          taskLabel,
-        )
-        if (normalized) {
-          return insertedId
-        }
-      } catch (error) {
-        console.error(error)
-      }
-    }
-  }
-
-  return null
-}
-
-async function insertMirrorChildBlock(
-  parentBlockId: DbId,
-  parentBlock: Block,
-  taskId: DbId,
-): Promise<DbId | null> {
-  const childIdsBeforeInsert = await readChildBlockIdSet(parentBlockId)
-  const parentCandidates: Array<Block | DbId> = [parentBlock, parentBlockId]
-
-  for (const parent of parentCandidates) {
+    const childIdsBeforeInsert = await readChildBlockIdSet(parentBlockId)
     try {
       const insertedResult = await orca.commands.invokeEditorCommand(
-        "core.editor.insertBlock",
+        "core.editor.batchInsertText",
         null,
         parent,
         "lastChild",
-        undefined,
-        {
-          type: "mirror",
-          mirroredId: taskId,
-        },
+        taskLabel,
+        false,
+        false,
       )
 
       const insertedId = await resolveInsertedChildBlockId(
@@ -1420,22 +1392,12 @@ async function insertMirrorChildBlock(
         continue
       }
 
-      const insertedBlock = await getBlockById(insertedId)
-      if (insertedBlock == null) {
-        continue
-      }
-
-      const repr = insertedBlock.properties.find((item) => item.name === "_repr")?.value as
-        | { type?: string; mirroredId?: DbId }
-        | undefined
-      if (
-        repr?.type === "mirror" &&
-        normalizeTaskDbId(repr.mirroredId) === taskId
-      ) {
-        return insertedId
-      }
-
-      if (insertedBlock.id === taskId || getMirrorId(insertedBlock.id) === taskId) {
+      const normalized = await setBlockTaskReferenceContent(
+        insertedId,
+        taskId,
+        taskLabel,
+      )
+      if (normalized) {
         return insertedId
       }
     } catch (error) {
@@ -1449,66 +1411,52 @@ async function insertMirrorChildBlock(
 async function ensureInlineTaskRef(
   sourceBlockId: DbId,
   taskId: DbId,
-): Promise<void> {
+  alias?: string,
+): Promise<DbId | null> {
   const sourceBlock = await getBlockById(sourceBlockId)
   if (sourceBlock == null) {
-    return
+    return null
   }
 
-  const hasInlineRef = sourceBlock.refs.some((ref) => {
+  const existingRef = sourceBlock.refs.find((ref) => {
     return ref.type === INLINE_REF_TYPE && normalizeTaskDbId(ref.to) === taskId
   })
-  if (hasInlineRef) {
-    return
+  if (existingRef != null) {
+    if (alias != null && alias.trim() !== "" && existingRef.alias !== alias) {
+      await setInlineRefAlias(existingRef, alias)
+    }
+    return existingRef.id
   }
 
   const resolvedTaskId =
     (await resolveExistingBlockId([taskId, getMirrorId(taskId)])) ?? taskId
 
   try {
-    await orca.commands.invokeEditorCommand(
+    const refId = await orca.commands.invokeEditorCommand(
       "core.editor.createRef",
       null,
       sourceBlockId,
       resolvedTaskId,
       INLINE_REF_TYPE,
+      alias,
     )
+    return normalizeRawDbId(refId)
   } catch (error) {
     console.error(error)
+    return null
   }
-}
-
-function createTaskReferenceContent(taskId: DbId, taskLabel: string): Array<Record<string, unknown>> {
-  const normalizedLabel = taskLabel.trim() === "" ? `#${taskId}` : taskLabel
-  return [
-    {
-      t: CONTENT_TYPE_LINK,
-      v: normalizedLabel,
-      u: taskId,
-    },
-  ]
-}
-
-function createTaskReferenceContentVariants(
-  taskId: DbId,
-  taskLabel: string,
-): Array<Array<Record<string, unknown>>> {
-  const normalizedLabel = taskLabel.trim() === "" ? `#${taskId}` : taskLabel
-  return [
-    createTaskReferenceContent(taskId, normalizedLabel),
-    [{ t: CONTENT_TYPE_LINK, v: normalizedLabel, u: String(taskId) }],
-    [{ t: CONTENT_TYPE_LINK, v: normalizedLabel, u: `((${taskId}))` }],
-  ]
 }
 
 async function resolveTaskReferenceLabel(taskId: DbId): Promise<string> {
   const taskBlock = await getBlockById(taskId)
-  const blockText = typeof taskBlock?.text === "string" ? taskBlock.text.trim() : ""
-  if (blockText !== "") {
-    return blockText
+  const blockText = resolveBlockDisplayText(taskBlock)
+  const tagAliases = collectTagAliases(taskBlock)
+  const normalized = stripHashTagsFromReferenceLabel(blockText, tagAliases)
+  if (normalized !== "") {
+    return normalized
   }
 
-  return `#${taskId}`
+  return `Task ${taskId}`
 }
 
 async function setBlockTaskReferenceContent(
@@ -1516,34 +1464,142 @@ async function setBlockTaskReferenceContent(
   taskId: DbId,
   taskLabel: string,
 ): Promise<boolean> {
-  const contentVariants = createTaskReferenceContentVariants(taskId, taskLabel)
+  const taskBlock = await getBlockById(taskId)
+  const taskTagAliases = collectTagAliases(taskBlock)
+  const refId = await ensureInlineTaskRef(blockId, taskId, taskLabel)
+  if (refId == null) {
+    return false
+  }
 
-  for (const content of contentVariants) {
+  try {
+    await orca.commands.invokeEditorCommand(
+      "core.editor.setBlocksContent",
+      null,
+      [
+        {
+          id: blockId,
+          content: [{ t: CONTENT_TYPE_REFERENCE, v: refId }],
+        },
+      ],
+      false,
+    )
+  } catch (error) {
+    console.error(error)
+    return false
+  }
+
+  await removeReferenceBlockTagArtifacts(blockId, taskTagAliases)
+  return true
+}
+
+async function setInlineRefAlias(ref: BlockRef, alias: string): Promise<void> {
+  try {
+    await orca.commands.invokeEditorCommand(
+      "core.editor.setRefAlias",
+      null,
+      ref,
+      alias,
+    )
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+function resolveBlockDisplayText(block: Block | null): string {
+  const blockText = typeof block?.text === "string" ? block.text.trim() : ""
+  if (blockText !== "") {
+    return blockText
+  }
+
+  if (!Array.isArray(block?.content) || block.content.length === 0) {
+    return ""
+  }
+
+  return block.content
+    .map((fragment) => {
+      return typeof fragment?.v === "string" ? fragment.v : ""
+    })
+    .join("")
+    .trim()
+}
+
+function collectTagAliases(block: Block | null): string[] {
+  if (block == null) {
+    return []
+  }
+
+  const aliases: string[] = []
+  const seen = new Set<string>()
+  for (const ref of block.refs) {
+    if (ref.type !== TAG_REF_TYPE || typeof ref.alias !== "string") {
+      continue
+    }
+
+    const alias = ref.alias.trim()
+    const key = alias.toLowerCase()
+    if (alias === "" || seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    aliases.push(alias)
+  }
+
+  return aliases
+}
+
+function stripHashTagsFromReferenceLabel(text: string, tagAliases: string[]): string {
+  let normalized = text.trim()
+  if (normalized === "") {
+    return ""
+  }
+
+  for (const alias of tagAliases) {
+    const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    normalized = normalized.replace(
+      new RegExp(
+        `(^|[\\s,\\uFF0C;\\uFF1B\\u3001])#${escapedAlias}(?=[\\s,\\uFF0C;\\uFF1B\\u3001]|$)`,
+        "gi",
+      ),
+      " ",
+    )
+  }
+
+  return normalized
+    .replace(
+      /(^|[\s,\uFF0C;\uFF1B\u3001])#[^\s#,\uFF0C;\uFF1B\u3001]+(?=[\s,\uFF0C;\uFF1B\u3001]|$)/g,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+async function removeReferenceBlockTagArtifacts(
+  blockId: DbId,
+  taskTagAliases: string[],
+): Promise<void> {
+  const block = await getBlockById(blockId)
+  if (block == null) {
+    return
+  }
+
+  const removableAliases = new Set(taskTagAliases.map((alias) => alias.toLowerCase()))
+  for (const alias of collectTagAliases(block)) {
+    if (!removableAliases.has(alias.toLowerCase())) {
+      continue
+    }
+
     try {
       await orca.commands.invokeEditorCommand(
-        "core.editor.setBlocksContent",
+        "core.editor.removeTag",
         null,
-        [
-          {
-            id: blockId,
-            content,
-          },
-        ],
-        false,
+        blockId,
+        alias,
       )
     } catch (error) {
       console.error(error)
     }
-
-    const updatedBlock = await getBlockById(blockId)
-    if (updatedBlock != null && blockHasTaskReferenceFragment(updatedBlock, taskId)) {
-      await ensureInlineTaskRef(blockId, taskId)
-      return true
-    }
   }
-
-  await ensureInlineTaskRef(blockId, taskId)
-  return false
 }
 
 async function resolveExistingBlockId(
@@ -2011,10 +2067,7 @@ async function cleanupDuplicateMyDayJournalEntries(
     }
 
     const hasMyDayMarker = candidateBlock.properties.some((property) => {
-      return (
-        property.name === MY_DAY_ENTRY_TASK_ID_PROPERTY ||
-        property.name === MY_DAY_ENTRY_DAY_KEY_PROPERTY
-      )
+      return isMyDayEntryMarkerProperty(property.name)
     })
     if (hasMyDayMarker) {
       removableIds.push(candidateId)
@@ -2113,8 +2166,22 @@ function blockHasTaskReferenceFragment(block: Block, taskId: DbId): boolean {
       return false
     }
 
-    if ((fragment as { t?: unknown }).t !== CONTENT_TYPE_LINK) {
+    if ((fragment as { t?: unknown }).t !== CONTENT_TYPE_REFERENCE) {
       return false
+    }
+
+    const fragmentRefId = normalizeRawDbId((fragment as { v?: unknown }).v)
+    if (
+      fragmentRefId != null &&
+      block.refs.some((ref) => {
+        return (
+          ref.id === fragmentRefId &&
+          ref.type === INLINE_REF_TYPE &&
+          normalizeTaskDbId(ref.to) === taskId
+        )
+      })
+    ) {
+      return true
     }
 
     const fragmentTargetTaskId = normalizeTaskDbId(
