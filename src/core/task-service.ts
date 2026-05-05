@@ -37,8 +37,36 @@ type PendingTaskTagInsertState = {
   hadTaskTag: boolean
 }
 
+type ReactRootLike = {
+  render: (node: unknown) => void
+  unmount: () => void
+}
+
+interface TaskStatusMenuState {
+  root: ReactRootLike | null
+  containerEl: HTMLDivElement | null
+  visible: boolean
+  rect: DOMRect | null
+  blockId: DbId | null
+  block: Block | null
+  taskTagRef: BlockRef | null
+  schema: TaskSchemaDefinition | null
+  pluginName: string
+}
+
 const pendingTaskTagInsertStates = new Map<string, PendingTaskTagInsertState[]>()
 let suppressedTaskTagInsertHookDepth = 0
+const taskStatusMenuState: TaskStatusMenuState = {
+  root: null,
+  containerEl: null,
+  visible: false,
+  rect: null,
+  blockId: null,
+  block: null,
+  taskTagRef: null,
+  schema: null,
+  pluginName: "",
+}
 
 export interface TaskQuickActionsHandle {
   commandId: string
@@ -61,7 +89,7 @@ export async function setupTaskQuickActions(
     }
   }
 
-  // 命令用于 Alt+Enter 和左侧状态图标点击，共享同一条状态流转逻辑。
+  // 命令用于 Alt+Enter 和命令面板，左侧状态图标单独打开状态选择菜单。
   registerCycleTaskStatusCommand(commandId, schema, pluginName)
 
   pendingTaskTagInsertStates.clear()
@@ -77,7 +105,7 @@ export async function setupTaskQuickActions(
 
   // 注入状态图标样式，并绑定左侧图标点击交互。
   injectTaskStatusStyles(pluginName, schema)
-  const clickListener = createStatusIconClickListener(commandId, schema)
+  const clickListener = createStatusIconClickListener(schema, pluginName)
   document.body.addEventListener("click", clickListener)
   let disposed = false
 
@@ -86,6 +114,7 @@ export async function setupTaskQuickActions(
     dispose: async () => {
       disposed = true
       document.body.removeEventListener("click", clickListener)
+      disposeTaskStatusMenu()
       removeTaskStatusStyles(pluginName)
       pendingTaskTagInsertStates.clear()
       orca.commands.unregisterBeforeCommand("core.editor.insertTag", beforeInsertTagHook)
@@ -187,9 +216,29 @@ async function cycleTaskTagStatus(
   schema: TaskSchemaDefinition,
   pluginName: string,
 ) {
+  const currentValues = getTaskPropertiesFromRef(taskTagRef.data, schema, block)
+  await setTaskTagStatus(
+    blockId,
+    cursor,
+    block,
+    taskTagRef,
+    schema,
+    pluginName,
+    getNextTaskStatusInMainCycle(currentValues.status, schema),
+  )
+}
+
+export async function setTaskTagStatus(
+  blockId: DbId,
+  cursor: CursorData | null,
+  block: Block,
+  taskTagRef: BlockRef,
+  schema: TaskSchemaDefinition,
+  pluginName: string,
+  nextStatus: string,
+) {
   const propertyNames = schema.propertyNames
   const currentValues = getTaskPropertiesFromRef(taskTagRef.data, schema, block)
-  const nextStatus = getNextTaskStatusInMainCycle(currentValues.status, schema)
   const dependsModeValue = getDependencyModeValue(taskTagRef.data, schema)
   const nextValues = normalizeTaskValuesForStatus({
     ...currentValues,
@@ -741,8 +790,8 @@ function normalizeTaskPropertyKey(value: unknown): string {
 }
 
 function createStatusIconClickListener(
-  commandId: string,
   schema: TaskSchemaDefinition,
+  pluginName: string,
 ) {
   return (event: MouseEvent) => {
     const target = event.target
@@ -778,8 +827,184 @@ function createStatusIconClickListener(
       return
     }
 
-    void orca.commands.invokeEditorCommand(commandId, null, blockId)
+    event.preventDefault()
+    event.stopPropagation()
+
+    openTaskStatusMenu({
+      blockId,
+      block: liveBlock ?? rawBlock,
+      taskTagRef: taskRef,
+      schema,
+      pluginName,
+      rect: new DOMRect(event.clientX, event.clientY, 0, 0),
+    })
   }
+}
+
+function openTaskStatusMenu(options: {
+  blockId: DbId
+  block: Block | null
+  taskTagRef: BlockRef
+  schema: TaskSchemaDefinition
+  pluginName: string
+  rect: DOMRect
+}) {
+  if (options.block == null) {
+    return
+  }
+
+  ensureTaskStatusMenuRoot()
+  taskStatusMenuState.visible = true
+  taskStatusMenuState.rect = options.rect
+  taskStatusMenuState.blockId = options.blockId
+  taskStatusMenuState.block = options.block
+  taskStatusMenuState.taskTagRef = options.taskTagRef
+  taskStatusMenuState.schema = options.schema
+  taskStatusMenuState.pluginName = options.pluginName
+  renderTaskStatusMenu()
+}
+
+function closeTaskStatusMenu() {
+  if (taskStatusMenuState.root == null) {
+    return
+  }
+
+  taskStatusMenuState.visible = false
+  renderTaskStatusMenu()
+}
+
+function disposeTaskStatusMenu() {
+  taskStatusMenuState.root?.unmount()
+  taskStatusMenuState.containerEl?.remove()
+  taskStatusMenuState.root = null
+  taskStatusMenuState.containerEl = null
+  taskStatusMenuState.visible = false
+  taskStatusMenuState.rect = null
+  taskStatusMenuState.blockId = null
+  taskStatusMenuState.block = null
+  taskStatusMenuState.taskTagRef = null
+  taskStatusMenuState.schema = null
+  taskStatusMenuState.pluginName = ""
+}
+
+function ensureTaskStatusMenuRoot() {
+  if (taskStatusMenuState.root != null && taskStatusMenuState.containerEl?.isConnected === true) {
+    return
+  }
+
+  taskStatusMenuState.root?.unmount()
+  taskStatusMenuState.containerEl?.remove()
+
+  const containerEl = document.createElement("div")
+  containerEl.dataset.role = "mlo-task-status-menu-root"
+  document.body.appendChild(containerEl)
+  taskStatusMenuState.containerEl = containerEl
+  taskStatusMenuState.root = window.createRoot(containerEl) as ReactRootLike
+}
+
+function renderTaskStatusMenu() {
+  if (taskStatusMenuState.root == null) {
+    return
+  }
+
+  const React = window.React
+  taskStatusMenuState.root.render(
+    React.createElement(TaskStatusPopupMenu, {
+      visible: taskStatusMenuState.visible,
+      rect: taskStatusMenuState.rect,
+      blockId: taskStatusMenuState.blockId,
+      block: taskStatusMenuState.block,
+      taskTagRef: taskStatusMenuState.taskTagRef,
+      schema: taskStatusMenuState.schema,
+      pluginName: taskStatusMenuState.pluginName,
+      onClose: () => closeTaskStatusMenu(),
+      onClosed: () => {
+        taskStatusMenuState.rect = null
+        taskStatusMenuState.blockId = null
+        taskStatusMenuState.block = null
+        taskStatusMenuState.taskTagRef = null
+      },
+    }),
+  )
+}
+
+function TaskStatusPopupMenu(props: {
+  visible: boolean
+  rect: DOMRect | null
+  blockId: DbId | null
+  block: Block | null
+  taskTagRef: BlockRef | null
+  schema: TaskSchemaDefinition | null
+  pluginName: string
+  onClose: () => void
+  onClosed: () => void
+}) {
+  const React = window.React
+  const Popup = orca.components.Popup
+  const Menu = orca.components.Menu
+  const MenuText = orca.components.MenuText
+
+  if (
+    props.rect == null ||
+    props.blockId == null ||
+    props.block == null ||
+    props.taskTagRef == null ||
+    props.schema == null
+  ) {
+    return null
+  }
+
+  const currentValues = getTaskPropertiesFromRef(props.taskTagRef.data, props.schema, props.block)
+  return React.createElement(
+    Popup,
+    {
+      container: { current: document.body },
+      rect: props.rect,
+      visible: props.visible,
+      onClose: props.onClose,
+      onClosed: props.onClosed,
+      defaultPlacement: "bottom",
+      alignment: "left",
+      offset: 6,
+      allowBeyondContainer: true,
+      noPointerLogic: true,
+      escapeToClose: true,
+    },
+    React.createElement(
+      Menu,
+      {
+        keyboardNav: true,
+        className: "mlo-task-status-menu-content",
+      },
+      ...props.schema.statusChoices.map((status) =>
+        React.createElement(MenuText, {
+          key: status,
+          title: status,
+          preIcon: currentValues.status === status ? "ti ti-check" : "ti ti-circle",
+          disabled: currentValues.status === status,
+          onClick: (event: MouseEvent) => {
+            event.stopPropagation()
+            props.onClose()
+            if (currentValues.status === status) {
+              return
+            }
+            void setTaskTagStatus(
+              props.blockId as DbId,
+              null,
+              props.block as Block,
+              props.taskTagRef as BlockRef,
+              props.schema as TaskSchemaDefinition,
+              props.pluginName,
+              status,
+            ).catch((error) => {
+              console.error(error)
+              orca.notify("error", t("Failed to set task status"))
+            })
+          },
+        }),
+      ),
+    ),
+  )
 }
 
 function isClickOnStatusIconArea(event: MouseEvent, contentEl: HTMLElement): boolean {
@@ -859,6 +1084,13 @@ function injectTaskStatusStyles(pluginName: string, schema: TaskSchemaDefinition
     .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])>.orca-repr-main>.orca-repr-main-content .orca-inline,
     .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content .orca-inline {
       opacity: 0.75;
+    }
+
+    .mlo-task-status-menu-content {
+      min-width: 156px;
+      border-radius: 10px;
+      border: 1px solid var(--orca-color-border);
+      background: var(--orca-color-bg-1);
     }
   `
 

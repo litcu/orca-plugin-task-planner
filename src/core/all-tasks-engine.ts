@@ -397,7 +397,40 @@ export async function cycleTaskStatusInView(
   const taskRefFromState = resolveTaskRefFromState(blockId, schema)
   const effectiveTaskRef = taskRefFromState ?? taskTagRef
   const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema, taskBlock)
-  const nextStatus = getNextTaskStatusInMainCycle(values.status, schema)
+  await setTaskStatusInView(
+    blockId,
+    getNextTaskStatusInMainCycle(values.status, schema),
+    schema,
+    effectiveTaskRef,
+    sourceBlockId,
+    options,
+  )
+}
+
+export async function setTaskStatusInView(
+  blockId: DbId,
+  nextStatus: string,
+  schema: TaskSchemaDefinition,
+  taskTagRef?: BlockRef | null,
+  sourceBlockId?: DbId | null,
+  options?: {
+    timerAutoStartOnDoing?: boolean
+  },
+): Promise<void> {
+  const targetIds = collectCandidateIds(
+    sourceBlockId ?? null,
+    getMirrorId(blockId),
+    blockId,
+  )
+  const writableTargetIds = await resolveExistingCandidateIds(targetIds)
+  if (writableTargetIds.length === 0) {
+    throw new Error("No task block id available for status update")
+  }
+
+  const taskBlock = resolveTaskBlockFromCandidates(writableTargetIds)
+  const taskRefFromState = resolveTaskRefFromState(blockId, schema)
+  const effectiveTaskRef = taskRefFromState ?? taskTagRef
+  const values = getTaskPropertiesFromRef(effectiveTaskRef?.data, schema, taskBlock)
   const dependsMode =
     values.dependsMode === "ALL" || values.dependsMode === "ANY"
       ? values.dependsMode

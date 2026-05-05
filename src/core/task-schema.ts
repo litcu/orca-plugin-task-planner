@@ -250,15 +250,12 @@ export function getNextTaskStatusInMainCycle(
   currentStatus: string | null,
   schema: TaskSchemaDefinition,
 ): string {
-  const { todo, doing, done } = getTaskStatusValues(schema)
+  const { todo, doing } = getTaskStatusValues(schema)
 
   if (currentStatus === todo) {
     return doing
   }
   if (currentStatus === doing) {
-    return done
-  }
-  if (currentStatus === done) {
     return todo
   }
 

@@ -41,6 +41,7 @@ interface MyDayScheduleBoardProps {
   onAddSubtask: (blockId: DbId) => void | Promise<void>
   onDeleteTaskTag: (blockId: DbId) => void | Promise<void>
   onDeleteTaskBlock: (blockId: DbId) => void | Promise<void>
+  onSetTaskStatus: (blockId: DbId, status: string) => void | Promise<void>
   onRemoveTask: (blockId: DbId) => void | Promise<void>
   onApplySchedule: (blockId: DbId, startMinute: number, endMinute: number) => void | Promise<void>
   onClearSchedule: (blockId: DbId) => void | Promise<void>
@@ -930,6 +931,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                   onAddSubtask: props.onAddSubtask,
                   onDeleteTaskTag: props.onDeleteTaskTag,
                   onDeleteTaskBlock: props.onDeleteTaskBlock,
+                  onSetTaskStatus: props.onSetTaskStatus,
                   onRemoveTask: props.onRemoveTask,
                 })
               }),
@@ -1081,6 +1083,7 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
                 onAddSubtask: props.onAddSubtask,
                 onDeleteTaskTag: props.onDeleteTaskTag,
                 onDeleteTaskBlock: props.onDeleteTaskBlock,
+                onSetTaskStatus: props.onSetTaskStatus,
                 onRemoveTask: props.onRemoveTask,
                 onClearSchedule: props.onClearSchedule,
               })
@@ -1280,6 +1283,7 @@ interface MyDayScheduleCardProps {
   onAddSubtask: (blockId: DbId) => void | Promise<void>
   onDeleteTaskTag: (blockId: DbId) => void | Promise<void>
   onDeleteTaskBlock: (blockId: DbId) => void | Promise<void>
+  onSetTaskStatus: (blockId: DbId, status: string) => void | Promise<void>
   onRemoveTask: (blockId: DbId) => void | Promise<void>
 }
 
@@ -1392,6 +1396,8 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
     ),
     React.createElement(MyDayTaskContextMenu, {
       blockId: props.item.blockId,
+      status: props.item.status,
+      doneStatus: props.doneStatus,
       starred: props.item.star,
       disabled: props.disabled,
       visible: contextMenuVisible,
@@ -1407,6 +1413,7 @@ function MyDayScheduleCard(props: MyDayScheduleCardProps) {
       onRemoveTask: props.onRemoveTask,
       onDeleteTaskTag: props.onDeleteTaskTag,
       onDeleteTaskBlock: props.onDeleteTaskBlock,
+      onSetTaskStatus: props.onSetTaskStatus,
       onClearSchedule: undefined,
     }),
   )
@@ -1435,6 +1442,7 @@ interface MyDayTimelineCardProps {
   onAddSubtask: (blockId: DbId) => void | Promise<void>
   onDeleteTaskTag: (blockId: DbId) => void | Promise<void>
   onDeleteTaskBlock: (blockId: DbId) => void | Promise<void>
+  onSetTaskStatus: (blockId: DbId, status: string) => void | Promise<void>
   onRemoveTask: (blockId: DbId) => void | Promise<void>
   onClearSchedule: (blockId: DbId) => void | Promise<void>
 }
@@ -1580,6 +1588,8 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
     ),
     React.createElement(MyDayTaskContextMenu, {
       blockId: props.item.blockId,
+      status: props.item.status,
+      doneStatus: props.doneStatus,
       starred: props.item.star,
       disabled: props.disabled,
       visible: contextMenuVisible,
@@ -1595,6 +1605,7 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
       onRemoveTask: props.onRemoveTask,
       onDeleteTaskTag: props.onDeleteTaskTag,
       onDeleteTaskBlock: props.onDeleteTaskBlock,
+      onSetTaskStatus: props.onSetTaskStatus,
       onClearSchedule: props.onClearSchedule,
     }),
   )
@@ -1602,6 +1613,8 @@ function MyDayTimelineCard(props: MyDayTimelineCardProps) {
 
 interface MyDayTaskContextMenuProps {
   blockId: DbId
+  status: string
+  doneStatus: string
   starred: boolean
   disabled: boolean
   visible: boolean
@@ -1617,6 +1630,7 @@ interface MyDayTaskContextMenuProps {
   onRemoveTask: (blockId: DbId) => void | Promise<void>
   onDeleteTaskTag: (blockId: DbId) => void | Promise<void>
   onDeleteTaskBlock: (blockId: DbId) => void | Promise<void>
+  onSetTaskStatus: (blockId: DbId, status: string) => void | Promise<void>
   onClearSchedule?: (blockId: DbId) => void | Promise<void>
 }
 
@@ -1627,6 +1641,7 @@ function MyDayTaskContextMenu(props: MyDayTaskContextMenuProps) {
   const Menu = orca.components.Menu
   const MenuSeparator = orca.components.MenuSeparator
   const MenuText = orca.components.MenuText
+  const isCompleted = props.status === props.doneStatus
 
   if (props.rect == null) {
     return null
@@ -1720,6 +1735,19 @@ function MyDayTaskContextMenu(props: MyDayTaskContextMenuProps) {
             },
           })
         : null,
+      React.createElement(MenuText, {
+        title: t("Set as completed"),
+        preIcon: "ti ti-circle-check",
+        disabled: props.disabled || isCompleted,
+        onClick: (event: MouseEvent) => {
+          event.stopPropagation()
+          props.onClose()
+          if (props.disabled || isCompleted) {
+            return
+          }
+          void props.onSetTaskStatus(props.blockId, props.doneStatus)
+        },
+      }),
       React.createElement(MenuText, {
         title: t("Remove from My Day"),
         preIcon: "ti ti-calendar-minus",

@@ -1,7 +1,10 @@
 import type { Block, DbId, TagMenuCommand } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import type { TaskSchemaDefinition } from "./task-schema"
+import { getTaskStatusValues, isTaskDoneStatus } from "./task-schema"
 import { getMirrorId, isValidDbId } from "./block-utils"
+import { getTaskPropertiesFromRef } from "./task-properties"
+import { setTaskTagStatus } from "./task-service"
 import {
   closeTaskPropertyPopup,
   disposeTaskPropertyPopup,
@@ -112,14 +115,48 @@ export function setupTaskPopupEntry(
         return window.React.createElement(window.React.Fragment)
       }
 
-      return window.React.createElement(MenuText, {
-        preIcon: "ti ti-edit",
-        title: t("Open task property popup"),
-        onClick: () => {
-          close()
-          void orca.commands.invokeCommand(openCommandId, tagRef.from)
-        },
-      })
+      const sourceBlock = orca.state.blocks[getMirrorId(tagRef.from)] ?? orca.state.blocks[tagRef.from] ?? null
+      const currentValues =
+        sourceBlock != null
+          ? getTaskPropertiesFromRef(tagRef.data, schema, sourceBlock)
+          : null
+      const doneStatus = getTaskStatusValues(schema).done
+
+      return window.React.createElement(
+        window.React.Fragment,
+        null,
+        window.React.createElement(MenuText, {
+          preIcon: "ti ti-edit",
+          title: t("Open task property popup"),
+          onClick: () => {
+            close()
+            void orca.commands.invokeCommand(openCommandId, tagRef.from)
+          },
+        }),
+        window.React.createElement(MenuText, {
+          preIcon: "ti ti-circle-check",
+          title: t("Set as completed"),
+          disabled: sourceBlock == null || (currentValues != null && isTaskDoneStatus(currentValues.status, schema)),
+          onClick: () => {
+            close()
+            if (sourceBlock == null) {
+              return
+            }
+            void setTaskTagStatus(
+              getMirrorId(tagRef.from),
+              null,
+              sourceBlock,
+              tagRef,
+              schema,
+              pluginName,
+              doneStatus,
+            ).catch((error) => {
+              console.error(error)
+              orca.notify("error", t("Failed to set task status"))
+            })
+          },
+        }),
+      )
     },
   }
 

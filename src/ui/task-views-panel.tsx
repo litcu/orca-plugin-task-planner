@@ -44,6 +44,7 @@ import {
   markTaskReviewedInView,
   moveTaskInView,
   removeTaskTagInView,
+  setTaskStatusInView,
   toggleTaskStarInView,
   type AllTaskItem,
 } from "../core/all-tasks-engine"
@@ -1009,6 +1010,48 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       } catch (error) {
         console.error(error)
         setErrorText(t("Failed to toggle task status"))
+      } finally {
+        setUpdatingIds((prev: Set<DbId>) => {
+          const next = new Set(prev)
+          next.delete(item.blockId)
+          return next
+        })
+      }
+    },
+    [
+      loadByTab,
+      panelSettings.taskTimerAutoStartOnDoing,
+      panelSettings.taskTimerEnabled,
+      props.schema,
+      tab,
+    ],
+  )
+
+  const setTaskStatus = React.useCallback(
+    async (item: TaskListRowItem, status: string) => {
+      setUpdatingIds((prev: Set<DbId>) => {
+        const next = new Set(prev)
+        next.add(item.blockId)
+        return next
+      })
+
+      try {
+        await setTaskStatusInView(
+          item.blockId,
+          status,
+          props.schema,
+          item.taskTagRef ?? null,
+          item.sourceBlockId,
+          {
+            timerAutoStartOnDoing:
+              panelSettings.taskTimerEnabled && panelSettings.taskTimerAutoStartOnDoing,
+          },
+        )
+        setErrorText("")
+        await loadByTab(tab, { silent: true })
+      } catch (error) {
+        console.error(error)
+        setErrorText(t("Failed to set task status"))
       } finally {
         setUpdatingIds((prev: Set<DbId>) => {
           const next = new Set(prev)
@@ -3334,6 +3377,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
           : undefined,
         onToggleReviewSelected: undefined,
         onToggleStatus: () => toggleTaskStatus(row.node.item),
+        onSetStatus: (status: string) => setTaskStatus(row.node.item, status),
         onNavigate: () => navigateToTask(row.node.item),
         onToggleStar: () => toggleTaskStar(row.node.item),
         onClearTimer: () => clearTaskTimerForItem(row.node.item),
@@ -4448,6 +4492,13 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                   }
                   await deleteTaskBlock(matched)
                 },
+                onSetTaskStatus: async (blockId: DbId, status: string) => {
+                  const matched = taskItemById.get(blockId)
+                  if (matched == null) {
+                    return
+                  }
+                  await setTaskStatus(matched, status)
+                },
                 onRemoveTask: async (blockId: DbId) => {
                   const matched = taskItemById.get(blockId)
                   if (matched == null) {
@@ -4516,6 +4567,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                         ? () => toggleReviewSelection(item.blockId)
                         : undefined,
                       onToggleStatus: () => toggleTaskStatus(item),
+                      onSetStatus: (status: string) => setTaskStatus(item, status),
                       onNavigate: () => navigateToTask(item),
                       onToggleStar: () => toggleTaskStar(item),
                       onClearTimer: () => clearTaskTimerForItem(item),

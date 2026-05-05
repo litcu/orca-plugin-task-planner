@@ -68,6 +68,7 @@ interface TaskListRowProps {
   onToggleCollapse?: () => void
   onToggleReviewSelected?: () => void
   onToggleStatus: () => void | Promise<void>
+  onSetStatus?: (status: string) => void | Promise<void>
   onNavigate: () => void
   onToggleStar: () => void | Promise<void>
   onClearTimer?: () => void | Promise<void>
@@ -96,6 +97,8 @@ export function TaskListRow(props: TaskListRowProps) {
   const pointerInteractingRef = React.useRef(false)
   const [contextMenuVisible, setContextMenuVisible] = React.useState(false)
   const [contextMenuRect, setContextMenuRect] = React.useState<DOMRect | null>(null)
+  const [statusMenuVisible, setStatusMenuVisible] = React.useState(false)
+  const [statusMenuRect, setStatusMenuRect] = React.useState<DOMRect | null>(null)
   const contextMenuContainerRef = React.useRef<HTMLElement | null>(null)
   if (contextMenuContainerRef.current == null) {
     contextMenuContainerRef.current = document.body
@@ -173,6 +176,7 @@ export function TaskListRow(props: TaskListRowProps) {
   const canShowClearTimerAction =
     props.timerEnabled && hasTimerRecord && props.onClearTimer != null
   const myDayMutationDisabled = mutationDisabled || props.myDayUpdating === true
+  const doneStatus = getTaskStatusValues(props.schema).done
 
   React.useEffect(() => {
     ensureTaskRowStyles()
@@ -358,10 +362,13 @@ export function TaskListRow(props: TaskListRowProps) {
           if (props.loading || props.updating) {
             return
           }
-          void props.onToggleStatus()
+          const currentTarget = (event.currentTarget as HTMLElement | null)
+          const rect = currentTarget?.getBoundingClientRect()
+          setStatusMenuRect(rect ?? new DOMRect(event.clientX, event.clientY, 0, 0))
+          setStatusMenuVisible(true)
         },
         "aria-disabled": props.loading || props.updating,
-        title: t("Toggle task status"),
+        title: t("Set task status"),
         style: {
           width: "18px",
           height: "18px",
@@ -896,6 +903,51 @@ export function TaskListRow(props: TaskListRowProps) {
       },
       rowContent,
     ),
+    statusMenuRect == null
+      ? null
+      : React.createElement(
+          Popup,
+          {
+            container: contextMenuContainerRef,
+            rect: statusMenuRect,
+            visible: statusMenuVisible,
+            onClose: () => setStatusMenuVisible(false),
+            onClosed: () => setStatusMenuRect(null),
+            defaultPlacement: "bottom",
+            alignment: "left",
+            offset: 6,
+            allowBeyondContainer: true,
+            noPointerLogic: true,
+            escapeToClose: true,
+          },
+          React.createElement(
+            Menu,
+            {
+              keyboardNav: true,
+              className: "mlo-task-row-status-menu-content",
+            },
+            ...props.schema.statusChoices.map((status) =>
+              React.createElement(MenuText, {
+                key: status,
+                title: status,
+                preIcon: props.item.status === status ? "ti ti-check" : "ti ti-circle",
+                disabled: mutationDisabled || props.item.status === status,
+                onClick: (event: MouseEvent) => {
+                  event.stopPropagation()
+                  setStatusMenuVisible(false)
+                  if (mutationDisabled || props.item.status === status) {
+                    return
+                  }
+                  if (props.onSetStatus != null) {
+                    void props.onSetStatus(status)
+                    return
+                  }
+                  void props.onToggleStatus()
+                },
+              }),
+            ),
+          ),
+        ),
     contextMenuRect == null
       ? null
       : React.createElement(
@@ -986,6 +1038,19 @@ export function TaskListRow(props: TaskListRowProps) {
                   },
                 })
               : null,
+            React.createElement(MenuText, {
+              title: t("Set as completed"),
+              preIcon: "ti ti-circle-check",
+              disabled: mutationDisabled || props.item.status === doneStatus,
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation()
+                setContextMenuVisible(false)
+                if (mutationDisabled || props.item.status === doneStatus) {
+                  return
+                }
+                void props.onSetStatus?.(doneStatus)
+              },
+            }),
             canShowMyDayAction
               ? React.createElement(MenuText, {
                   title: props.myDaySelected
@@ -1094,6 +1159,13 @@ function ensureTaskRowStyles() {
 
 .mlo-task-row-context-menu-content {
   min-width: 186px;
+  border-radius: 10px;
+  border: 1px solid var(--orca-color-border);
+  background: var(--orca-color-bg-1);
+}
+
+.mlo-task-row-status-menu-content {
+  min-width: 156px;
   border-radius: 10px;
   border: 1px solid var(--orca-color-border);
   background: var(--orca-color-bg-1);
