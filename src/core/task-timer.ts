@@ -63,6 +63,13 @@ interface ResolvedTaskBlock {
   taskId: DbId
 }
 
+interface RunningTaskTimerIndexEntry {
+  taskId: DbId
+  sourceBlockId: DbId | null
+}
+
+let runningTaskTimerIndex: RunningTaskTimerIndexEntry | null = null
+
 export function createDefaultTaskTimerData(): TaskTimerData {
   return {
     schema: TASK_TIMER_SCHEMA_VERSION,
@@ -281,6 +288,7 @@ export async function startTaskTimer(options: {
 
   const currentTimer = readTaskTimerFromSourceAndLiveBlocks(target.sourceBlock, target.liveBlock)
   if (currentTimer.running) {
+    updateRunningTaskTimerIndex(target, currentTimer)
     return currentTimer
   }
 
@@ -310,6 +318,7 @@ export async function startTaskTimer(options: {
     pausedRemainingMs: null,
   }
   await saveTaskTimer(options.schema, target, nextTimer)
+  updateRunningTaskTimerIndex(target, nextTimer)
   dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
@@ -329,6 +338,7 @@ export async function stopTaskTimer(options: {
   }
 
   await saveTaskTimer(options.schema, target, nextTimer)
+  updateRunningTaskTimerIndex(target, nextTimer)
   dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
@@ -358,6 +368,7 @@ export async function pauseTaskTimer(options: {
     completed: false,
   })
   await saveTaskTimer(options.schema, target, nextTimer)
+  updateRunningTaskTimerIndex(target, nextTimer)
   dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
@@ -387,6 +398,7 @@ export async function switchTaskTimerPhase(options: {
     pausedRemainingMs: null,
   }
   await saveTaskTimer(options.schema, target, nextTimer)
+  updateRunningTaskTimerIndex(target, nextTimer)
   dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
@@ -412,6 +424,7 @@ export async function completeTaskTimerPomodoroPhase(options: {
   const continueTo = options.continueTo ?? "idle"
   if (continueTo === "idle") {
     await saveTaskTimer(options.schema, target, completedTimer)
+    updateRunningTaskTimerIndex(target, completedTimer)
     dispatchTaskTimerChange(target, completedTimer)
     return completedTimer
   }
@@ -427,6 +440,7 @@ export async function completeTaskTimerPomodoroPhase(options: {
     pausedRemainingMs: null,
   }
   await saveTaskTimer(options.schema, target, nextTimer)
+  updateRunningTaskTimerIndex(target, nextTimer)
   dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
@@ -444,6 +458,7 @@ export async function clearTaskTimer(options: {
 
   const nextTimer = createDefaultTaskTimerData()
   await saveTaskTimer(options.schema, target, nextTimer)
+  updateRunningTaskTimerIndex(target, nextTimer)
   dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
@@ -478,6 +493,7 @@ export async function checkpointRunningTaskTimer(options: {
       ),
   }
   await saveTaskTimer(options.schema, target, nextTimer)
+  updateRunningTaskTimerIndex(target, nextTimer)
   dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
@@ -487,11 +503,19 @@ export async function stopAllRunningTaskTimers(
   exceptTaskId?: DbId | null,
   nowMs: number = Date.now(),
 ): Promise<number> {
+  const normalizedExceptId = isValidDbId(exceptTaskId) ? getMirrorId(exceptTaskId) : null
+  const indexedTaskId = runningTaskTimerIndex?.taskId ?? null
+  if (indexedTaskId != null && indexedTaskId !== normalizedExceptId) {
+    const stopped = await stopIndexedRunningTaskTimer(schema, nowMs)
+    if (stopped != null) {
+      return stopped ? 1 : 0
+    }
+  }
+
   const taskBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
     schema.tagAlias,
   ])) as Block[]
 
-  const normalizedExceptId = isValidDbId(exceptTaskId) ? getMirrorId(exceptTaskId) : null
   let stoppedCount = 0
 
   for (const sourceBlock of taskBlocks) {
@@ -530,7 +554,9 @@ export async function stopAllRunningTaskTimers(
       taskId,
     }
 
-    await saveTaskTimer(schema, target, finalizeRunningTaskTimer(timer, nowMs))
+    const nextTimer = finalizeRunningTaskTimer(timer, nowMs)
+    await saveTaskTimer(schema, target, nextTimer)
+    updateRunningTaskTimerIndex(target, nextTimer)
     stoppedCount += 1
   }
 
@@ -541,6 +567,14 @@ export async function checkpointAllRunningTaskTimers(
   schema: TaskSchemaDefinition,
   nowMs: number = Date.now(),
 ): Promise<number> {
+  const indexedTaskId = runningTaskTimerIndex?.taskId ?? null
+  if (indexedTaskId != null) {
+    const checkpointed = await checkpointIndexedRunningTaskTimer(schema, nowMs)
+    if (checkpointed != null) {
+      return checkpointed ? 1 : 0
+    }
+  }
+
   const taskBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
     schema.tagAlias,
   ])) as Block[]
@@ -598,6 +632,7 @@ export async function checkpointAllRunningTaskTimers(
         : Math.max(0, timer.phaseDurationMs - resolveTaskTimerPhaseElapsedMs(timer, nowMs)),
     }
     await saveTaskTimer(schema, target, nextTimer)
+    updateRunningTaskTimerIndex(target, nextTimer)
     checkpointedCount += 1
   }
 
@@ -642,6 +677,74 @@ export async function applyTaskTimerForStatusChange(options: {
       schema: options.schema,
     })
   }
+}
+
+async function stopIndexedRunningTaskTimer(
+  schema: TaskSchemaDefinition,
+  nowMs: number,
+): Promise<boolean | null> {
+  const indexed = runningTaskTimerIndex
+  if (indexed == null) {
+    return null
+  }
+
+  const target = await resolveTaskBlockOrNull(indexed.taskId, indexed.sourceBlockId, schema)
+  if (target == null) {
+    runningTaskTimerIndex = null
+    return null
+  }
+
+  const currentTimer = readTaskTimerFromSourceAndLiveBlocks(target.sourceBlock, target.liveBlock)
+  if (!currentTimer.running) {
+    updateRunningTaskTimerIndex(target, currentTimer)
+    return null
+  }
+
+  const nextTimer = finalizeRunningTaskTimer(currentTimer, nowMs)
+  await saveTaskTimer(schema, target, nextTimer)
+  updateRunningTaskTimerIndex(target, nextTimer)
+  dispatchTaskTimerChange(target, nextTimer)
+  return true
+}
+
+async function checkpointIndexedRunningTaskTimer(
+  schema: TaskSchemaDefinition,
+  nowMs: number,
+): Promise<boolean | null> {
+  const indexed = runningTaskTimerIndex
+  if (indexed == null) {
+    return null
+  }
+
+  const target = await resolveTaskBlockOrNull(indexed.taskId, indexed.sourceBlockId, schema)
+  if (target == null) {
+    runningTaskTimerIndex = null
+    return null
+  }
+
+  const currentTimer = readTaskTimerFromSourceAndLiveBlocks(target.sourceBlock, target.liveBlock)
+  if (!currentTimer.running || currentTimer.startedAt == null) {
+    updateRunningTaskTimerIndex(target, currentTimer)
+    return null
+  }
+
+  const nextTimer: TaskTimerData = {
+    ...currentTimer,
+    elapsedMs: resolveTaskTimerElapsedMs(currentTimer, nowMs),
+    totalFocusMs: doesPhaseCountAsFocus(currentTimer.activePhase)
+      ? resolveTaskTimerElapsedMs(currentTimer, nowMs)
+      : currentTimer.totalFocusMs,
+    running: true,
+    startedAt: nowMs,
+    sessionId: currentTimer.sessionId,
+    phaseDurationMs: currentTimer.phaseDurationMs == null
+      ? null
+      : Math.max(0, currentTimer.phaseDurationMs - resolveTaskTimerPhaseElapsedMs(currentTimer, nowMs)),
+  }
+  await saveTaskTimer(schema, target, nextTimer)
+  updateRunningTaskTimerIndex(target, nextTimer)
+  dispatchTaskTimerChange(target, nextTimer)
+  return true
 }
 
 export function resolveTaskStatusFromBlock(
@@ -983,6 +1086,23 @@ function dispatchTaskTimerChange(target: ResolvedTaskBlock, timer: TaskTimerData
   )
 }
 
+function updateRunningTaskTimerIndex(
+  target: ResolvedTaskBlock,
+  timer: TaskTimerData,
+) {
+  if (timer.running) {
+    runningTaskTimerIndex = {
+      taskId: target.taskId,
+      sourceBlockId: target.writableBlockId,
+    }
+    return
+  }
+
+  if (runningTaskTimerIndex?.taskId === target.taskId) {
+    runningTaskTimerIndex = null
+  }
+}
+
 async function resolveTaskBlock(
   blockId: DbId,
   sourceBlockId: DbId | null | undefined,
@@ -1029,6 +1149,18 @@ async function resolveTaskBlock(
   }
 
   throw new Error(t("Current block is not a task"))
+}
+
+async function resolveTaskBlockOrNull(
+  blockId: DbId,
+  sourceBlockId: DbId | null | undefined,
+  schema: TaskSchemaDefinition,
+): Promise<ResolvedTaskBlock | null> {
+  try {
+    return await resolveTaskBlock(blockId, sourceBlockId, schema)
+  } catch {
+    return null
+  }
 }
 
 async function resolveWritableBlockId(

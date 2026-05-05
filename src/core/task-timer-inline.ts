@@ -26,6 +26,7 @@ const TAG_BUTTON_TEXT_ROLE = "mlo-task-timer-tag-text"
 const DETAIL_ROLE = "mlo-task-timer-detail"
 const INLINE_STYLE_ROLE = "mlo-task-timer-inline-style"
 const DETAIL_BASE_INDENT_PX = 24
+const VISIBLE_TASK_SIGNATURE_SCHEMA_VERSION = 1
 
 interface VisibleTimerDetail {
   taskId: DbId
@@ -54,6 +55,7 @@ export function setupTaskTimerInlineWidgets(
   let previousSettings = getPluginSettings(pluginName)
   let checkpointing = false
   let visibleTimerDetails: VisibleTimerDetail[] = []
+  let visibleTaskSignatures = new Map<DbId, string>()
 
   const scheduleRefresh = (delayMs: number = REFRESH_DEBOUNCE_MS) => {
     if (disposed) {
@@ -214,11 +216,13 @@ export function setupTaskTimerInlineWidgets(
     const settings = getPluginSettings(pluginName)
     if (!settings.taskTimerEnabled) {
       visibleTimerDetails = []
+      visibleTaskSignatures = new Map()
       removeInlineWidgets()
       return
     }
 
     const nextVisibleTimerDetails: VisibleTimerDetail[] = []
+    const nextVisibleTaskSignatures = new Map<DbId, string>()
     const blockNodes = Array.from(document.querySelectorAll(".orca-block[data-id]"))
     for (const blockNode of blockNodes) {
       if (!(blockNode instanceof HTMLElement)) {
@@ -238,6 +242,7 @@ export function setupTaskTimerInlineWidgets(
       }
 
       const taskId = getMirrorId(rawBlockId)
+      nextVisibleTaskSignatures.set(rawBlockId, buildVisibleTaskSignature(rawBlockId, schema))
       renderBlockTimerUi(
         blockNode,
         rawBlockId,
@@ -249,6 +254,7 @@ export function setupTaskTimerInlineWidgets(
       )
     }
     visibleTimerDetails = nextVisibleTimerDetails
+    visibleTaskSignatures = nextVisibleTaskSignatures
   }
 
   document.body.addEventListener("click", clickListener, true)
@@ -256,7 +262,21 @@ export function setupTaskTimerInlineWidgets(
   window.addEventListener("beforeunload", beforeUnloadListener)
 
   blocksUnsubscribe = subscribe(orca.state.blocks, () => {
-    scheduleRefresh()
+    if (visibleTaskSignatures.size === 0) {
+      return
+    }
+
+    let changed = false
+    for (const [rawBlockId, signature] of visibleTaskSignatures.entries()) {
+      if (buildVisibleTaskSignature(rawBlockId, schema) !== signature) {
+        changed = true
+        break
+      }
+    }
+
+    if (changed) {
+      scheduleRefresh()
+    }
   })
 
   const pluginState = orca.state.plugins[pluginName]
@@ -299,6 +319,7 @@ export function setupTaskTimerInlineWidgets(
       blocksUnsubscribe = null
 
       visibleTimerDetails = []
+      visibleTaskSignatures = new Map()
       void checkpointNow()
       removeInlineWidgets()
       removeInlineTimerStyles(pluginName)
@@ -467,6 +488,35 @@ function removeBlockTimerUi(blockEl: HTMLElement) {
 function resolveVisibleTaskBlock(rawBlockId: DbId): Block | null {
   const taskId = getMirrorId(rawBlockId)
   return orca.state.blocks[taskId] ?? orca.state.blocks[rawBlockId] ?? null
+}
+
+function buildVisibleTaskSignature(rawBlockId: DbId, schema: TaskSchemaDefinition): string {
+  const block = resolveVisibleTaskBlock(rawBlockId)
+  if (block == null) {
+    return `${VISIBLE_TASK_SIGNATURE_SCHEMA_VERSION}:missing`
+  }
+
+  const liveBlock = orca.state.blocks[getMirrorId(block.id)] ?? block
+  const taskRef = liveBlock.refs.find((ref) => {
+    return ref.type === TAG_REF_TYPE && ref.alias === schema.tagAlias
+  }) ?? null
+  const timer = readTaskTimerFromBlock(liveBlock)
+  const status = resolveTaskStatusFromBlock(liveBlock, schema)
+  return JSON.stringify({
+    v: VISIBLE_TASK_SIGNATURE_SCHEMA_VERSION,
+    id: liveBlock.id,
+    text: liveBlock.text,
+    parent: liveBlock.parent ?? null,
+    children: Array.isArray(liveBlock.children) ? liveBlock.children : [],
+    status,
+    timer,
+    refData: taskRef?.data ?? null,
+  }, (_key, value) => {
+    if (value instanceof Date) {
+      return value.getTime()
+    }
+    return value
+  })
 }
 
 function hasTaskTagRef(block: Block, tagAlias: string): boolean {

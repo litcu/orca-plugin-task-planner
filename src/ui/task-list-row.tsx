@@ -70,7 +70,6 @@ interface TaskListRowProps {
   onToggleStatus: () => void | Promise<void>
   onNavigate: () => void
   onToggleStar: () => void | Promise<void>
-  onToggleTimer: () => void | Promise<void>
   onClearTimer?: () => void | Promise<void>
   onMarkReviewed: () => void | Promise<void>
   onAddSubtask: () => void | Promise<void>
@@ -143,17 +142,6 @@ export function TaskListRow(props: TaskListRowProps) {
   const hasTimerRecord = hasTaskTimerRecord(timerData)
   const timerDurationText = formatTaskTimerDuration(timerElapsedMs)
   const timerProgress = resolveTaskPomodoroProgress(timerElapsedMs)
-  const timerButtonDisabled =
-    props.loading ||
-    props.updating ||
-    props.timerUpdating ||
-    (!timerData.running && isClosed)
-  const timerButtonTitle =
-    !timerData.running && isClosed
-      ? t("Closed task cannot start timer")
-      : timerData.running
-        ? t("Stop timer")
-        : t("Start timer")
   const timerDisplayText =
     hasTimerRecord && props.timerMode === "pomodoro"
       ? t("Pomodoro ${cycle} ${elapsed}/${duration}", {
@@ -164,7 +152,7 @@ export function TaskListRow(props: TaskListRowProps) {
       : hasTimerRecord
         ? t("Elapsed ${time}", { time: timerDurationText })
         : t("Start timer")
-  const timerButtonTone =
+  const timerDisplayTone =
     timerData.running
       ? "running"
       : props.timerMode === "pomodoro"
@@ -756,53 +744,35 @@ export function TaskListRow(props: TaskListRowProps) {
           }),
         )
       : null,
-    props.timerEnabled
+    props.timerEnabled && hasTimerRecord
       ? React.createElement(
-          "button",
+          "span",
           {
-            type: "button",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation()
-              if (timerButtonDisabled) {
-                return
-              }
-              void props.onToggleTimer()
-            },
-            disabled: timerButtonDisabled,
-            title: timerButtonTitle,
+            title: timerDisplayText,
             style: {
               maxWidth: "180px",
               height: "22px",
               padding: "0 8px",
-              border: timerButtonTone === "running"
+              border: timerDisplayTone === "running"
                 ? "1px solid rgba(197, 48, 48, 0.35)"
-                : timerButtonTone === "pomodoro"
+                : timerDisplayTone === "pomodoro"
                   ? "1px solid rgba(183, 121, 31, 0.34)"
-                  : timerButtonTone === "direct"
-                    ? "1px solid rgba(37, 99, 235, 0.34)"
-                    : "1px solid rgba(148, 163, 184, 0.34)",
+                  : "1px solid rgba(37, 99, 235, 0.34)",
               borderRadius: "999px",
-              background: timerButtonTone === "running"
+              background: timerDisplayTone === "running"
                 ? "rgba(197, 48, 48, 0.1)"
-                : timerButtonTone === "pomodoro"
+                : timerDisplayTone === "pomodoro"
                   ? hovered || focused
                     ? "rgba(183, 121, 31, 0.17)"
                     : "rgba(183, 121, 31, 0.1)"
-                  : timerButtonTone === "direct"
-                    ? hovered || focused
-                      ? "rgba(37, 99, 235, 0.14)"
-                      : "rgba(37, 99, 235, 0.08)"
-                    : hovered || focused
-                      ? "rgba(148, 163, 184, 0.2)"
-                      : "rgba(148, 163, 184, 0.12)",
-              color: timerButtonTone === "running"
+                  : hovered || focused
+                    ? "rgba(37, 99, 235, 0.14)"
+                    : "rgba(37, 99, 235, 0.08)",
+              color: timerDisplayTone === "running"
                 ? "var(--orca-color-text-red, #c53030)"
-                : timerButtonTone === "pomodoro"
+                : timerDisplayTone === "pomodoro"
                   ? "var(--orca-color-text-yellow, #b7791f)"
-                  : timerButtonTone === "idle"
-                    ? "var(--orca-color-text-2)"
-                    : "var(--orca-color-text-blue, #2563eb)",
-              cursor: timerButtonDisabled ? "not-allowed" : "pointer",
+                  : "var(--orca-color-text-blue, #2563eb)",
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
@@ -812,11 +782,10 @@ export function TaskListRow(props: TaskListRowProps) {
               fontWeight: timerData.running ? 600 : 500,
               letterSpacing: "0.02em",
               fontVariantNumeric: "tabular-nums",
-              opacity: timerButtonDisabled ? 0.56 : 1,
             },
           },
           React.createElement("i", {
-            className: timerData.running ? "ti ti-player-stop-filled" : "ti ti-player-play-filled",
+            className: timerData.running ? "ti ti-clock-hour-4" : "ti ti-clock",
             style: { fontSize: "12px", lineHeight: 1, flexShrink: 0 },
           }),
           React.createElement(

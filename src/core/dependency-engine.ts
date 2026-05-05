@@ -127,6 +127,45 @@ export async function collectNextActionEvaluations(
   }
 
   const taskBlocks = await queryTaskBlocks(schema.tagAlias)
+  return buildNextActionEvaluationsFromTaskBlocks(taskBlocks, schema, now, options, cacheKey, nowMs)
+}
+
+export async function collectNextActionEvaluationsFromTaskBlocks(
+  sourceTaskBlocks: Block[],
+  schema: TaskSchemaDefinition,
+  now: Date = new Date(),
+  options: CollectNextActionEvaluationsOptions = {},
+): Promise<NextActionEvaluation[]> {
+  const includeCompleted = options.includeCompleted === true
+  const useCache = options.useCache !== false
+  const nowMs = now.getTime()
+  const cacheKey = buildNextActionCacheKey(schema.tagAlias, nowMs, includeCompleted)
+  const cached = useCache ? readNextActionEvaluationCache(cacheKey, nowMs) : null
+  if (cached != null) {
+    return cached
+  }
+
+  return buildNextActionEvaluationsFromTaskBlocks(
+    sourceTaskBlocks,
+    schema,
+    now,
+    options,
+    cacheKey,
+    nowMs,
+  )
+}
+
+async function buildNextActionEvaluationsFromTaskBlocks(
+  sourceTaskBlocks: Block[],
+  schema: TaskSchemaDefinition,
+  now: Date,
+  options: CollectNextActionEvaluationsOptions,
+  cacheKey: string,
+  nowMs: number,
+): Promise<NextActionEvaluation[]> {
+  const includeCompleted = options.includeCompleted === true
+  const useCache = options.useCache !== false
+  const taskBlocks = sourceTaskBlocks.filter((block) => findTaskTagRef(block, schema.tagAlias) != null)
   const taskMap = buildTaskMap(taskBlocks)
   const cycleContext = buildDependencyCycleContext(taskBlocks, taskMap, schema)
   const subtaskContext = await buildSubtaskContext(taskBlocks, schema)

@@ -59,12 +59,37 @@ export interface AllTaskItem {
   blockProperties: BlockProperty[]
 }
 
+export interface TaskDatasetSnapshot {
+  taskBlocks: Block[]
+  allTasks: AllTaskItem[]
+}
+
+export async function collectTaskDatasetSnapshot(
+  schema: TaskSchemaDefinition,
+): Promise<TaskDatasetSnapshot> {
+  const taskBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
+    schema.tagAlias,
+  ])) as Block[]
+
+  return {
+    taskBlocks,
+    allTasks: await buildAllTaskItemsFromBlocks(taskBlocks, schema),
+  }
+}
+
 export async function collectAllTasks(
   schema: TaskSchemaDefinition,
 ): Promise<AllTaskItem[]> {
   const raw = (await orca.invokeBackend("get-blocks-with-tags", [
     schema.tagAlias,
   ])) as Block[]
+  return await buildAllTaskItemsFromBlocks(raw, schema)
+}
+
+async function buildAllTaskItemsFromBlocks(
+  raw: Block[],
+  schema: TaskSchemaDefinition,
+): Promise<AllTaskItem[]> {
   const taskMap = new Map<DbId, AllTaskItem>()
   const liveBlockByTaskId = new Map<DbId, Block>()
   const blockCacheById = new Map<DbId, Block | null>()

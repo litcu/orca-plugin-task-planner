@@ -27,6 +27,7 @@ import {
   subscribeActiveTaskRuntimeSchema,
 } from "../core/task-runtime-schema"
 import {
+  collectNextActionEvaluationsFromTaskBlocks,
   collectNextActionEvaluations,
   collectNextActions,
   selectNextActionsFromEvaluations,
@@ -36,6 +37,7 @@ import {
 } from "../core/dependency-engine"
 import {
   collectAllTasks,
+  collectTaskDatasetSnapshot,
   countTaskDependentsForDeleteInView,
   cycleTaskStatusInView,
   deleteTaskBlockInView,
@@ -89,8 +91,7 @@ import { parseRepeatRuleConfig } from "../core/task-repeat"
 import {
   clearTaskTimer,
   readTaskTimerFromProperties,
-  startTaskTimer,
-  stopTaskTimer,
+  TASK_TIMER_PROPERTY_NAME,
 } from "../core/task-timer"
 import { t } from "../libs/l10n"
 import {
@@ -189,6 +190,10 @@ const TASK_FILTER_SELECT_MENU_CLASS_NAME = "mlo-task-filter-select-menu"
 const TASK_FILTER_PROPERTY_UNRESOLVED = Symbol("task-filter-property-unresolved")
 const DAY_MS = 24 * 60 * 60 * 1000
 const DASHBOARD_DUE_DAYS = 7
+const BLOCK_CHANGE_REFRESH_DEBOUNCE_MS = 900
+const TASK_BLOCK_SIGNATURE_SCHEMA_VERSION = 1
+const TASK_TAG_REF_TYPE = 2
+const TIMER_DISPLAY_TICK_MS = 500
 
 type BlockedReasonCountMap = Partial<Record<NextActionBlockedReason, number>>
 type AllTasksQuickFilter = TaskDashboardQuickFilter | "doing" | null
@@ -278,6 +283,25 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const [nextActionItems, setNextActionItems] = React.useState<NextActionItem[]>([])
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
   const [allTaskItemsLoaded, setAllTaskItemsLoaded] = React.useState(false)
+  const knownTaskIdsRef = React.useRef<Set<DbId>>(new Set())
+  const taskBlockSignaturesRef = React.useRef<Map<DbId, string>>(new Map())
+  const taskSetSignatureRef = React.useRef("")
+  const updateKnownTaskBlockSignatures = React.useCallback(
+    (items: Array<Pick<AllTaskItem, "blockId" | "sourceBlockId">>) => {
+      const nextKnownTaskIds = new Set<DbId>()
+      const nextSignatures = new Map<DbId, string>()
+      const sourceTaskIds = new Set<DbId>()
+      for (const item of items) {
+        sourceTaskIds.add(getMirrorId(item.blockId))
+        for (const taskId of collectTaskSignatureCandidateIds(item)) {
+          nextKnownTaskIds.add(taskId)
+          nextSignatures.set(taskId, buildTaskBlockSignature(taskId, props.schema.tagAlias))
+        }
+      }
+      knownTaskIdsRef.current = nextKnownTaskIds
+      taskBlockSignaturesRef.current = nextSignatures
+      taskSetSignatureRef.current = buildTaskSetSignatureFromIds(sourceTaskIds)
+    }, [props.schema.tagAlias])
   const [dashboardBlockedCounts, setDashboardBlockedCounts] = React.useState<BlockedReasonCountMap>(
     {},
   )
@@ -388,11 +412,17 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       }
 
       try {
+        let loadedAllTasks: AllTaskItem[] | null = null
         if (targetTab === "dashboard") {
-          const [allTasks, evaluations] = await Promise.all([
-            collectAllTasks(props.schema),
-            collectNextActionEvaluations(props.schema),
-          ])
+          const snapshot = await collectTaskDatasetSnapshot(props.schema)
+          const allTasks = snapshot.allTasks
+          loadedAllTasks = allTasks
+          const evaluations = await collectNextActionEvaluationsFromTaskBlocks(
+            snapshot.taskBlocks,
+            props.schema,
+            new Date(),
+            { useCache: false },
+          )
           setAllTaskItems(allTasks)
           setAllTaskItemsLoaded(true)
           setNextActionItems(selectNextActionsFromEvaluations(evaluations))
@@ -402,28 +432,40 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         } else if (targetTab === "next-actions") {
           const nextActions = await collectNextActions(props.schema)
           setNextActionItems(nextActions)
+          updateKnownTaskBlockSignatures(nextActions)
         } else if (targetTab === "all-tasks") {
-          const [allTasks, evaluations] = await Promise.all([
-            collectAllTasks(props.schema),
-            collectNextActionEvaluations(props.schema),
-          ])
+          const snapshot = await collectTaskDatasetSnapshot(props.schema)
+          const allTasks = snapshot.allTasks
+          loadedAllTasks = allTasks
+          const evaluations = await collectNextActionEvaluationsFromTaskBlocks(
+            snapshot.taskBlocks,
+            props.schema,
+            new Date(),
+            { useCache: false },
+          )
           setAllTaskItems(allTasks)
           setAllTaskItemsLoaded(true)
           setDashboardBlockedTaskIds(collectDashboardBlockedTaskIds(evaluations))
         } else if (targetTab === "my-day") {
           const allTasks = await collectAllTasks(props.schema)
+          loadedAllTasks = allTasks
           setAllTaskItems(allTasks)
           setAllTaskItemsLoaded(true)
         } else if (isCustomTaskViewsTab(targetTab)) {
           const allTasks = await collectAllTasks(props.schema)
+          loadedAllTasks = allTasks
           setAllTaskItems(allTasks)
           setAllTaskItemsLoaded(true)
         } else {
           const allTasks = await collectAllTasks(props.schema)
+          loadedAllTasks = allTasks
           setAllTaskItems(allTasks)
           setAllTaskItemsLoaded(true)
         }
 
+        if (loadedAllTasks != null) {
+          updateKnownTaskBlockSignatures(loadedAllTasks)
+        }
         setErrorText("")
       } catch (error) {
         console.error(error)
@@ -434,7 +476,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         }
       }
     },
-    [customViews, props.schema],
+    [customViews, props.schema, updateKnownTaskBlockSignatures],
   )
 
   const loadTaskTagProperties = React.useCallback(async () => {
@@ -772,7 +814,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   }, [allTasksQuickFilter, tab])
 
   React.useEffect(() => {
-    // Listen for block changes and do lightweight refresh.
     const { subscribe } = window.Valtio
     let refreshTimer: number | null = null
     const unsubscribe = subscribe(orca.state.blocks, () => {
@@ -781,8 +822,27 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       }
 
       refreshTimer = window.setTimeout(() => {
+        const nextSignatures = new Map<DbId, string>()
+        let changed = false
+        for (const taskId of knownTaskIdsRef.current) {
+          const nextSignature = buildTaskBlockSignature(taskId, props.schema.tagAlias)
+          nextSignatures.set(taskId, nextSignature)
+          if (nextSignature !== taskBlockSignaturesRef.current.get(taskId)) {
+            changed = true
+          }
+        }
+
+        const nextTaskSetSignature = buildLoadedTaskSetSignature(props.schema.tagAlias)
+        const taskSetChanged = nextTaskSetSignature !== taskSetSignatureRef.current
+        if (!changed && !taskSetChanged) {
+          return
+        }
+
+        if (!taskSetChanged) {
+          taskBlockSignaturesRef.current = nextSignatures
+        }
         void loadByTab(tab, { silent: true })
-      }, 180)
+      }, BLOCK_CHANGE_REFRESH_DEBOUNCE_MS)
     })
 
     return () => {
@@ -791,7 +851,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       }
       unsubscribe()
     }
-  }, [loadByTab, tab])
+  }, [loadByTab, props.schema.tagAlias, tab])
 
   const openCustomViewTab = React.useCallback((viewId: string) => {
     setPreferredTaskViewsTab(toCustomTaskViewsTab(viewId))
@@ -966,51 +1026,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       props.schema,
       tab,
     ],
-  )
-
-  const toggleTaskTimer = React.useCallback(
-    async (item: TaskListRowItem) => {
-      setTimingIds((prev: Set<DbId>) => {
-        const next = new Set(prev)
-        next.add(item.blockId)
-        return next
-      })
-
-      const currentTimer = readTaskTimerFromProperties(item.blockProperties)
-      const action = currentTimer.running ? "stop" : "start"
-
-      try {
-        if (action === "stop") {
-          await stopTaskTimer({
-            blockId: item.blockId,
-            sourceBlockId: item.sourceBlockId,
-            schema: props.schema,
-          })
-        } else {
-          await startTaskTimer({
-            blockId: item.blockId,
-            sourceBlockId: item.sourceBlockId,
-            schema: props.schema,
-          })
-        }
-
-        setErrorText("")
-        await loadByTab(tab, { silent: true })
-      } catch (error) {
-        console.error(error)
-        const fallbackMessage = action === "stop"
-          ? t("Failed to stop timer")
-          : t("Failed to start timer")
-        setErrorText(error instanceof Error ? error.message : fallbackMessage)
-      } finally {
-        setTimingIds((prev: Set<DbId>) => {
-          const next = new Set(prev)
-          next.delete(item.blockId)
-          return next
-        })
-      }
-    },
-    [loadByTab, props.schema, tab],
   )
 
   const clearTaskTimerForItem = React.useCallback(
@@ -2015,7 +2030,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     setTimerNowMs(Date.now())
     const timerId = window.setInterval(() => {
       setTimerNowMs(Date.now())
-    }, 1000)
+    }, TIMER_DISPLAY_TICK_MS)
 
     return () => {
       window.clearInterval(timerId)
@@ -3335,7 +3350,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         onToggleStatus: () => toggleTaskStatus(row.node.item),
         onNavigate: () => navigateToTask(row.node.item),
         onToggleStar: () => toggleTaskStar(row.node.item),
-        onToggleTimer: () => toggleTaskTimer(row.node.item),
         onClearTimer: () => clearTaskTimerForItem(row.node.item),
         onMarkReviewed: () => markTaskReviewed(row.node.item),
         onAddSubtask: () => addSubtask(row.node.item),
@@ -4539,7 +4553,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                       onToggleStatus: () => toggleTaskStatus(item),
                       onNavigate: () => navigateToTask(item),
                       onToggleStar: () => toggleTaskStar(item),
-                      onToggleTimer: () => toggleTaskTimer(item),
                       onClearTimer: () => clearTaskTimerForItem(item),
                       onMarkReviewed: () => markTaskReviewed(item),
                       onAddSubtask: () => addSubtask(item),
@@ -7097,4 +7110,82 @@ function collectCollapsibleNodeIds(nodes: TaskTreeNode[]): DbId[] {
 
   nodes.forEach(walk)
   return ids
+}
+
+function collectTaskSignatureCandidateIds(
+  item: Pick<AllTaskItem, "blockId" | "sourceBlockId">,
+): DbId[] {
+  const ids = [
+    item.blockId,
+    item.sourceBlockId,
+    getMirrorId(item.blockId),
+    getMirrorId(item.sourceBlockId),
+  ]
+  return Array.from(new Set(ids.filter((id) => Number.isFinite(id))))
+}
+
+function buildTaskBlockSignature(blockId: DbId, tagAlias: string): string {
+  const block = orca.state.blocks[blockId] ?? orca.state.blocks[getMirrorId(blockId)]
+  if (block == null) {
+    return `${TASK_BLOCK_SIGNATURE_SCHEMA_VERSION}:missing`
+  }
+
+  const taskRef = block.refs.find((ref: BlockRef) => {
+    return ref.type === TASK_TAG_REF_TYPE && ref.alias === tagAlias
+  }) ?? null
+  const meta = block.properties?.find((property: BlockProperty) => {
+    return property.name === TASK_META_PROPERTY_NAME
+  })?.value ?? null
+  const timer = block.properties?.find((property: BlockProperty) => {
+    return property.name === TASK_TIMER_PROPERTY_NAME
+  })?.value ?? null
+
+  return stableStringifyTaskSignature({
+    v: TASK_BLOCK_SIGNATURE_SCHEMA_VERSION,
+    id: block.id,
+    text: block.text,
+    parent: block.parent ?? null,
+    children: Array.isArray(block.children) ? block.children : [],
+    refData: taskRef?.data ?? null,
+    refFrom: taskRef?.from ?? null,
+    refTo: taskRef?.to ?? null,
+    meta,
+    timer,
+  })
+}
+
+function buildLoadedTaskSetSignature(tagAlias: string): string {
+  const taskIds = new Set<DbId>()
+  for (const block of Object.values(orca.state.blocks)) {
+    if (block == null) {
+      continue
+    }
+    if (hasTaskTagRef(block, tagAlias)) {
+      taskIds.add(getMirrorId(block.id))
+    }
+  }
+  return buildTaskSetSignatureFromIds(taskIds)
+}
+
+function buildTaskSetSignatureFromIds(taskIds: Set<DbId>): string {
+  return Array.from(taskIds)
+    .filter((id) => Number.isFinite(id))
+    .sort((left, right) => left - right)
+    .join(",")
+}
+
+function hasTaskTagRef(block: Block, tagAlias: string): boolean {
+  const liveBlock = orca.state.blocks[getMirrorId(block.id)] ?? block
+  return liveBlock.refs.some((ref: BlockRef) => {
+    return ref.type === TASK_TAG_REF_TYPE && ref.alias === tagAlias
+  })
+}
+
+function stableStringifyTaskSignature(value: unknown): string {
+  return JSON.stringify(value, (_key, rawValue) => {
+    if (rawValue instanceof Date) {
+      return rawValue.getTime()
+    }
+    return rawValue
+  })
 }
