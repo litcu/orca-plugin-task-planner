@@ -19,18 +19,41 @@ const PROP_TYPE_JSON = 0
 const TAG_REF_TYPE = 2
 const DATE_TIME_PROP_TYPE = 5
 const TEXT_CHOICES_PROP_TYPE = 6
-const TASK_TIMER_SCHEMA_VERSION = 1
+const TASK_TIMER_SCHEMA_VERSION = 2
 const POMODORO_DURATION_MS = 25 * 60 * 1000
+const SHORT_BREAK_DURATION_MS = 5 * 60 * 1000
+const LONG_BREAK_DURATION_MS = 15 * 60 * 1000
+const POMODOROS_BEFORE_LONG_BREAK = 4
 
 export const TASK_TIMER_PROPERTY_NAME = "_mlo_task_timer"
+export const TASK_TIMER_EVENT_NAME = "mlo:task-timer-change"
 
 export type TaskTimerMode = "direct" | "pomodoro"
+export type TaskTimerPhase = "idle" | "focus" | "short-break" | "long-break" | "paused"
+
+export interface TaskTimerSessionLogEntry {
+  startedAt: number
+  endedAt: number
+  durationMs: number
+  mode: TaskTimerMode
+  phase: Exclude<TaskTimerPhase, "idle" | "paused">
+  completed: boolean
+}
 
 export interface TaskTimerData {
   schema: number
   elapsedMs: number
+  totalFocusMs: number
+  completedPomodoros: number
   running: boolean
   startedAt: number | null
+  sessionId: string | null
+  activeMode: TaskTimerMode
+  activePhase: TaskTimerPhase
+  phaseDurationMs: number | null
+  pausedPhase: Exclude<TaskTimerPhase, "idle" | "paused"> | null
+  pausedRemainingMs: number | null
+  sessionLog: TaskTimerSessionLogEntry[]
 }
 
 interface ResolvedTaskBlock {
@@ -44,9 +67,25 @@ export function createDefaultTaskTimerData(): TaskTimerData {
   return {
     schema: TASK_TIMER_SCHEMA_VERSION,
     elapsedMs: 0,
+    totalFocusMs: 0,
+    completedPomodoros: 0,
     running: false,
     startedAt: null,
+    sessionId: null,
+    activeMode: "direct",
+    activePhase: "idle",
+    phaseDurationMs: null,
+    pausedPhase: null,
+    pausedRemainingMs: null,
+    sessionLog: [],
   }
+}
+
+export interface TaskTimerChangeEventDetail {
+  taskId: DbId
+  sourceBlockId: DbId
+  running: boolean
+  activePhase: TaskTimerPhase
 }
 
 export function readTaskTimerFromProperties(
@@ -75,14 +114,36 @@ export function toTaskTimerProperty(
 }
 
 export function hasTaskTimerRecord(timer: TaskTimerData): boolean {
-  return timer.elapsedMs > 0 || timer.running || timer.startedAt != null
+  return timer.elapsedMs > 0 ||
+    timer.totalFocusMs > 0 ||
+    timer.completedPomodoros > 0 ||
+    timer.running ||
+    timer.startedAt != null ||
+    timer.activePhase !== "idle"
+}
+
+export function finalizeStaleRunningTaskTimer(timer: TaskTimerData): TaskTimerData {
+  if (!timer.running) {
+    return timer
+  }
+
+  return {
+    ...timer,
+    running: false,
+    startedAt: null,
+    sessionId: null,
+    activePhase: "idle",
+    phaseDurationMs: null,
+    pausedPhase: null,
+    pausedRemainingMs: null,
+  }
 }
 
 export function resolveTaskTimerElapsedMs(
   timer: TaskTimerData,
   nowMs: number = Date.now(),
 ): number {
-  if (!timer.running || timer.startedAt == null) {
+  if (!timer.running || timer.startedAt == null || !doesPhaseCountAsFocus(timer.activePhase)) {
     return timer.elapsedMs
   }
 
@@ -92,6 +153,58 @@ export function resolveTaskTimerElapsedMs(
   }
 
   return timer.elapsedMs + delta
+}
+
+export function resolveTaskTimerPhaseElapsedMs(
+  timer: TaskTimerData,
+  nowMs: number = Date.now(),
+): number {
+  if (!timer.running || timer.startedAt == null) {
+    if (timer.activePhase === "paused" && timer.pausedRemainingMs != null && timer.phaseDurationMs != null) {
+      return Math.max(0, timer.phaseDurationMs - timer.pausedRemainingMs)
+    }
+    return 0
+  }
+
+  const delta = nowMs - timer.startedAt
+  if (!Number.isFinite(delta) || Number.isNaN(delta) || delta <= 0) {
+    return 0
+  }
+
+  return Math.floor(delta)
+}
+
+export function resolveTaskTimerPhaseRemainingMs(
+  timer: TaskTimerData,
+  nowMs: number = Date.now(),
+): number | null {
+  if (timer.activePhase === "paused") {
+    return timer.pausedRemainingMs
+  }
+
+  if (!timer.running || timer.phaseDurationMs == null) {
+    return null
+  }
+
+  return Math.max(0, timer.phaseDurationMs - resolveTaskTimerPhaseElapsedMs(timer, nowMs))
+}
+
+export function isTaskTimerPomodoroPhaseComplete(
+  timer: TaskTimerData,
+  nowMs: number = Date.now(),
+): boolean {
+  if (
+    !timer.running ||
+    timer.activeMode !== "pomodoro" ||
+    timer.startedAt == null ||
+    timer.phaseDurationMs == null ||
+    timer.activePhase === "idle" ||
+    timer.activePhase === "paused"
+  ) {
+    return false
+  }
+
+  return resolveTaskTimerPhaseElapsedMs(timer, nowMs) >= timer.phaseDurationMs
 }
 
 export function formatTaskTimerDuration(elapsedMs: number): string {
@@ -126,10 +239,35 @@ export function resolveTaskPomodoroProgress(elapsedMs: number): {
   }
 }
 
+export function getTaskTimerDefaultPhaseDurationMs(
+  phase: TaskTimerPhase,
+  completedPomodoros: number = 0,
+): number | null {
+  switch (phase) {
+    case "focus":
+      return POMODORO_DURATION_MS
+    case "short-break":
+      return SHORT_BREAK_DURATION_MS
+    case "long-break":
+      return LONG_BREAK_DURATION_MS
+    case "paused":
+    case "idle":
+      return null
+  }
+}
+
+export function resolveNextPomodoroBreakPhase(completedPomodoros: number): "short-break" | "long-break" {
+  return completedPomodoros > 0 && completedPomodoros % POMODOROS_BEFORE_LONG_BREAK === 0
+    ? "long-break"
+    : "short-break"
+}
+
 export async function startTaskTimer(options: {
   blockId: DbId
   sourceBlockId?: DbId | null
   schema: TaskSchemaDefinition
+  mode?: TaskTimerMode
+  sessionId?: string | null
   nowMs?: number
 }): Promise<TaskTimerData> {
   const nowMs = normalizeNowMs(options.nowMs)
@@ -148,12 +286,31 @@ export async function startTaskTimer(options: {
 
   await stopAllRunningTaskTimers(options.schema, target.taskId, nowMs)
 
+  const mode = options.mode ?? currentTimer.activeMode
+  const activePhase: TaskTimerPhase =
+    mode === "pomodoro" &&
+      currentTimer.activePhase === "paused" &&
+      currentTimer.pausedPhase != null
+      ? currentTimer.pausedPhase
+      : "focus"
+  const phaseDurationMs = mode === "pomodoro"
+    ? currentTimer.activePhase === "paused" && currentTimer.pausedRemainingMs != null
+      ? currentTimer.pausedRemainingMs
+      : getTaskTimerDefaultPhaseDurationMs(activePhase, currentTimer.completedPomodoros)
+    : null
   const nextTimer: TaskTimerData = {
     ...currentTimer,
     running: true,
     startedAt: nowMs,
+    sessionId: normalizeSessionId(options.sessionId),
+    activeMode: mode,
+    activePhase,
+    phaseDurationMs,
+    pausedPhase: null,
+    pausedRemainingMs: null,
   }
   await saveTaskTimer(options.schema, target, nextTimer)
+  dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
 
@@ -172,6 +329,105 @@ export async function stopTaskTimer(options: {
   }
 
   await saveTaskTimer(options.schema, target, nextTimer)
+  dispatchTaskTimerChange(target, nextTimer)
+  return nextTimer
+}
+
+export async function pauseTaskTimer(options: {
+  blockId: DbId
+  sourceBlockId?: DbId | null
+  schema: TaskSchemaDefinition
+  nowMs?: number
+}): Promise<TaskTimerData> {
+  const nowMs = normalizeNowMs(options.nowMs)
+  const target = await resolveTaskBlock(options.blockId, options.sourceBlockId, options.schema)
+  const currentTimer = readTaskTimerFromSourceAndLiveBlocks(target.sourceBlock, target.liveBlock)
+  if (!currentTimer.running || currentTimer.startedAt == null) {
+    return currentTimer
+  }
+
+  const remainingMs = resolveTaskTimerPhaseRemainingMs(currentTimer, nowMs)
+  const nextTimer = finalizeRunningTaskTimer(currentTimer, nowMs, {
+    nextPhase: "paused",
+    pausedPhase: currentTimer.activeMode === "pomodoro"
+      ? currentTimer.activePhase === "paused" || currentTimer.activePhase === "idle"
+        ? "focus"
+        : currentTimer.activePhase
+      : null,
+    pausedRemainingMs: currentTimer.activeMode === "pomodoro" ? remainingMs : null,
+    completed: false,
+  })
+  await saveTaskTimer(options.schema, target, nextTimer)
+  dispatchTaskTimerChange(target, nextTimer)
+  return nextTimer
+}
+
+export async function switchTaskTimerPhase(options: {
+  blockId: DbId
+  sourceBlockId?: DbId | null
+  schema: TaskSchemaDefinition
+  phase: Exclude<TaskTimerPhase, "idle" | "paused">
+  nowMs?: number
+}): Promise<TaskTimerData> {
+  const nowMs = normalizeNowMs(options.nowMs)
+  const target = await resolveTaskBlock(options.blockId, options.sourceBlockId, options.schema)
+  const currentTimer = readTaskTimerFromSourceAndLiveBlocks(target.sourceBlock, target.liveBlock)
+  const finalizedTimer = finalizeRunningTaskTimer(currentTimer, nowMs, {
+    nextPhase: "idle",
+    completed: false,
+  })
+  const nextTimer: TaskTimerData = {
+    ...finalizedTimer,
+    running: true,
+    startedAt: nowMs,
+    activeMode: "pomodoro",
+    activePhase: options.phase,
+    phaseDurationMs: getTaskTimerDefaultPhaseDurationMs(options.phase, finalizedTimer.completedPomodoros),
+    pausedPhase: null,
+    pausedRemainingMs: null,
+  }
+  await saveTaskTimer(options.schema, target, nextTimer)
+  dispatchTaskTimerChange(target, nextTimer)
+  return nextTimer
+}
+
+export async function completeTaskTimerPomodoroPhase(options: {
+  blockId: DbId
+  sourceBlockId?: DbId | null
+  schema: TaskSchemaDefinition
+  continueTo?: Exclude<TaskTimerPhase, "idle" | "paused"> | "idle"
+  nowMs?: number
+}): Promise<TaskTimerData> {
+  const nowMs = normalizeNowMs(options.nowMs)
+  const target = await resolveTaskBlock(options.blockId, options.sourceBlockId, options.schema)
+  const currentTimer = readTaskTimerFromSourceAndLiveBlocks(target.sourceBlock, target.liveBlock)
+  if (!isTaskTimerPomodoroPhaseComplete(currentTimer, nowMs)) {
+    return currentTimer
+  }
+
+  const completedTimer = finalizeRunningTaskTimer(currentTimer, nowMs, {
+    nextPhase: "idle",
+    completed: true,
+  })
+  const continueTo = options.continueTo ?? "idle"
+  if (continueTo === "idle") {
+    await saveTaskTimer(options.schema, target, completedTimer)
+    dispatchTaskTimerChange(target, completedTimer)
+    return completedTimer
+  }
+
+  const nextTimer: TaskTimerData = {
+    ...completedTimer,
+    running: true,
+    startedAt: nowMs,
+    activeMode: "pomodoro",
+    activePhase: continueTo,
+    phaseDurationMs: getTaskTimerDefaultPhaseDurationMs(continueTo, completedTimer.completedPomodoros),
+    pausedPhase: null,
+    pausedRemainingMs: null,
+  }
+  await saveTaskTimer(options.schema, target, nextTimer)
+  dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
 
@@ -188,6 +444,7 @@ export async function clearTaskTimer(options: {
 
   const nextTimer = createDefaultTaskTimerData()
   await saveTaskTimer(options.schema, target, nextTimer)
+  dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
 
@@ -207,10 +464,21 @@ export async function checkpointRunningTaskTimer(options: {
   const nextTimer: TaskTimerData = {
     ...currentTimer,
     elapsedMs: resolveTaskTimerElapsedMs(currentTimer, nowMs),
+    totalFocusMs: doesPhaseCountAsFocus(currentTimer.activePhase)
+      ? resolveTaskTimerElapsedMs(currentTimer, nowMs)
+      : currentTimer.totalFocusMs,
     running: true,
     startedAt: nowMs,
+    sessionId: currentTimer.sessionId,
+    phaseDurationMs: currentTimer.phaseDurationMs == null
+      ? null
+      : Math.max(
+        0,
+        currentTimer.phaseDurationMs - resolveTaskTimerPhaseElapsedMs(currentTimer, nowMs),
+      ),
   }
   await saveTaskTimer(options.schema, target, nextTimer)
+  dispatchTaskTimerChange(target, nextTimer)
   return nextTimer
 }
 
@@ -319,8 +587,15 @@ export async function checkpointAllRunningTaskTimers(
     const nextTimer: TaskTimerData = {
       ...timer,
       elapsedMs: resolveTaskTimerElapsedMs(timer, nowMs),
+      totalFocusMs: doesPhaseCountAsFocus(timer.activePhase)
+        ? resolveTaskTimerElapsedMs(timer, nowMs)
+        : timer.totalFocusMs,
       running: true,
       startedAt: nowMs,
+      sessionId: timer.sessionId,
+      phaseDurationMs: timer.phaseDurationMs == null
+        ? null
+        : Math.max(0, timer.phaseDurationMs - resolveTaskTimerPhaseElapsedMs(timer, nowMs)),
     }
     await saveTaskTimer(schema, target, nextTimer)
     checkpointedCount += 1
@@ -386,12 +661,31 @@ function normalizeTaskTimerData(raw: unknown): TaskTimerData {
 
   const running = raw.running === true
   const startedAt = normalizeTimestamp(raw.startedAt)
+  const elapsedMs = normalizeElapsedMs(raw.elapsedMs)
+  const totalFocusMs = normalizeElapsedMs(raw.totalFocusMs ?? raw.focusMs ?? elapsedMs)
+  const activeMode = normalizeTaskTimerMode(raw.activeMode)
+  const activePhase = normalizeTaskTimerPhase(raw.activePhase, running)
+  const phaseDurationMs = normalizeNullableDuration(raw.phaseDurationMs)
+  const pausedPhase = normalizePausedPhase(raw.pausedPhase)
+  const pausedRemainingMs = normalizeNullableDuration(raw.pausedRemainingMs)
+  const sessionId = normalizeSessionId(raw.sessionId)
 
   return {
     schema: normalizePositiveInt(raw.schema, TASK_TIMER_SCHEMA_VERSION),
-    elapsedMs: normalizeElapsedMs(raw.elapsedMs),
+    elapsedMs,
+    totalFocusMs,
+    completedPomodoros: normalizeNonNegativeInt(raw.completedPomodoros, Math.floor(totalFocusMs / POMODORO_DURATION_MS)),
     running: running && startedAt != null,
     startedAt: running && startedAt != null ? startedAt : null,
+    sessionId: running && startedAt != null ? sessionId : null,
+    activeMode,
+    activePhase: running && startedAt != null
+      ? activePhase === "idle" || activePhase === "paused" ? "focus" : activePhase
+      : activePhase === "paused" ? "paused" : "idle",
+    phaseDurationMs,
+    pausedPhase: activePhase === "paused" ? pausedPhase ?? "focus" : null,
+    pausedRemainingMs: activePhase === "paused" ? pausedRemainingMs : null,
+    sessionLog: normalizeSessionLog(raw.sessionLog),
   }
 }
 
@@ -411,6 +705,94 @@ function normalizeTimestamp(value: unknown): number | null {
   }
 
   return Math.floor(parsed)
+}
+
+function normalizeNullableDuration(value: unknown): number | null {
+  if (value == null) {
+    return null
+  }
+
+  return normalizeElapsedMs(value)
+}
+
+function normalizeNonNegativeInt(value: unknown, fallback: number): number {
+  const parsed = typeof value === "number" ? value : Number(value)
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 0) {
+    return fallback
+  }
+
+  return Math.floor(parsed)
+}
+
+function normalizeTaskTimerMode(value: unknown): TaskTimerMode {
+  return value === "pomodoro" ? "pomodoro" : "direct"
+}
+
+function normalizeSessionId(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null
+  }
+
+  const normalized = value.trim()
+  return normalized === "" ? null : normalized
+}
+
+function normalizeTaskTimerPhase(value: unknown, running: boolean): TaskTimerPhase {
+  switch (value) {
+    case "focus":
+    case "short-break":
+    case "long-break":
+    case "paused":
+      return value
+    case "idle":
+      return "idle"
+    default:
+      return running ? "focus" : "idle"
+  }
+}
+
+function normalizePausedPhase(value: unknown): Exclude<TaskTimerPhase, "idle" | "paused"> | null {
+  switch (value) {
+    case "focus":
+    case "short-break":
+    case "long-break":
+      return value
+    default:
+      return null
+  }
+}
+
+function normalizeSessionLog(value: unknown): TaskTimerSessionLogEntry[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((item): TaskTimerSessionLogEntry | null => {
+      if (!isRecord(item)) {
+        return null
+      }
+
+      const startedAt = normalizeTimestamp(item.startedAt)
+      const endedAt = normalizeTimestamp(item.endedAt)
+      const durationMs = normalizeElapsedMs(item.durationMs)
+      const mode = normalizeTaskTimerMode(item.mode)
+      const phase = normalizePausedPhase(item.phase)
+      if (startedAt == null || endedAt == null || phase == null) {
+        return null
+      }
+
+      return {
+        startedAt,
+        endedAt,
+        durationMs,
+        mode,
+        phase,
+        completed: item.completed === true,
+      }
+    })
+    .filter((item): item is TaskTimerSessionLogEntry => item != null)
+    .slice(-20)
 }
 
 function normalizePositiveInt(value: unknown, fallback: number): number {
@@ -455,13 +837,70 @@ function readTaskTimerFromSourceAndLiveBlocks(
 function finalizeRunningTaskTimer(
   timer: TaskTimerData,
   nowMs: number,
+  options?: {
+    nextPhase?: TaskTimerPhase
+    pausedPhase?: Exclude<TaskTimerPhase, "idle" | "paused"> | null
+    pausedRemainingMs?: number | null
+    completed?: boolean
+  },
 ): TaskTimerData {
+  const elapsedMs = resolveTaskTimerElapsedMs(timer, nowMs)
+  const phaseElapsedMs = resolveTaskTimerPhaseElapsedMs(timer, nowMs)
+  const phaseCompleted = options?.completed === true
+  const countedFocus = doesPhaseCountAsFocus(timer.activePhase)
+  const nextCompletedPomodoros =
+    timer.activeMode === "pomodoro" &&
+      timer.activePhase === "focus" &&
+      phaseCompleted
+      ? timer.completedPomodoros + 1
+      : timer.completedPomodoros
+  const sessionLogEntry = buildSessionLogEntry(timer, nowMs, phaseElapsedMs, phaseCompleted)
+
   return {
     ...timer,
-    elapsedMs: resolveTaskTimerElapsedMs(timer, nowMs),
+    elapsedMs,
+    totalFocusMs: countedFocus ? elapsedMs : timer.totalFocusMs,
+    completedPomodoros: nextCompletedPomodoros,
     running: false,
     startedAt: null,
+    sessionId: null,
+    activePhase: options?.nextPhase ?? "idle",
+    phaseDurationMs: null,
+    pausedPhase: options?.pausedPhase ?? null,
+    pausedRemainingMs: options?.pausedRemainingMs ?? null,
+    sessionLog: sessionLogEntry == null
+      ? timer.sessionLog
+      : [...timer.sessionLog, sessionLogEntry].slice(-20),
   }
+}
+
+function buildSessionLogEntry(
+  timer: TaskTimerData,
+  nowMs: number,
+  durationMs: number,
+  completed: boolean,
+): TaskTimerSessionLogEntry | null {
+  if (
+    timer.startedAt == null ||
+    timer.activePhase === "idle" ||
+    timer.activePhase === "paused" ||
+    durationMs <= 0
+  ) {
+    return null
+  }
+
+  return {
+    startedAt: timer.startedAt,
+    endedAt: nowMs,
+    durationMs,
+    mode: timer.activeMode,
+    phase: timer.activePhase,
+    completed,
+  }
+}
+
+function doesPhaseCountAsFocus(phase: TaskTimerPhase): boolean {
+  return phase === "focus"
 }
 
 async function promoteTaskStatusToDoingIfNeeded(
@@ -528,6 +967,19 @@ async function saveTaskTimer(
     null,
     [target.writableBlockId],
     [toTaskTimerProperty(timer, existingProperty)],
+  )
+}
+
+function dispatchTaskTimerChange(target: ResolvedTaskBlock, timer: TaskTimerData) {
+  window.dispatchEvent(
+    new CustomEvent<TaskTimerChangeEventDetail>(TASK_TIMER_EVENT_NAME, {
+      detail: {
+        taskId: target.taskId,
+        sourceBlockId: target.writableBlockId,
+        running: timer.running,
+        activePhase: timer.activePhase,
+      },
+    }),
   )
 }
 
