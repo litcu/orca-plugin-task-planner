@@ -693,21 +693,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   ])
 
   React.useEffect(() => {
-    if (!panelSettings.taskTimerEnabled) {
-      return
-    }
-
-    setTimerNowMs(Date.now())
-    const timerId = window.setInterval(() => {
-      setTimerNowMs(Date.now())
-    }, 1000)
-
-    return () => {
-      window.clearInterval(timerId)
-    }
-  }, [panelSettings.taskTimerEnabled])
-
-  React.useEffect(() => {
     let cancelled = false
     setCustomViewsLoaded(false)
 
@@ -2011,6 +1996,32 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     subtaskProgressByTaskId,
     tab,
   ])
+  const hasRunningVisibleTimer = React.useMemo(() => {
+    if (!panelSettings.taskTimerEnabled) {
+      return false
+    }
+
+    const candidates = isAllTasksTab ? allTaskItems : flatVisibleItems
+    return candidates.some((item: TaskListRowItem | AllTaskItem) => {
+      return readTaskTimerFromProperties(item.blockProperties).running
+    })
+  }, [allTaskItems, flatVisibleItems, isAllTasksTab, panelSettings.taskTimerEnabled])
+
+  React.useEffect(() => {
+    if (!hasRunningVisibleTimer) {
+      return
+    }
+
+    setTimerNowMs(Date.now())
+    const timerId = window.setInterval(() => {
+      setTimerNowMs(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(timerId)
+    }
+  }, [hasRunningVisibleTimer])
+
   const selectedReviewItems = React.useMemo(() => {
     if (!isReviewDueTab || selectedReviewIds.size === 0) {
       return []

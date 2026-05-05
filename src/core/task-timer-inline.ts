@@ -19,7 +19,6 @@ import {
 const TAG_REF_TYPE = 2
 const POMODORO_DURATION_MS = 25 * 60 * 1000
 const TICK_INTERVAL_MS = 1000
-const CHECKPOINT_INTERVAL_MS = 15000
 const REFRESH_DEBOUNCE_MS = 120
 const TAG_BUTTON_ROLE = "mlo-task-timer-tag-button"
 const TAG_BUTTON_ICON_ROLE = "mlo-task-timer-tag-icon"
@@ -27,9 +26,12 @@ const TAG_BUTTON_TEXT_ROLE = "mlo-task-timer-tag-text"
 const DETAIL_ROLE = "mlo-task-timer-detail"
 const INLINE_STYLE_ROLE = "mlo-task-timer-inline-style"
 const DETAIL_BASE_INDENT_PX = 24
-const DETAIL_TEXT_OFFSET_FROM_STATUS_ICON_PX = 20
-const DETAIL_MIRROR_FALLBACK_OFFSET_PX = 12
-const DETAIL_MAX_MIRROR_OFFSET_PX = 64
+
+interface VisibleTimerDetail {
+  taskId: DbId
+  rawBlockId: DbId
+  detailEl: HTMLElement
+}
 
 export interface TaskTimerInlineHandle {
   dispose: () => void
@@ -51,7 +53,7 @@ export function setupTaskTimerInlineWidgets(
   let blocksUnsubscribe: (() => void) | null = null
   let previousSettings = getPluginSettings(pluginName)
   let checkpointing = false
-  let lastCheckpointAtMs = 0
+  let visibleTimerDetails: VisibleTimerDetail[] = []
 
   const scheduleRefresh = (delayMs: number = REFRESH_DEBOUNCE_MS) => {
     if (disposed) {
@@ -136,24 +138,13 @@ export function setupTaskTimerInlineWidgets(
     }
 
     checkpointing = true
-    const nowMs = Date.now()
-    lastCheckpointAtMs = nowMs
     try {
-      await checkpointAllRunningTaskTimers(schema, nowMs)
+      await checkpointAllRunningTaskTimers(schema)
     } catch (error) {
       console.error(error)
     } finally {
       checkpointing = false
     }
-  }
-
-  const maybeCheckpoint = () => {
-    const nowMs = Date.now()
-    if (nowMs - lastCheckpointAtMs < CHECKPOINT_INTERVAL_MS) {
-      return
-    }
-
-    void checkpointNow()
   }
 
   const visibilityChangeListener = () => {
@@ -176,54 +167,43 @@ export function setupTaskTimerInlineWidgets(
       return
     }
 
-    maybeCheckpoint()
-
-    const blocks = Array.from(document.querySelectorAll(".orca-block[data-id]"))
-    for (const blockNode of blocks) {
-      if (!(blockNode instanceof HTMLElement)) {
+    const nextVisibleTimerDetails: VisibleTimerDetail[] = []
+    const nowMs = Date.now()
+    for (const visibleDetail of visibleTimerDetails) {
+      if (!visibleDetail.detailEl.isConnected) {
         continue
       }
 
-      const rawBlockId = Number(blockNode.dataset.id)
-      if (!isValidDbId(rawBlockId)) {
-        continue
-      }
-
-      const block = resolveVisibleTaskBlock(rawBlockId)
+      const block = resolveVisibleTaskBlock(visibleDetail.rawBlockId)
       if (block == null || !hasTaskTagRef(block, schema.tagAlias)) {
-        removeBlockTimerUi(blockNode)
+        visibleDetail.detailEl.remove()
         continue
       }
 
       const status = resolveTaskStatusFromBlock(block, schema)
       const timer = readTaskTimerFromBlock(block)
-      const taskId = getMirrorId(rawBlockId)
 
-      if (timer.running && isTaskDoneStatus(status, schema) && !autoStoppingTaskIds.has(taskId)) {
-        autoStoppingTaskIds.add(taskId)
+      if (timer.running && isTaskDoneStatus(status, schema) && !autoStoppingTaskIds.has(visibleDetail.taskId)) {
+        autoStoppingTaskIds.add(visibleDetail.taskId)
         void stopTaskTimer({
-          blockId: taskId,
-          sourceBlockId: rawBlockId,
+          blockId: visibleDetail.taskId,
+          sourceBlockId: visibleDetail.rawBlockId,
           schema,
         })
           .catch((error) => {
             console.error(error)
           })
           .finally(() => {
-            autoStoppingTaskIds.delete(taskId)
+            autoStoppingTaskIds.delete(visibleDetail.taskId)
             scheduleRefresh(0)
           })
       }
 
-      renderBlockTimerUi(
-        blockNode,
-        rawBlockId,
-        block,
-        schema,
-        settings,
-        pendingTaskIds.has(taskId),
-      )
+      updateDetailText(visibleDetail.detailEl, timer, settings, nowMs)
+      visibleDetail.detailEl.className = `mlo-task-timer-detail ${timer.running ? "is-running" : ""}`
+      nextVisibleTimerDetails.push(visibleDetail)
     }
+    visibleTimerDetails = nextVisibleTimerDetails
   }
 
   async function refreshInlineWidgets() {
@@ -233,10 +213,12 @@ export function setupTaskTimerInlineWidgets(
 
     const settings = getPluginSettings(pluginName)
     if (!settings.taskTimerEnabled) {
+      visibleTimerDetails = []
       removeInlineWidgets()
       return
     }
 
+    const nextVisibleTimerDetails: VisibleTimerDetail[] = []
     const blockNodes = Array.from(document.querySelectorAll(".orca-block[data-id]"))
     for (const blockNode of blockNodes) {
       if (!(blockNode instanceof HTMLElement)) {
@@ -263,8 +245,10 @@ export function setupTaskTimerInlineWidgets(
         schema,
         settings,
         pendingTaskIds.has(taskId),
+        nextVisibleTimerDetails,
       )
     }
+    visibleTimerDetails = nextVisibleTimerDetails
   }
 
   document.body.addEventListener("click", clickListener, true)
@@ -314,6 +298,7 @@ export function setupTaskTimerInlineWidgets(
       blocksUnsubscribe?.()
       blocksUnsubscribe = null
 
+      visibleTimerDetails = []
       void checkpointNow()
       removeInlineWidgets()
       removeInlineTimerStyles(pluginName)
@@ -328,13 +313,12 @@ function renderBlockTimerUi(
   schema: TaskSchemaDefinition,
   settings: ReturnType<typeof getPluginSettings>,
   pending: boolean,
+  visibleTimerDetails: VisibleTimerDetail[],
 ) {
   const taskId = getMirrorId(rawBlockId)
   const timer = readTaskTimerFromBlock(block)
   const status = resolveTaskStatusFromBlock(block, schema)
   const hasRecord = hasTaskTimerRecord(timer)
-  const elapsedMs = resolveTaskTimerElapsedMs(timer)
-  const elapsedText = formatTaskTimerDuration(elapsedMs)
   const startDisabled = !timer.running && isTaskDoneStatus(status, schema)
   const action = timer.running ? "stop" : "start"
   const actionLabel = action === "stop" ? t("Stop") : t("Timer")
@@ -373,20 +357,13 @@ function renderBlockTimerUi(
   }
 
   detailEl.className = `mlo-task-timer-detail ${timer.running ? "is-running" : ""}`
-  applyDetailAlignment(detailEl, blockEl, rawBlockId)
-  let detailText = settings.taskTimerMode === "pomodoro"
-    ? ""
-    : t("Elapsed ${time}", { time: elapsedText })
-  if (settings.taskTimerMode === "pomodoro") {
-    const progress = resolveTaskPomodoroProgress(elapsedMs)
-    detailText = t("Pomodoro ${cycle} ${elapsed}/${duration}", {
-      cycle: String(progress.cycle),
-      elapsed: formatTaskTimerDuration(progress.cycleElapsedMs),
-      duration: formatTaskTimerDuration(POMODORO_DURATION_MS),
-    })
-  }
-  detailEl.textContent = detailText
+  updateDetailText(detailEl, timer, settings, Date.now())
   detailEl.dataset.blockId = String(taskId)
+  visibleTimerDetails.push({
+    taskId,
+    rawBlockId,
+    detailEl,
+  })
 }
 
 function ensureTagButton(
@@ -468,142 +445,6 @@ function resolveDetailHostElement(blockEl: HTMLElement): HTMLElement | null {
   return host instanceof HTMLElement ? host : null
 }
 
-function applyDetailAlignment(
-  detailEl: HTMLElement,
-  blockEl: HTMLElement,
-  rawBlockId: DbId,
-) {
-  const host = resolveDetailHostElement(blockEl)
-  if (host == null) {
-    detailEl.style.setProperty(
-      "--mlo-task-timer-detail-indent",
-      `${DETAIL_BASE_INDENT_PX}px`,
-    )
-    return
-  }
-
-  const indentPx = resolveDetailIndentPx(host, blockEl, rawBlockId)
-  detailEl.style.setProperty(
-    "--mlo-task-timer-detail-indent",
-    `${indentPx}px`,
-  )
-}
-
-function resolveDetailIndentPx(
-  host: HTMLElement,
-  blockEl: HTMLElement,
-  rawBlockId: DbId,
-): number {
-  const hostRect = host.getBoundingClientRect()
-  if (hostRect.width > 0) {
-    const statusIconLeft = resolveTaskStatusIconLeft(host, blockEl)
-    if (statusIconLeft != null) {
-      const alignedIndent = Math.round(
-        statusIconLeft - hostRect.left + DETAIL_TEXT_OFFSET_FROM_STATUS_ICON_PX,
-      )
-      return Math.max(
-        DETAIL_BASE_INDENT_PX,
-        Math.min(DETAIL_BASE_INDENT_PX + DETAIL_MAX_MIRROR_OFFSET_PX, alignedIndent),
-      )
-    }
-  }
-
-  const taskId = getMirrorId(rawBlockId)
-  if (taskId === rawBlockId) {
-    return DETAIL_BASE_INDENT_PX
-  }
-
-  if (hostRect.width <= 0) {
-    return DETAIL_BASE_INDENT_PX + DETAIL_MIRROR_FALLBACK_OFFSET_PX
-  }
-
-  let mirrorOffsetPx = 0
-  const nestedMainEls = host.querySelectorAll(".orca-repr-main")
-  for (const candidate of nestedMainEls) {
-    if (!(candidate instanceof HTMLElement) || candidate === host) {
-      continue
-    }
-
-    const candidateRect = candidate.getBoundingClientRect()
-    const rawOffsetPx = Math.round(candidateRect.left - hostRect.left)
-    if (rawOffsetPx <= 0) {
-      continue
-    }
-
-    mirrorOffsetPx = Math.max(mirrorOffsetPx, rawOffsetPx)
-  }
-
-  if (mirrorOffsetPx <= 0) {
-    mirrorOffsetPx = DETAIL_MIRROR_FALLBACK_OFFSET_PX
-  }
-
-  const clampedOffsetPx = Math.min(mirrorOffsetPx, DETAIL_MAX_MIRROR_OFFSET_PX)
-  return DETAIL_BASE_INDENT_PX + clampedOffsetPx
-}
-
-function resolveTaskStatusIconLeft(
-  host: HTMLElement,
-  blockEl: HTMLElement,
-): number | null {
-  const candidates: HTMLElement[] = []
-  const selector = [
-    'input[type="checkbox"]',
-    '[role="checkbox"]',
-    ".orca-checkbox",
-    ".orca-task-checkbox",
-    ".orca-task-state",
-    ".orca-task-icon",
-    'i[class*="ti-"]',
-  ].join(",")
-
-  const queried = blockEl.querySelectorAll(selector)
-  for (const node of queried) {
-    if (!(node instanceof HTMLElement)) {
-      continue
-    }
-
-    if (node.closest(`[data-role="${TAG_BUTTON_ROLE}"]`) != null) {
-      continue
-    }
-
-    if (node.closest(`[data-role="${DETAIL_ROLE}"]`) != null) {
-      continue
-    }
-
-    if (node.matches('i[class*="ti-"]')) {
-      const className = node.className
-      if (
-        !/(ti-(circle|square|checkbox|check|point|minus|x))/i.test(className) ||
-        /(ti-(chevron|caret|arrow|plus))/i.test(className)
-      ) {
-        continue
-      }
-    }
-
-    candidates.push(node)
-  }
-
-  if (candidates.length === 0) {
-    return null
-  }
-
-  const hostRect = host.getBoundingClientRect()
-  let leftMost: number | null = null
-  for (const element of candidates) {
-    const rect = element.getBoundingClientRect()
-    const left = Math.round(rect.left)
-    if (left < Math.round(hostRect.left) - 1) {
-      continue
-    }
-
-    if (leftMost == null || left < leftMost) {
-      leftMost = left
-    }
-  }
-
-  return leftMost
-}
-
 function removeTagButton(blockEl: HTMLElement) {
   const button = blockEl.querySelector(`button[data-role="${TAG_BUTTON_ROLE}"]`)
   if (button instanceof HTMLElement) {
@@ -631,6 +472,31 @@ function resolveVisibleTaskBlock(rawBlockId: DbId): Block | null {
 function hasTaskTagRef(block: Block, tagAlias: string): boolean {
   const liveBlock = orca.state.blocks[getMirrorId(block.id)] ?? block
   return liveBlock.refs.some((ref) => ref.type === TAG_REF_TYPE && ref.alias === tagAlias)
+}
+
+function updateDetailText(
+  detailEl: HTMLElement,
+  timer: ReturnType<typeof readTaskTimerFromBlock>,
+  settings: ReturnType<typeof getPluginSettings>,
+  nowMs: number,
+) {
+  const elapsedMs = resolveTaskTimerElapsedMs(timer, nowMs)
+  let detailText = t("Elapsed ${time}", {
+    time: formatTaskTimerDuration(elapsedMs),
+  })
+
+  if (settings.taskTimerMode === "pomodoro") {
+    const progress = resolveTaskPomodoroProgress(elapsedMs)
+    detailText = t("Pomodoro ${cycle} ${elapsed}/${duration}", {
+      cycle: String(progress.cycle),
+      elapsed: formatTaskTimerDuration(progress.cycleElapsedMs),
+      duration: formatTaskTimerDuration(POMODORO_DURATION_MS),
+    })
+  }
+
+  if (detailEl.textContent !== detailText) {
+    detailEl.textContent = detailText
+  }
 }
 
 function removeInlineWidgets() {
