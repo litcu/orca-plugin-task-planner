@@ -1,354 +1,227 @@
-# orca-task-planner
+# Task Planner
 
 [![English](https://img.shields.io/badge/README-English-1f6feb)](README_en.md)
 [![简体中文](https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-2ea44f)](README.md)
 
-`orca-task-planner` is an all-in-one planning and execution plugin for Orca Note.
+Task Planner is an all-in-one task planning and execution plugin for [Orca Note](https://github.com/sethyuan/orca-note). It turns ordinary blocks into manageable tasks and helps you move work forward with task tags, active-task detection, My Day, timers, reviews, recurring tasks, and custom views.
+
+Project home: [https://github.com/litcu/orca-plugin-task-planner](https://github.com/litcu/orca-plugin-task-planner)
+
+## Index
+
+- [Task Planner](#task-planner)
+  - [Index](#index)
+  - [Plugin Overview](#plugin-overview)
+  - [Feature Guide](#feature-guide)
+    - [0) Quick Capture](#0-quick-capture)
+    - [1) Task Tags and Status Flow](#1-task-tags-and-status-flow)
+    - [2) Task Property Popup](#2-task-property-popup)
+    - [3) Task Management Panel](#3-task-management-panel)
+    - [4) Active Tasks and Blocking Rules](#4-active-tasks-and-blocking-rules)
+    - [5) Dependencies, Parent Tasks, and Sequential Subtasks](#5-dependencies-parent-tasks-and-sequential-subtasks)
+    - [6) My Day](#6-my-day)
+    - [7) Task Timer](#7-task-timer)
+    - [8) Reviews](#8-reviews)
+    - [9) Recurring Tasks](#9-recurring-tasks)
+    - [10) Filters and Custom Views](#10-filters-and-custom-views)
+    - [11) Startup Task Summary](#11-startup-task-summary)
+  - [Quick Start](#quick-start)
+  - [Commands and Shortcuts](#commands-and-shortcuts)
+  - [Data and Persistence](#data-and-persistence)
+  - [Settings](#settings)
+  - [Installation and Releases](#installation-and-releases)
+  - [Local Development](#local-development)
+  - [Documentation](#documentation)
+  - [License](#license)
 
 ## Plugin Overview
 
-A task command center for Orca Note. It helps you:
+Task Planner is a task command center for Orca Note. It helps you:
 
 - capture ideas as tasks in seconds
-- run planning, scheduling, execution, and review in one flow
-- focus only on actionable work in **Active Tasks**
-- shape today with **My Day** (list and schedule)
-- track real effort with built-in timer
-- reduce priority decision fatigue with scoring and views
+- move from task lists to scheduling, execution, review, and recurrence
+- focus only on currently actionable work in **Active Tasks**
+- plan today's workload with **My Day** list and schedule views
+- track real effort with direct or Pomodoro timers
+- reduce priority decision fatigue with scoring, filters, and saved views
 
-## Key Features
+## Feature Guide
 
-### 0) Quick capture (fast task collection)
+### 0) Quick Capture
 
-The first step of task management is not perfect planning, but not losing input.  
-The plugin supports immediate task capture inside notes:
+The first step of task management is not perfect planning. It is making sure the task is not lost.
 
-- convert the current block into a task with `Alt+Enter`
-- create a new task block quickly from the task management panel (`Add task`)
-- fill time/dependency/priority details later in the property panel
+- Add `#Task` to any block to turn it into a task.
+- Press `Alt+Enter` inside a block to initialize a task and use the fast status flow.
+- Create new tasks directly from the task management panel.
+- Fill dates, dependencies, labels, reviews, recurring rules, and custom fields later in the property popup.
 
-Capture first, refine later, without breaking your writing flow.
+### 1) Task Tags and Status Flow
 
-### 1) Fast task status switching
+The plugin initializes a `Task` tag and keeps task-facing fields on the tag reference.
 
-Status switching is designed as a low-friction editor action:
+- Core statuses are `TODO`, `Doing`, `Waiting`, and `Done` in English workspaces.
+- `Alt+Enter` switches the main execution loop between `TODO` and `Doing`.
+- Clicking the status icon on the left side of a task block opens a full status menu.
+- Switching a task to `Doing` records a start time when none exists.
+- When timer auto-start is enabled, switching to `Doing` starts the task timer.
 
-- press `Alt+Enter` to create a task and cycle status
-- status sequence: `TODO -> Doing -> Done -> TODO`
-- `Waiting` can be set manually in task properties (not included in the `Alt+Enter` cycle)
-- click the left status icon for the same status cycle
-- when switching to `Doing`, start time is recorded automatically
-- if timer auto-start is enabled, switching to `Doing` also starts task timer
+### 2) Task Property Popup
 
-Progress and execution records stay inside the editor, so workflow stays continuous.
+Click a task tag, use the tag menu, or run the command to open a focused task editor.
 
-### 2) Task Property Panel: fast task editing
+- Edit status, start time, due time, star, labels, and remarks.
+- Edit dependency targets, dependency mode (`ALL` / `ANY`), and dependency delay.
+- Configure review tracking and recurring rules.
+- Edit priority fields such as importance, urgency, and effort.
+- Preserve supported custom task-tag properties in the same workflow.
 
-Click the task tag to open a single editing surface for "fill in -> save -> continue":
+### 3) Task Management Panel
 
-- basic fields: status, start time, due time, labels, notes, star
-- planning fields: importance, urgency, effort
-- dependency fields: dependency targets, dependency mode (`ALL` / `ANY`), dependency delay
-- cycle fields: review rules, recurrence rules
+The task panel is the main workspace for reading, filtering, editing, and executing tasks.
 
-The panel includes validation and quick save. Dependency targets can be selected by block references, making complex task graphs manageable without context switching.
+- **Dashboard**: live metrics, due pressure, blockers, and top actionable tasks.
+- **Active Tasks**: tasks that are actionable right now.
+- **All Tasks**: the full task tree with hierarchy management.
+- **Starred Tasks**: manually highlighted tasks.
+- **Due Soon**: tasks due within the configured horizon.
+- **Review**: tasks that need review, with batch review actions.
+- **My Day**: today's task list and schedule board.
+- **Custom Views**: saved filter views for recurring contexts.
 
-### 3) Task Management Panel: one place to manage all tasks
+### 4) Active Tasks and Blocking Rules
 
-The task panel is the plugin's operations hub for viewing, filtering, editing, and executing tasks.  
-Included views:
+Active Tasks is designed to answer one question: what can I do now?
 
-- **Dashboard**: global snapshot (completion, due pressure, blockers, top priorities)
-- **My Day**: daily focus list and schedule board (list/schedule mode)
-- **Active Tasks**: executable tasks right now (primary execution entry)
-- **All Tasks**: full task tree (hierarchy and drag/drop management)
-- **Starred Tasks**: manually highlighted tasks
-- **Due Soon**: tasks due within configured window
-- **Review**: review queue and batch review actions
-- **Custom Views**: scenario-specific saved rule-based views
+A task is blocked when any of these conditions apply:
 
-It supports the full loop of **inspect -> adjust -> execute -> review** in one place.
+1. the task is completed or canceled
+2. the start time has not arrived
+3. dependencies are not satisfied
+4. dependency delay is still active
+5. open subtasks are still present
+6. a previous sequential subtask is unfinished
+7. an ancestor task is blocked by dependencies
 
-### 4) Active Tasks: GTD-oriented execution list
+Actionable tasks are scored and sorted by urgency, importance, due pressure, start timing, star context, effort, dependency criticality, and task age. Overdue tasks are prioritized first, then score, due time, and stable task ID.
 
-`Active Tasks` is designed to answer one question instantly: "What should I do right now?"
+### 5) Dependencies, Parent Tasks, and Sequential Subtasks
 
-#### Eligibility rules
+Task Planner supports both explicit dependencies and document-tree task structure.
 
-A task enters `Active Tasks` only if all checks pass:
+- Use `Depends on` to select prerequisite tasks.
+- Choose `ALL` when every dependency must finish first.
+- Choose `ANY` when one completed dependency is enough.
+- Add dependency delay when a task should wait after dependencies are satisfied.
+- Link a block to a parent task from the block menu.
+- Enable sequential subtasks on a parent task so children enter Active Tasks one by one in their current order.
 
-1. task is not completed and not canceled
-2. start time is reached (or not set)
-3. no unfinished subtasks exist
-4. ancestor dependency chain does not block
-5. own dependency condition is satisfied (`ALL` / `ANY` + delay)
+### 6) My Day
 
-#### Priority score formula
+My Day turns today's plan into an executable workspace.
 
-Active tasks are scored and ranked with:
+- Add or remove tasks from My Day from task rows.
+- Work in list mode for lightweight daily focus.
+- Switch to schedule mode to drag tasks onto a timeline.
+- Keep unscheduled tasks visible while planning time blocks.
+- Sync My Day tasks into today's journal as reference blocks.
+- Reset the My Day boundary based on the configured local start hour.
 
-```text
-base = 0.40*I + 0.22*U + 0.20*D + 0.10*S + 0.08*C
-score = base * criticalBoost * deadlineBoost * startByBoost * agingBoost / timePenalty
-```
+### 7) Task Timer
 
-Where:
+The built-in timer turns "I worked on this" into persistent task data.
 
-- `timePenalty = 1 + 0.9*EffN`
-- `criticalBoost = 1 + 0.3*Criticality`
-- `deadlineBoost = 1 + 0.25*OverdueN`
-- `startByBoost = 1 + 0.22*StartBy`
-- `agingBoost = 1 + 0.12*AgingN`
+- Use direct timer mode for simple elapsed-time tracking.
+- Use Pomodoro mode for focus, short break, and long break cycles.
+- Start, stop, pause, resume, and clear timers from task rows.
+- Run only one task timer globally at a time.
+- Starting a timer promotes `TODO` or `Waiting` tasks to `Doing`.
+- Switching to `Done` or `Waiting` stops a running timer.
 
-And key factors are:
+### 8) Reviews
 
-- `I/U`: non-linear mapping of importance/urgency (neutral at `50`)
-- `D`: due factor (`45` if no due date, `100` if overdue, otherwise exponential decay by due distance)
-- `S`: start factor (`100` when start is reached, quadratic decay for future tasks, floor at `10`)
-- `C`: context factor (`80` for starred tasks, otherwise `50`)
-- `EffN`: normalized effort (`effort/100`)
-- `Criticality`: dependency criticality from dependency graph (`0.6*descendants + 0.4*dependencyDemand`)
-- `OverdueN`: normalized overdue days (`daysOverdue/7`)
-- `StartBy`: latest-start pressure using effort and remaining days
-- `AgingN`: task-age factor based on creation time (`waitingDays/14`)
-- `dependencyDemand`: downstream task demand intensity (higher when dependent tasks are high importance/urgency)
+Review tracking keeps long-running tasks visible after the initial capture.
 
-Sort order:
+- Use a one-time review for a single future check.
+- Use cyclic review for ongoing review intervals.
+- Find due reviews in the Review view.
+- Mark one task or selected tasks as reviewed.
+- Automatically advance the next review time for cyclic reviews.
 
-1. overdue tasks first
-2. score descending
-3. due time ascending
-4. stable internal ID order
+### 9) Recurring Tasks
 
-You do not need to manually compare tasks repeatedly. The list keeps attention on what is most worth pushing now.
+Recurring rules reduce repeated manual planning for routine work.
 
-#### Recommended usage
+- Repeat by day, week, or month.
+- Configure interval, weekday, repeat time, maximum count, and end date.
+- When a task is completed, the plugin can advance it to the next occurrence.
+- Recurrence works with task timing and task state so routine items remain reusable.
 
-- start each work session from `Active Tasks`
-- execute from top to bottom to reduce context switching
-- combine `Due Soon` for short-term scheduling and `Dashboard` for macro calibration
+### 10) Filters and Custom Views
 
-### 5) Recurring tasks
+Custom views turn repeated filtering into a reusable task workspace.
 
-Recurring rules turn repeated planning into automatic progression:
+- Filter by task name, status, labels, dates, review rules, and custom properties.
+- Combine rules with `AND` / `OR` groups.
+- Use operators such as equals, contains, between, before, after, empty, and not empty.
+- Save, edit, and delete custom views from the task panel.
+- Reopen saved views after restarting Orca Note.
 
-- daily / weekly / monthly recurrence
-- interval, weekday (weekly), max count, end date
-- automatic roll-forward to next cycle when completed
-- coordinated timeline progression for related subtasks in task hierarchies
+### 11) Startup Task Summary
 
-Great for standups, weekly reports, maintenance checks, and other cadence-based work.
-
-### 6) Task review
-
-Review keeps long-running work visible so tasks do not disappear after kickoff:
-
-- single review and cyclic review
-- configurable review interval (e.g., every N days/weeks/months)
-- centralized review handling in `Review` view
-- batch `Mark reviewed` action with automatic next-review progression
-
-### 7) Custom views
-
-Custom views save high-frequency filters as reusable entry points:
-
-- create, edit, and delete custom views
-- combine rules with AND/OR logic
-- filter by status, time, dependencies, labels, and more
-- persistent across restarts
-
-Useful for recurring contexts such as work/home/project phase/weekly planning.
-
-### 8) Task dashboard
-
-`Dashboard` gives an operating view of your task system:
-
-- key metrics: total tasks, active tasks, review tasks, overdue tasks
-- structure metrics: status distribution, due pressure
-- risk metrics: major blocker categories
-- execution metrics: top-priority active tasks
-
-Use it for a quick daily calibration before execution starts.
-
-### 9) My Day view
-
-`My Day` turns "today's plan" into an executable workspace:
-
-- keep a dedicated "today list" of tasks
-- switch between list mode and schedule mode
-- drag and resize task cards on timeline for time blocking
-- use right-click menu on cards for quick actions
-- sync My Day tasks to today journal section automatically
-- avoid duplicate mirror insertion when the task already exists in today's journal
-
-Move directly from priority list to concrete time blocks without duplicating task sources.
-
-### 10) Task timer
-
-The built-in task timer turns "I worked on it for a while" into measurable effort:
-
-- timer modes: `Direct timer` and `Pomodoro timer`
-- start/stop timer from task rows and inline task widgets
-- only one running task timer at a time (starting one stops others)
-- optional auto-start when status switches to `Doing`
-- starting timer from `Waiting` auto-switches task status to `Doing`
-- auto-stop when status switches to `Done` or `Waiting`
-- elapsed time persists across restarts
-
-Useful for effort review and better estimation over time.
-
-### 11) Startup task summary notification
-
-On startup, the plugin can show a quick snapshot of today's workload:
+On plugin startup, Task Planner can show a short workload snapshot.
 
 - active task count
 - overdue task count
-- due-soon task count within configured due-soon window
+- tasks due within the configured due-soon window
 
-This notification is optional and can be toggled in settings.
-
-## Installation
-
-### Install from source
-
-1. Place this project under Orca plugin directory, for example:  
-   `C:\Users\<your-name>\Documents\orca\plugins\orca-task-planner`
-2. Build:
-
-```bash
-npm install
-npm run build
-```
-
-3. Start/restart Orca Note.
-4. Enable `orca-task-planner` in plugin settings.
-
-Build output: `dist/index.js`.
-
-### Install from GitHub Release
-
-1. Download `orca-task-planner-vX.Y.Z.zip` from GitHub `Releases` assets.
-2. Extract it to your Orca plugins folder:  
-   `C:\Users\<your-name>\Documents\orca\plugins\`
-3. Ensure the final structure is:  
-   `...\plugins\orca-task-planner\dist\index.js`
-4. Start/restart Orca Note and enable `orca-task-planner`.
-
-### Marketplace submission readiness
-
-This repository is updated to match the latest `awesome-orcanote` contribution requirements:
-
-- `package.json` includes the required metadata fields: `name`, `description`, `version`, `keywords`, `license`, `author`
-- `author` is set to the GitHub username `litcu`
-- the release package explicitly includes `LICENSE` and excludes `package-lock.json`
-- the marketplace icon now follows the `80x80` size limit
-- run `npm run check:marketplace` to validate metadata and print a ready-to-paste `plugins.json` entry for your `awesome-orcanote` PR
-
+The notification is controlled by plugin settings and can be disabled.
 
 ## Quick Start
 
-1. Open Command Palette and run `Open task management panel` (your unified workspace).
-2. Create a task:
-   - place cursor on any block
-   - press `Alt+Enter`
-   - status cycle: `TODO -> Doing -> Done -> TODO`
-3. Open task properties:
-   - click the task tag, or
-   - run `Open task property popup`
-4. Set core fields:
-   - start time / due time
-   - dependency mode (`ALL` or `ANY`)
-   - dependency delay (if needed)
-   - importance / urgency / effort
-5. Switch to **Active Tasks** and execute in order.
-6. Use `All Tasks` for hierarchy and drag/drop structure management.
-7. Use `My Day` for daily focus and schedule planning.
-8. Use `Review` for periodic review and batch review actions.
-9. Use `Due Soon` and `Dashboard` for planning and global overview.
+1. Download the plugin package from [Releases](https://github.com/litcu/orca-plugin-task-planner/releases), then install and enable it in Orca Note.
+2. Add the `#Task` tag to any block, or place the cursor inside a block and press `Alt+Enter`, to turn it into a task.
+3. Click the task button in the top bar, or run "Open task management panel" from the command palette, to view Dashboard, Active Tasks, All Tasks, and other views.
+4. Click a task tag to open the property popup, then add due dates, dependencies, labels, reviews, recurring rules, and more.
+5. Use Active Tasks for execution, My Day for daily planning, Review for periodic follow-up, and Custom Views for saved task contexts.
+6. Open plugin settings to enable My Day, task timers, startup task summary notifications, the default panel view, and subtask progress bars as needed.
 
-## Commands and Shortcut
+## Commands and Shortcuts
 
-- `Alt+Enter`: create/cycle task status
-- `Open task management panel`: open task management panel
-- `Open task property popup`: open task property panel
+- `Alt+Enter`: initialize a task or switch the main status flow.
+- `Open task management panel`: open the task management panel.
+- `Open task property popup`: open the task property popup for the current task block.
 
 ## Data and Persistence
 
-- task-facing fields are stored in task tag properties
-- extended planning fields are persisted in block property `_mlo_task_meta`
-- task timer data is persisted in block property `_mlo_task_timer`
-- custom views and My Day state are persisted in plugin local data
-- local-first persistence, with no external service required
+- User-facing task fields are stored on the task tag reference.
+- Extended task metadata is stored in the block property `_mlo_task_meta`.
+- Timer data is stored in the block property `_mlo_task_timer`.
+- My Day state and custom views are stored in plugin-local data.
+- The plugin is local-first and does not require an external service.
 
-## FAQ
+## Settings
 
-### Why is a task missing from Active Tasks?
+- `Task tag name`: The tag used to identify tasks. The default is `Task`, and changes apply immediately.
+- `Show task panel icon`: Controls whether the task panel button appears in the top bar.
+- `Show subtask progress bar`: Shows subtask completion progress in task lists.
+- `Default task panel view`: Sets the view shown when the task panel is opened for the first time.
+- `Enable My Day` and `My Day start hour`: Enable My Day and configure the hour used for daily reset and schedule timeline start.
+- `Due soon days` and `Include overdue in Due Soon`: Configure the time horizon for the Due Soon view and whether overdue tasks are included.
+- `Notify task summary on startup`: Shows a startup notification with counts for active, overdue, and due-soon tasks.
+- `Enable task timer`, `Auto start timer when status becomes Doing`, and `Task timer mode`: Enable timers, auto-start timing, and choose direct or Pomodoro mode.
 
-Most common reasons:
+## Installation and Releases
 
-- start time not reached yet
-- dependency not completed
-- dependency delay not elapsed
-- ancestor dependency still blocks
-- unfinished subtasks exist
-- task is already done/canceled
+- Repository: [https://github.com/litcu/orca-plugin-task-planner](https://github.com/litcu/orca-plugin-task-planner)
+- Download packages: [Releases](https://github.com/litcu/orca-plugin-task-planner/releases)
+- Report issues: [Issues](https://github.com/litcu/orca-plugin-task-planner/issues)
 
-### Why did Active Tasks order change?
+A release package usually includes `dist/index.js`, `package.json`, `LICENSE`, `README.md`, and the plugin icon. Use the zip file from the latest Release when installing.
 
-Order updates when fields that actually affect scoring or blocking change (for example due date, urgency, or dependency completion).
-Switching a task to `Doing` only records its start time; that action alone should not reorder Active Tasks.
+## Local Development
 
-### How should I choose `ALL` vs `ANY` dependency mode?
-
-- `ALL`: start only after all prerequisites are completed
-- `ANY`: start when any prerequisite is completed
-
-### Can I change the task tag name?
-
-Yes. Update **Task tag name** in plugin settings.
-
-### How do I adjust Due Soon range?
-
-Use plugin settings:
-
-- **Due soon days**
-- **Include overdue in Due Soon**
-
-### How do I set the initial task panel view?
-
-Use plugin setting:
-
-- **Default task panel view** (used when opening the task panel for the first time)
-
-### Can I hide the top task panel icon?
-
-Yes. In plugin settings:
-
-- **Show task panel icon** (enabled by default)
-
-### How do I use My Day view?
-
-Enable it in plugin settings via **Enable My Day**, then switch to `My Day` tab in task panel.
-
-### How does My Day day boundary work?
-
-Use **My Day start hour** to define when a new My Day starts (0-23 local hour).
-
-### How does task timer work with status switching?
-
-If **Auto start timer when status becomes Doing** is enabled, switching to `Doing` starts timer automatically.  
-Starting timer from `Waiting` auto-switches the task to `Doing`.  
-Switching to `Done` or `Waiting` stops running timer automatically.
-
-### Why does starting one task timer stop another running timer?
-
-The plugin enforces a single running task timer globally to keep elapsed time records consistent.
-
-### Can I disable startup task summary notification?
-
-Yes. Disable **Notify task summary on startup** in plugin settings.
-
-## Development
+This repository uses npm and the existing `package-lock.json`.
 
 ```bash
 npm install
@@ -356,37 +229,19 @@ npm run dev
 npm run build
 ```
 
-## Release
-
-One-click release commands:
+Common validation and release dry run commands:
 
 ```bash
-npm run release
-```
-
-Version level options:
-
-```bash
+npm run check:marketplace
 npm run release:dry-run
-npm run release:patch
-npm run release:minor
-npm run release:major
 ```
 
-`release:dry-run` will only build and package locally (no version bump, no commit/tag, no push).  
-Local artifact path:
+The repository currently has no separate `test` or `lint` script, so `npm run build` is the baseline validation. When changing marketplace metadata or release package structure, also run `npm run check:marketplace`. When changing release scripts, prefer `npm run release:dry-run`.
 
-```text
-release/orca-task-planner-vX.Y.Z.zip
-```
+## Documentation
 
-`release` / `release:patch` / `release:minor` / `release:major` will:
+Before contributing, start with the [architecture and data-flow documentation index](./doc/文档索引.md). The docs are organized by runtime registration, data model, task lifecycle, queries and views, dependency scoring, My Day, timers, reviews and recurring tasks, and custom views.
 
-1. ensure git working tree is clean
-2. ensure current branch is `main`
-3. run `npm run build`
-4. run `npm version <patch|minor|major> --tag-version-prefix v` (creates commit + tag)
-5. run `git push origin main`
-6. run `git push origin vX.Y.Z`
+## License
 
-After push, GitHub Actions will auto-create (or update) Release and upload `orca-task-planner-vX.Y.Z.zip`.
+This project is released under the [Apache-2.0](./LICENSE) license.
