@@ -3,6 +3,7 @@ import { t } from "../libs/l10n"
 import { dedupeDbIds, getMirrorId, isValidDbId } from "./block-utils"
 import { invalidateNextActionEvaluationCache } from "./dependency-engine"
 import { moveTaskInView } from "./all-tasks-engine"
+import { hasProjectTagRef } from "./project-schema"
 import { type TaskSchemaDefinition } from "./task-schema"
 import { initializeTaskTagForBlock } from "./task-service"
 import {
@@ -48,14 +49,18 @@ export function setupTaskBlockMenu(
 ): TaskBlockMenuHandle {
   const commandId = `${COMMAND_PREFIX}.linkParentTask`
   const sequentialCommandId = `${COMMAND_PREFIX}.toggleSequentialSubtasks`
+  const projectCommandId = `${COMMAND_PREFIX}.toggleProjectTag`
   const legacyCommandIds = [
     `${pluginName}.linkParentTask`,
     `${pluginName}.toggleSequentialSubtasks`,
+    `${pluginName}.toggleProjectTag`,
     "orca-task-planner.linkParentTask",
     "orca-task-planner.toggleSequentialSubtasks",
+    "orca-task-planner.toggleProjectTag",
   ].filter((id, index, list) => {
     return id !== commandId &&
       id !== sequentialCommandId &&
+      id !== projectCommandId &&
       list.indexOf(id) === index
   })
 
@@ -71,12 +76,19 @@ export function setupTaskBlockMenu(
   if (orca.state.blockMenuCommands[sequentialCommandId] != null) {
     orca.blockMenuCommands.unregisterBlockMenuCommand(sequentialCommandId)
   }
+  if (orca.state.blockMenuCommands[projectCommandId] != null) {
+    orca.blockMenuCommands.unregisterBlockMenuCommand(projectCommandId)
+  }
 
   orca.blockMenuCommands.registerBlockMenuCommand(commandId, {
     worksOnMultipleBlocks: false,
     render: (blockId, _rootBlockId, close) => {
       const MenuText = orca.components.MenuText
       const normalizedBlockId = getMirrorId(blockId)
+      const block = orca.state.blocks[normalizedBlockId] ?? orca.state.blocks[blockId] ?? null
+      if (block != null && hasProjectTagRef(block, schema.projectTagAlias)) {
+        return null
+      }
 
       return window.React.createElement(MenuText, {
         title: t("Link to parent task"),
@@ -99,7 +111,7 @@ export function setupTaskBlockMenu(
       const MenuText = orca.components.MenuText
       const normalizedBlockId = getMirrorId(blockId)
       const block = orca.state.blocks[normalizedBlockId] ?? orca.state.blocks[blockId] ?? null
-      if (block == null || findTaskTagRef(block, schema.tagAlias) == null) {
+      if (block == null || findTaskTagRef(block, schema.tagAlias) == null || hasProjectTagRef(block, schema.projectTagAlias)) {
         return null
       }
 
@@ -115,7 +127,12 @@ export function setupTaskBlockMenu(
           event.stopPropagation()
           close()
           try {
-            await toggleSequentialSubtasks(normalizedBlockId, schema.tagAlias, !sequentialEnabled)
+            await toggleSequentialSubtasks(
+              normalizedBlockId,
+              schema.tagAlias,
+              schema.projectTagAlias,
+              !sequentialEnabled,
+            )
             orca.notify(
               "info",
               !sequentialEnabled
@@ -134,6 +151,42 @@ export function setupTaskBlockMenu(
     },
   })
 
+  orca.blockMenuCommands.registerBlockMenuCommand(projectCommandId, {
+    worksOnMultipleBlocks: false,
+    render: (blockId, _rootBlockId, close) => {
+      const MenuText = orca.components.MenuText
+      const normalizedBlockId = getMirrorId(blockId)
+      const block = orca.state.blocks[normalizedBlockId] ?? orca.state.blocks[blockId] ?? null
+      if (block == null) {
+        return null
+      }
+
+      const projectTagged = hasProjectTagRef(block, schema.projectTagAlias)
+      return window.React.createElement(MenuText, {
+        title: projectTagged ? t("Unmark project") : t("Mark as project"),
+        preIcon: projectTagged ? "ti ti-folder-off" : "ti ti-folder",
+        postIcon: projectTagged ? "ti ti-check" : undefined,
+        onClick: async (event: MouseEvent) => {
+          event.stopPropagation()
+          close()
+          try {
+            await toggleProjectTag(normalizedBlockId, schema.projectTagAlias, !projectTagged)
+            orca.notify(
+              "info",
+              projectTagged ? t("Project tag removed") : t("Marked as project"),
+            )
+          } catch (error) {
+            console.error(error)
+            const message = error instanceof Error
+              ? error.message
+              : t("Failed to toggle project tag")
+            orca.notify("error", message)
+          }
+        },
+      })
+    },
+  })
+
   return {
     dispose: () => {
       if (orca.state.blockMenuCommands[commandId] != null) {
@@ -141,6 +194,9 @@ export function setupTaskBlockMenu(
       }
       if (orca.state.blockMenuCommands[sequentialCommandId] != null) {
         orca.blockMenuCommands.unregisterBlockMenuCommand(sequentialCommandId)
+      }
+      if (orca.state.blockMenuCommands[projectCommandId] != null) {
+        orca.blockMenuCommands.unregisterBlockMenuCommand(projectCommandId)
       }
 
       for (const legacyCommandId of legacyCommandIds) {
@@ -564,6 +620,7 @@ async function getBlockById(blockId: DbId): Promise<Block | null> {
 async function toggleSequentialSubtasks(
   blockId: DbId,
   taskTagAlias: string,
+  projectTagAlias: string,
   enabled: boolean,
 ): Promise<void> {
   const targetBlock = await getBlockById(getMirrorId(blockId))
@@ -571,7 +628,10 @@ async function toggleSequentialSubtasks(
     throw new Error(t("Current block is unavailable"))
   }
 
-  if (findTaskTagRef(targetBlock, taskTagAlias) == null) {
+  if (
+    findTaskTagRef(targetBlock, taskTagAlias) == null ||
+    hasProjectTagRef(targetBlock, projectTagAlias)
+  ) {
     throw new Error(t("Sequential subtasks can only be enabled on task blocks"))
   }
 
@@ -586,6 +646,43 @@ async function toggleSequentialSubtasks(
     null,
     [targetBlock.id],
     [toTaskMetaProperty(nextMeta, existingProperty)],
+  )
+  invalidateNextActionEvaluationCache()
+}
+
+async function toggleProjectTag(
+  blockId: DbId,
+  projectTagAlias: string,
+  enabled: boolean,
+): Promise<void> {
+  const targetBlock = await getBlockById(getMirrorId(blockId))
+  if (targetBlock == null) {
+    throw new Error(t("Current block is unavailable"))
+  }
+
+  if (enabled) {
+    if (hasProjectTagRef(targetBlock, projectTagAlias)) {
+      return
+    }
+    await orca.commands.invokeEditorCommand(
+      "core.editor.insertTag",
+      null,
+      targetBlock.id,
+      projectTagAlias,
+      [],
+    )
+    invalidateNextActionEvaluationCache()
+    return
+  }
+
+  if (!hasProjectTagRef(targetBlock, projectTagAlias)) {
+    return
+  }
+  await orca.commands.invokeEditorCommand(
+    "core.editor.removeTag",
+    null,
+    targetBlock.id,
+    projectTagAlias,
   )
   invalidateNextActionEvaluationCache()
 }

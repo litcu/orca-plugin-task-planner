@@ -672,6 +672,7 @@ function createDefaultTaskValues(schema: TaskSchemaDefinition): TaskPropertyValu
     status: todoStatus,
     startTime: null,
     endTime: null,
+    projects: [],
     reviewEnabled: false,
     reviewType: "single",
     nextReview: null,
@@ -1029,14 +1030,22 @@ function injectTaskStatusStyles(pluginName: string, schema: TaskSchemaDefinition
   removeTaskStatusStyles(pluginName)
 
   const taskTagName = schema.tagAlias.toLowerCase()
+  const projectTagName = schema.projectTagAlias.toLowerCase()
   const statusPropertyDataName = toDataAttributeName(schema.propertyNames.status)
   const { todo: todoStatus, doing: doingStatus, waiting: waitingStatus, done: doneStatus } =
     getTaskStatusValues(schema)
+  const mainTaskSelector = `.orca-tags>.orca-tag[data-name="${taskTagName}"]`
+  const projectSelector = `.orca-tags>.orca-tag[data-name="${projectTagName}"]`
+  const cardTaskSelector = `.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"]`
+  const cardProjectSelector = `.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${projectTagName}"]`
+  const taskSelector = `.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${todoStatus}"]`
+  const projectFilter = `:not(:has(${projectSelector}))`
+  const cardProjectFilter = `:not(:has(${cardProjectSelector}))`
 
   const styles = `
-    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"])::before,
-    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"])>.orca-repr-main>.orca-repr-main-content::before,
-    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
+    .orca-repr-main-content:has(>${mainTaskSelector})${projectFilter}::before,
+    .orca-repr:has(>${cardTaskSelector})${cardProjectFilter} > .orca-repr-main>.orca-repr-main-content::before,
+    .orca-query-card-title:has(>${mainTaskSelector})${projectFilter} ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
       font-family: "tabler-icons";
       speak: none;
       font-style: normal;
@@ -1052,37 +1061,37 @@ function injectTaskStatusStyles(pluginName: string, schema: TaskSchemaDefinition
       translate: 0 .125rem;
     }
 
-    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${todoStatus}"])::before,
-    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${todoStatus}"])>.orca-repr-main>.orca-repr-main-content::before,
-    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${todoStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
+    .orca-repr-main-content:has(>${taskSelector})${projectFilter}::before,
+    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${todoStatus}"])${cardProjectFilter} > .orca-repr-main>.orca-repr-main-content::before,
+    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${todoStatus}"])${projectFilter} ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
       content: "\\ea6b";
       color: var(--orca-color-text-2);
     }
 
-    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"])::before,
-    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"])>.orca-repr-main>.orca-repr-main-content::before,
-    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
+    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"])${projectFilter}::before,
+    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"])${cardProjectFilter} > .orca-repr-main>.orca-repr-main-content::before,
+    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doingStatus}"])${projectFilter} ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
       content: "\\fedd";
       color: var(--orca-color-text-yellow);
     }
 
-    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])::before,
-    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])>.orca-repr-main>.orca-repr-main-content::before,
-    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
+    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])${projectFilter}::before,
+    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])${cardProjectFilter} > .orca-repr-main>.orca-repr-main-content::before,
+    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])${projectFilter} ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
       content: "\\ea6b";
       color: var(--orca-color-text-blue, #2563eb);
     }
 
-    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])::before,
-    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])>.orca-repr-main>.orca-repr-main-content::before,
-    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
+    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])${projectFilter}::before,
+    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])${cardProjectFilter} > .orca-repr-main>.orca-repr-main-content::before,
+    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])${projectFilter} ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
       content: "\\f704";
       color: var(--orca-color-text-green);
     }
 
-    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"]) .orca-inline,
-    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])>.orca-repr-main>.orca-repr-main-content .orca-inline,
-    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"]) ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content .orca-inline {
+    .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])${projectFilter} .orca-inline,
+    .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])${cardProjectFilter} > .orca-repr-main>.orca-repr-main-content .orca-inline,
+    .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${doneStatus}"])${projectFilter} ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content .orca-inline {
       opacity: 0.75;
     }
 

@@ -14,6 +14,7 @@ import {
   type TaskSchemaDefinition,
 } from "./task-schema"
 import { getTaskPropertiesFromRef, mergeTaskRefData } from "./task-properties"
+import { hasProjectTagRef } from "./project-schema"
 
 const PROP_TYPE_JSON = 0
 const TAG_REF_TYPE = 2
@@ -515,13 +516,17 @@ export async function stopAllRunningTaskTimers(
   const taskBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
     schema.tagAlias,
   ])) as Block[]
+  const filteredTaskBlocks = taskBlocks.filter((block) => !isProjectTaggedTaskBlock(block, schema))
 
   let stoppedCount = 0
 
-  for (const sourceBlock of taskBlocks) {
+  for (const sourceBlock of filteredTaskBlocks) {
     const liveBlock = getLiveTaskBlock(sourceBlock)
     const taskRef = findTaskTagRef(liveBlock, schema.tagAlias) ?? findTaskTagRef(sourceBlock, schema.tagAlias)
     if (taskRef == null) {
+      continue
+    }
+    if (isProjectTaggedTaskBlock(sourceBlock, schema) || isProjectTaggedTaskBlock(liveBlock, schema)) {
       continue
     }
 
@@ -578,13 +583,17 @@ export async function checkpointAllRunningTaskTimers(
   const taskBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
     schema.tagAlias,
   ])) as Block[]
+  const filteredTaskBlocks = taskBlocks.filter((block) => !isProjectTaggedTaskBlock(block, schema))
   let checkpointedCount = 0
   const seenTaskIds = new Set<DbId>()
 
-  for (const sourceBlock of taskBlocks) {
+  for (const sourceBlock of filteredTaskBlocks) {
     const liveBlock = getLiveTaskBlock(sourceBlock)
     const taskRef = findTaskTagRef(liveBlock, schema.tagAlias) ?? findTaskTagRef(sourceBlock, schema.tagAlias)
     if (taskRef == null) {
+      continue
+    }
+    if (isProjectTaggedTaskBlock(sourceBlock, schema) || isProjectTaggedTaskBlock(liveBlock, schema)) {
       continue
     }
 
@@ -1128,6 +1137,9 @@ async function resolveTaskBlock(
     if (taskRef == null) {
       continue
     }
+    if (isProjectTaggedTaskBlock(sourceBlock, schema) || isProjectTaggedTaskBlock(liveBlock, schema)) {
+      continue
+    }
 
     const writableBlockId = await resolveWritableBlockId([
       getMirrorIdFromBlock(liveBlock),
@@ -1202,6 +1214,15 @@ async function resolveBlockById(blockId: DbId): Promise<Block | null> {
 
 function getLiveTaskBlock(block: Block): Block {
   return orca.state.blocks[getMirrorId(block.id)] ?? block
+}
+
+function isProjectTaggedTaskBlock(
+  block: Block,
+  schema: TaskSchemaDefinition,
+): boolean {
+  const liveBlock = getLiveTaskBlock(block)
+  return hasProjectTagRef(liveBlock, schema.projectTagAlias) ||
+    hasProjectTagRef(block, schema.projectTagAlias)
 }
 
 function findTaskTagRef(

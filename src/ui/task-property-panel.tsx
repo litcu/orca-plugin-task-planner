@@ -260,6 +260,13 @@ function TaskPropertyPopupView(props: {
       props.schema.propertyNames.dependsOn,
     )
   }, [block, initialValues.dependsOn, props.schema.propertyNames.dependsOn])
+  const initialProjectsForEditor = React.useMemo(() => {
+    return normalizeProjectsForSelect(
+      block,
+      initialValues.projects,
+      props.schema.projectTagAlias,
+    )
+  }, [block, initialValues.projects, props.schema.projectTagAlias])
   const blockTagLabels = React.useMemo(() => {
     return collectTaskLabelValuesFromBlockTags(block, props.schema.tagAlias)
   }, [block, props.schema.tagAlias])
@@ -372,6 +379,9 @@ function TaskPropertyPopupView(props: {
   )
   const [dependsOnValues, setDependsOnValues] = React.useState<DbId[]>(
     initialDependsOnForEditor,
+  )
+  const [projectsValues, setProjectsValues] = React.useState<DbId[]>(
+    initialProjectsForEditor,
   )
   const [dependsModeValue, setDependsModeValue] = React.useState(
     editorInitialValues.dependsMode,
@@ -489,6 +499,7 @@ function TaskPropertyPopupView(props: {
       reviewMode: initialReviewEditor.mode,
       reviewIntervalText: initialReviewEditor.intervalText,
       lastReviewed: editorInitialValues.lastReviewed,
+      projects: initialProjectsForEditor,
       importanceText:
         editorInitialValues.importance == null ? "" : String(editorInitialValues.importance),
       urgencyText:
@@ -517,6 +528,7 @@ function TaskPropertyPopupView(props: {
     customPropertyDescriptors,
     initialCustomPropertyStates,
     initialDependsOnForEditor,
+    initialProjectsForEditor,
     taskName,
     editorInitialValues.dependencyDelay,
     editorInitialValues.dependsMode,
@@ -549,6 +561,7 @@ function TaskPropertyPopupView(props: {
       reviewMode: reviewModeValue,
       reviewIntervalText,
       lastReviewed: lastReviewedValue,
+      projects: projectsValues,
       importanceText,
       urgencyText,
       effortText,
@@ -585,6 +598,7 @@ function TaskPropertyPopupView(props: {
     startTimeValue,
     starValue,
     statusValue,
+    projectsValues,
     taskNameText,
     taskLabelsValue,
     urgencyText,
@@ -624,6 +638,7 @@ function TaskPropertyPopupView(props: {
     setReviewIntervalText(initialReviewEditor.intervalText)
     setLastReviewedValue(editorInitialValues.lastReviewed)
     setDependsOnValues(initialDependsOnForEditor)
+    setProjectsValues(initialProjectsForEditor)
     setDependsModeValue(editorInitialValues.dependsMode)
     setDependencyDelayText(
       editorInitialValues.dependencyDelay == null
@@ -639,6 +654,7 @@ function TaskPropertyPopupView(props: {
   }, [
     props.blockId,
     initialDependsOnForEditor,
+    initialProjectsForEditor,
     initialRepeatEditor.intervalText,
     initialRepeatEditor.mode,
     initialRepeatEditor.maxCountText,
@@ -923,6 +939,10 @@ function TaskPropertyPopupView(props: {
             insertedTaskId,
             dependsOnValues,
           )
+          const projectRefIds = await ensureProjectRefIds(
+            insertedTaskId,
+            projectsValues,
+          )
           const insertedTaskBlock =
             orca.state.blocks[getMirrorId(insertedTaskId)] ??
             orca.state.blocks[insertedTaskId] ??
@@ -955,6 +975,7 @@ function TaskPropertyPopupView(props: {
             labels: normalizedTaskLabels,
             remark: remarkText,
             dependsOn: dependencyRefIds,
+            projects: projectRefIds,
             dependsMode: hasDependencies ? dependsModeValue : "ALL",
             dependencyDelay: hasDependencies ? dependencyDelay.value : null,
           }, props.schema)
@@ -1036,6 +1057,10 @@ function TaskPropertyPopupView(props: {
         sourceBlockId,
         dependsOnValues,
       )
+      const projectRefIds = await ensureProjectRefIds(
+        sourceBlockId,
+        projectsValues,
+      )
       const sourceTaskBlock = orca.state.blocks[sourceBlockId] ?? block ?? null
       const normalizedTaskLabels = mergeTaskLabelValues(
         baseTaskLabels,
@@ -1070,6 +1095,7 @@ function TaskPropertyPopupView(props: {
         labels: normalizedTaskLabels,
         remark: remarkText,
         dependsOn: dependencyRefIds,
+        projects: projectRefIds,
         dependsMode: hasDependencies ? dependsModeValue : "ALL",
         dependencyDelay: hasDependencies ? dependencyDelay.value : null,
       }, props.schema)
@@ -1276,6 +1302,7 @@ function TaskPropertyPopupView(props: {
     nextReview: t("The next date/time when this task should be reviewed."),
     reviewEvery: t("How often to review this task in cyclic mode."),
     lastReviewed: t("The most recent time this task was marked as reviewed."),
+    projects: t("Projects this task belongs to."),
     dependsOn: t("Tasks that must be finished first before this one can proceed."),
     dependsMode: t("ALL means all dependencies must finish; ANY means one is enough."),
     dependencyDelay: t("Extra wait time in hours after dependencies are satisfied."),
@@ -1952,6 +1979,27 @@ function TaskPropertyPopupView(props: {
             fieldHelpTexts.status,
           ),
           renderFormRow(
+            labels.projects,
+            React.createElement(BlockSelect, {
+              mode: "block",
+              scope: props.schema.projectTagAlias,
+              selected: projectsValues,
+              multiSelection: true,
+              width: "100%",
+              menuContainer: popupMenuContainerRef,
+              onChange: (selected: string[]) => {
+                const normalized = dedupeBlockIds(
+                  selected
+                    .map((item) => Number(item))
+                    .filter((item): item is DbId => isValidDbId(item))
+                    .map((item) => getMirrorId(item)),
+                )
+                setProjectsValues(normalized)
+              },
+            }),
+            fieldHelpTexts.projects,
+          ),
+          renderFormRow(
             labels.labels,
             React.createElement(Select, {
               selected: taskLabelsValue,
@@ -2502,6 +2550,7 @@ interface TaskEditorSnapshotInput {
   reviewMode: ReviewMode
   reviewIntervalText: string
   lastReviewed: Date | null
+  projects: DbId[]
   importanceText: string
   urgencyText: string
   effortText: string
@@ -2601,6 +2650,7 @@ function buildEditorSnapshot(input: TaskEditorSnapshotInput): string {
       ? ""
       : input.reviewIntervalText.trim(),
     lastReviewed: input.reviewEnabled ? input.lastReviewed?.getTime() ?? null : null,
+    projects: [...input.projects].sort((left, right) => left - right),
     importanceText: input.importanceText.trim(),
     urgencyText: input.urgencyText.trim(),
     effortText: input.effortText.trim(),
@@ -2737,6 +2787,32 @@ function normalizeDependsOnForSelect(
   return normalized
 }
 
+function normalizeProjectsForSelect(
+  sourceBlock: Block | undefined,
+  projects: DbId[],
+  _projectTagAlias: string,
+): DbId[] {
+  const seen = new Set<DbId>()
+  const normalized: DbId[] = []
+
+  for (const value of projects) {
+    if (!isValidDbId(value)) {
+      continue
+    }
+
+    const matchedRef = sourceBlock?.refs.find((ref) => ref.id === value)
+    const targetId = getMirrorId(matchedRef?.to ?? value)
+    if (!isValidDbId(targetId) || seen.has(targetId)) {
+      continue
+    }
+
+    seen.add(targetId)
+    normalized.push(targetId)
+  }
+
+  return normalized
+}
+
 async function ensureDependencyRefIds(
   sourceBlockId: DbId,
   targetTaskIds: DbId[],
@@ -2780,6 +2856,59 @@ async function ensureDependencyRefIds(
       null,
       normalizedSourceBlockId,
       targetTaskId,
+      REF_DATA_TYPE,
+    )) as DbId
+    if (isValidDbId(createdRefId)) {
+      resolvedRefIds.push(createdRefId)
+    }
+  }
+
+  return dedupeBlockIds(resolvedRefIds)
+}
+
+async function ensureProjectRefIds(
+  sourceBlockId: DbId,
+  targetProjectIds: DbId[],
+): Promise<DbId[]> {
+  const sourceCandidates = dedupeBlockIds([
+    getMirrorId(sourceBlockId),
+    sourceBlockId,
+  ])
+  const normalizedSourceBlockId = sourceCandidates[0] ?? null
+  if (normalizedSourceBlockId == null) {
+    return []
+  }
+
+  const uniqueTargetIds = dedupeBlockIds(
+    targetProjectIds.map((item) => getMirrorId(item)),
+  ).filter((item) => item !== normalizedSourceBlockId)
+
+  const resolvedRefIds: DbId[] = []
+  for (const unresolvedTargetProjectId of uniqueTargetIds) {
+    const resolvedTargetProjectId = await resolveExistingBlockId([
+      unresolvedTargetProjectId,
+      getMirrorId(unresolvedTargetProjectId),
+    ])
+    const targetProjectId = resolvedTargetProjectId ?? unresolvedTargetProjectId
+    if (targetProjectId == null || targetProjectId === normalizedSourceBlockId) {
+      continue
+    }
+
+    const sourceBlock = orca.state.blocks[normalizedSourceBlockId]
+    const existingRefId = sourceBlock?.refs.find((ref) => {
+      return ref.type === REF_DATA_TYPE && getMirrorId(ref.to) === targetProjectId
+    })?.id
+
+    if (isValidDbId(existingRefId)) {
+      resolvedRefIds.push(existingRefId)
+      continue
+    }
+
+    const createdRefId = (await orca.commands.invokeEditorCommand(
+      "core.editor.createRef",
+      null,
+      normalizedSourceBlockId,
+      targetProjectId,
       REF_DATA_TYPE,
     )) as DbId
     if (isValidDbId(createdRefId)) {

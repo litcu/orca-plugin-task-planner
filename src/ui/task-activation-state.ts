@@ -5,6 +5,7 @@ import {
   type NextActionBlockedReason,
 } from "../core/dependency-engine"
 import { getTaskPropertiesFromRef } from "../core/task-properties"
+import { hasProjectTagRef } from "../core/project-schema"
 import {
   isTaskCanceledStatus,
   isTaskDoneStatus,
@@ -52,6 +53,9 @@ export async function loadTaskActivationInfo(
     }
 
     const liveBlock = orca.state.blocks[getMirrorId(block.id)] ?? block
+    if (hasProjectTagRef(liveBlock, schema.projectTagAlias) || hasProjectTagRef(block, schema.projectTagAlias)) {
+      return null
+    }
     return findTaskTagRef(liveBlock, schema.tagAlias) ?? findTaskTagRef(block, schema.tagAlias)
   })()
   if (taskRef == null) {

@@ -1,4 +1,5 @@
 import type { Block, BlockProperty, DbId } from "../orca.d.ts"
+import { PROJECT_TAG_ALIAS } from "./project-schema"
 
 export const TASK_TAG_ALIAS = "Task"
 
@@ -22,6 +23,7 @@ interface TaskSchemaPropertyNames {
   startTime: string
   endTime: string
   dependsOn: string
+  projects: string
   dependsMode: string
   dependencyDelay: string
   star: string
@@ -32,6 +34,7 @@ interface TaskSchemaPropertyNames {
 export interface TaskSchemaDefinition {
   locale: TaskSchemaLocale
   tagAlias: string
+  projectTagAlias: string
   propertyNames: TaskSchemaPropertyNames
   statusChoices: [string, string, string, string]
   dependencyModeChoices: [DependencyMode, DependencyMode]
@@ -48,11 +51,13 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
   en: {
     locale: "en",
     tagAlias: TASK_TAG_ALIAS,
+    projectTagAlias: PROJECT_TAG_ALIAS,
     propertyNames: {
       status: "Status",
       startTime: "Start time",
       endTime: "End time",
       dependsOn: "Depends on",
+      projects: "Projects",
       dependsMode: "Depends mode",
       dependencyDelay: "Dependency delay",
       star: "Star",
@@ -65,11 +70,13 @@ const TASK_SCHEMA_BY_LOCALE: Record<TaskSchemaLocale, TaskSchemaDefinition> = {
   "zh-CN": {
     locale: "zh-CN",
     tagAlias: TASK_TAG_ALIAS,
+    projectTagAlias: PROJECT_TAG_ALIAS,
     propertyNames: {
       status: "\u72b6\u6001",
       startTime: "\u5f00\u59cb\u65f6\u95f4",
       endTime: "\u7ed3\u675f\u65f6\u95f4",
       dependsOn: "\u4f9d\u8d56\u4efb\u52a1",
+      projects: "\u9879\u76ee",
       dependsMode: "\u4f9d\u8d56\u6a21\u5f0f",
       dependencyDelay: "\u4f9d\u8d56\u5ef6\u8fdf",
       star: "\u6536\u85cf",
@@ -104,17 +111,19 @@ export interface EnsureTaskSchemaResult {
 export function getTaskSchemaByLocale(
   locale: string,
   taskTagAlias: string = TASK_TAG_ALIAS,
+  projectTagAlias: string = PROJECT_TAG_ALIAS,
 ): TaskSchemaDefinition {
   const schema = locale === "zh-CN"
     ? TASK_SCHEMA_BY_LOCALE["zh-CN"]
     : TASK_SCHEMA_BY_LOCALE.en
 
-  return withTaskTagAlias(schema, taskTagAlias)
+  return withTaskTagAlias(schema, taskTagAlias, projectTagAlias)
 }
 
 export async function ensureTaskTagSchema(
   locale: string,
   taskTagAlias: string = TASK_TAG_ALIAS,
+  projectTagAlias: string = PROJECT_TAG_ALIAS,
 ): Promise<EnsureTaskSchemaResult> {
   let taskBlock = (await orca.invokeBackend(
     "get-block-by-alias",
@@ -152,8 +161,9 @@ export async function ensureTaskTagSchema(
 
   const existingSchema = detectSchemaFromProperties(taskBlock.properties)
   const targetSchema = withTaskTagAlias(
-    existingSchema ?? getTaskSchemaByLocale(locale),
+    existingSchema ?? getTaskSchemaByLocale(locale, taskTagAlias, projectTagAlias),
     taskTagAlias,
+    projectTagAlias,
   )
 
   await orca.commands.invokeEditorCommand(
@@ -181,10 +191,12 @@ export async function ensureTaskTagSchema(
 function withTaskTagAlias(
   schema: TaskSchemaDefinition,
   taskTagAlias: string,
+  projectTagAlias: string = PROJECT_TAG_ALIAS,
 ): TaskSchemaDefinition {
   return {
     ...schema,
     tagAlias: taskTagAlias,
+    projectTagAlias,
     propertyNames: { ...schema.propertyNames },
     statusChoices: [...schema.statusChoices] as [string, string, string, string],
     dependencyModeChoices: [...schema.dependencyModeChoices] as [
@@ -364,6 +376,14 @@ function buildTaskTagProperties(
         scope: tagScope,
       },
       pos: findPos(names.dependsOn),
+    },
+    {
+      name: names.projects,
+      type: PROP_TYPE.BLOCK_REFS,
+      typeArgs: {
+        scope: schema.projectTagAlias,
+      },
+      pos: findPos(names.projects),
     },
     {
       name: names.dependsMode,

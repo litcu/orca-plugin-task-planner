@@ -23,6 +23,7 @@ import {
   isTaskDoingStatus,
   type TaskSchemaDefinition,
 } from "./task-schema"
+import { hasProjectTagRef } from "./project-schema"
 import { createRecurringTaskInTodayJournal } from "./task-recurrence"
 import {
   resolveEffectiveNextReview,
@@ -54,6 +55,7 @@ export interface AllTaskItem {
   repeatRule: string
   lastReviewed: Date | null
   labels: string[]
+  projects: DbId[]
   star: boolean
   taskTagRef: BlockRef
   blockProperties: BlockProperty[]
@@ -67,9 +69,14 @@ export interface TaskDatasetSnapshot {
 export async function collectTaskDatasetSnapshot(
   schema: TaskSchemaDefinition,
 ): Promise<TaskDatasetSnapshot> {
-  const taskBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
+  const rawTaskBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
     schema.tagAlias,
   ])) as Block[]
+  const taskBlocks = rawTaskBlocks.filter((block) => {
+    const liveBlock = getLiveTaskBlock(block)
+    return !hasProjectTagRef(liveBlock, schema.projectTagAlias) &&
+      !hasProjectTagRef(block, schema.projectTagAlias)
+  })
 
   return {
     taskBlocks,
@@ -83,7 +90,14 @@ export async function collectAllTasks(
   const raw = (await orca.invokeBackend("get-blocks-with-tags", [
     schema.tagAlias,
   ])) as Block[]
-  return await buildAllTaskItemsFromBlocks(raw, schema)
+  return await buildAllTaskItemsFromBlocks(
+    raw.filter((block) => {
+      const liveBlock = getLiveTaskBlock(block)
+      return !hasProjectTagRef(liveBlock, schema.projectTagAlias) &&
+        !hasProjectTagRef(block, schema.projectTagAlias)
+    }),
+    schema,
+  )
 }
 
 async function buildAllTaskItemsFromBlocks(
@@ -101,7 +115,11 @@ async function buildAllTaskItemsFromBlocks(
     const liveBlock = getLiveTaskBlock(sourceBlock)
     cacheBlockByKnownIds(liveBlock, blockCacheById)
     const taskRef = findTaskTagRef(liveBlock, schema.tagAlias) ?? sourceTaskRef
-    if (taskRef == null) {
+    if (
+      taskRef == null ||
+      hasProjectTagRef(liveBlock, schema.projectTagAlias) ||
+      hasProjectTagRef(sourceBlock, schema.projectTagAlias)
+    ) {
       continue
     }
 
@@ -135,6 +153,7 @@ async function buildAllTaskItemsFromBlocks(
       repeatRule: values.repeatRule,
       lastReviewed: values.lastReviewed,
       labels: values.labels,
+      projects: values.projects,
       star: values.star,
       taskTagRef: taskRef,
       blockProperties: collectTaskBlockProperties(liveBlock, sourceBlock),
@@ -1022,6 +1041,7 @@ function createDefaultTaskValues(schema: TaskSchemaDefinition): TaskPropertyValu
     status: todoStatus,
     startTime: null,
     endTime: null,
+    projects: [],
     reviewEnabled: false,
     reviewType: "single",
     nextReview: null,
@@ -1247,6 +1267,9 @@ async function collectDependencyCleanupPlans(
   const seenTaskIds = new Set<DbId>()
 
   for (const sourceBlock of rawBlocks) {
+    if (hasProjectTagRef(sourceBlock, schema.projectTagAlias)) {
+      continue
+    }
     const taskId = getMirrorIdFromBlock(sourceBlock)
     if (!isValidDbId(taskId) || seenTaskIds.has(taskId) || deletedTargetIds.has(taskId)) {
       continue

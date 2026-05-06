@@ -4,6 +4,7 @@ import type { TaskSchemaDefinition } from "./task-schema"
 import { getTaskStatusValues, isTaskDoneStatus } from "./task-schema"
 import { getMirrorId, isValidDbId } from "./block-utils"
 import { getTaskPropertiesFromRef } from "./task-properties"
+import { hasProjectTagRef } from "./project-schema"
 import { setTaskTagStatus } from "./task-service"
 import {
   closeTaskPropertyPopup,
@@ -57,7 +58,7 @@ export function setupTaskPopupEntry(
     }
 
     // Only intercept task tag click, do not affect other tags.
-    if (!hasTaskTagRef(blockId, tagAlias)) {
+    if (!hasTaskTagRef(blockId, tagAlias, schema.projectTagAlias)) {
       return
     }
 
@@ -92,7 +93,7 @@ export function setupTaskPopupEntry(
         return
       }
 
-      if (!hasTaskTagRef(targetBlockId, tagAlias)) {
+      if (!hasTaskTagRef(targetBlockId, tagAlias, schema.projectTagAlias)) {
         orca.notify("warn", t("Current block is not a task"))
         return
       }
@@ -214,11 +215,16 @@ function resolveCommandTargetBlockId(explicitBlockId?: DbId): DbId | null {
   return isValidDbId(normalized) ? normalized : null
 }
 
-function hasTaskTagRef(blockId: DbId, tagAlias: string): boolean {
+function hasTaskTagRef(
+  blockId: DbId,
+  tagAlias: string,
+  projectTagAlias: string,
+): boolean {
   const block = orca.state.blocks[blockId]
   if (block == null) {
     return false
   }
 
-  return block.refs.some((ref) => ref.type === TAG_REF_TYPE && ref.alias === tagAlias)
+  return block.refs.some((ref) => ref.type === TAG_REF_TYPE && ref.alias === tagAlias) &&
+    !hasProjectTagRef(block, projectTagAlias)
 }

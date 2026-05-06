@@ -49,6 +49,11 @@ import {
   type AllTaskItem,
 } from "../core/all-tasks-engine"
 import {
+  collectProjectDatasetSnapshot,
+  type ProjectItem,
+} from "../core/project-engine"
+import type { ProjectSchemaDefinition } from "../core/project-schema"
+import {
   getPluginSettings,
   type TaskPlannerSettings,
 } from "../core/plugin-settings"
@@ -102,6 +107,7 @@ import {
   MyDayScheduleBoard,
   type MyDayScheduleTaskItem,
 } from "./my-day-schedule-board"
+import { ProjectViewsPanel } from "./project-views-panel"
 import {
   TaskListRow,
   type TaskListRowItem,
@@ -111,6 +117,7 @@ import { openTaskPropertyPopup } from "./task-property-panel"
 
 interface TaskViewsPanelProps extends PanelProps {
   schema: TaskSchemaDefinition
+  projectSchema: ProjectSchemaDefinition
   pluginName: string
 }
 
@@ -281,6 +288,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const [dropTarget, setDropTarget] = React.useState<TaskDropTarget | null>(null)
   const [nextActionItems, setNextActionItems] = React.useState<NextActionItem[]>([])
   const [allTaskItems, setAllTaskItems] = React.useState<AllTaskItem[]>([])
+  const [projectItems, setProjectItems] = React.useState<ProjectItem[]>([])
   const [allTaskItemsLoaded, setAllTaskItemsLoaded] = React.useState(false)
   const knownTaskIdsRef = React.useRef<Set<DbId>>(new Set())
   const taskBlockSignaturesRef = React.useRef<Map<DbId, string>>(new Map())
@@ -450,6 +458,13 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
           loadedAllTasks = allTasks
           setAllTaskItems(allTasks)
           setAllTaskItemsLoaded(true)
+        } else if (targetTab === "projects") {
+          const snapshot = await collectProjectDatasetSnapshot(props.schema)
+          const allTasks = snapshot.allTasks
+          loadedAllTasks = allTasks
+          setAllTaskItems(allTasks)
+          setAllTaskItemsLoaded(true)
+          setProjectItems(snapshot.projectItems)
         } else if (isCustomTaskViewsTab(targetTab)) {
           const allTasks = await collectAllTasks(props.schema)
           loadedAllTasks = allTasks
@@ -1990,6 +2005,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const isDashboardTab = tab === "dashboard"
   const isMyDayTab = tab === "my-day"
   const isMyDayScheduleMode = isMyDayTab
+  const isProjectsTab = tab === "projects"
   const isReviewDueTab = tab === "review-due"
   const isAllTasksTab = tab === "all-tasks"
   const isCustomViewTab = isCustomTaskViewsTab(tab)
@@ -2543,6 +2559,10 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         label: t("Active Tasks"),
       },
       {
+        value: "projects",
+        label: t("Projects"),
+      },
+      {
         value: "all-tasks",
         label: t("All Tasks"),
       },
@@ -2586,6 +2606,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       ? t("My Day")
     : tab === "next-actions"
       ? t("Active Tasks")
+      : tab === "projects"
+        ? t("Projects")
       : tab === "all-tasks"
         ? t("All Tasks")
       : tab === "starred-tasks"
@@ -2599,11 +2621,15 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     ? allTasksVisibleCount
     : isDashboardTab
       ? allTaskItems.length
+      : isProjectsTab
+        ? projectItems.length
       : isMyDayTab
         ? filteredMyDayTaskItems.length
       : flatVisibleItems.length
   const emptyText = tab === "next-actions"
     ? t("No actionable tasks")
+    : tab === "projects"
+      ? t("No projects yet")
     : tab === "my-day"
       ? t("No tasks in My Day")
     : tab === "all-tasks"
@@ -2623,6 +2649,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       ? "rgba(11, 95, 255, 0.22)"
     : tab === "next-actions"
       ? "rgba(37, 99, 235, 0.18)"
+      : tab === "projects"
+        ? "rgba(34, 197, 94, 0.16)"
       : tab === "all-tasks"
         ? "rgba(183, 121, 31, 0.2)"
         : tab === "starred-tasks"
@@ -3861,7 +3889,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
           {
             ref: filterButtonAnchorRef,
             style: {
-              display: isDashboardTab ? "none" : "inline-flex",
+              display: isDashboardTab || isProjectsTab ? "none" : "inline-flex",
               alignItems: "center",
             },
           },
@@ -4003,18 +4031,20 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
             ),
           ),
         ),
-        React.createElement(Input, {
-          value: quickSearchKeyword,
-          placeholder: t("Search task name"),
-          onChange: (event: Event) => {
-            const target = event.target as HTMLInputElement | null
-            setQuickSearchKeyword(target?.value ?? "")
-          },
-          style: {
-            width: "220px",
-            minWidth: "160px",
-          },
-        }),
+        !isProjectsTab
+          ? React.createElement(Input, {
+              value: quickSearchKeyword,
+              placeholder: t("Search task name"),
+              onChange: (event: Event) => {
+                const target = event.target as HTMLInputElement | null
+                setQuickSearchKeyword(target?.value ?? "")
+              },
+              style: {
+                width: "220px",
+                minWidth: "160px",
+              },
+            })
+          : null,
         null,
         isAllTasksTab && allTasksQuickFilter != null
           ? React.createElement(
@@ -4215,37 +4245,39 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
               ),
             )
           : null,
-        React.createElement(
-          Button,
-          {
-            variant: "solid",
-            onClick: () => {
-              addTask()
-            },
-            style: {
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "4px",
-              whiteSpace: "nowrap",
-              borderRadius: "8px",
-              background: "var(--orca-color-text-blue, #2563eb)",
-              borderColor: "var(--orca-color-text-blue, #2563eb)",
-              color: "#fff",
-            },
-          },
-          React.createElement("i", {
-            className: "ti ti-plus",
-            style: {
-              fontSize: "14px",
-              lineHeight: 1,
-            },
-          }),
-          React.createElement(
-            "span",
-            null,
-            t("Add task"),
-          ),
-        ),
+        !isProjectsTab
+          ? React.createElement(
+              Button,
+              {
+                variant: "solid",
+                onClick: () => {
+                  addTask()
+                },
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  whiteSpace: "nowrap",
+                  borderRadius: "8px",
+                  background: "var(--orca-color-text-blue, #2563eb)",
+                  borderColor: "var(--orca-color-text-blue, #2563eb)",
+                  color: "#fff",
+                },
+              },
+              React.createElement("i", {
+                className: "ti ti-plus",
+                style: {
+                  fontSize: "14px",
+                  lineHeight: 1,
+                },
+              }),
+              React.createElement(
+                "span",
+                null,
+                t("Add task"),
+              ),
+            )
+          : null,
       ),
     ),
     React.createElement(
@@ -4396,7 +4428,71 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
               isDashboardTab ? t("Loading dashboard...") : t("Loading..."),
             )
           : null,
+        !loading && isProjectsTab
+          ? React.createElement(
+              "div",
+              {
+                style: {
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: "auto",
+                  width: "100%",
+                  minWidth: 0,
+                },
+              },
+              React.createElement(ProjectViewsPanel, {
+                pluginName: props.pluginName,
+                schema: props.schema,
+                projectItems,
+                allTaskItems,
+                taskItemById,
+                loading,
+                disabled: loading,
+                mountContainer: panelRootRef.current,
+                onRefresh: async () => {
+                  await loadByTab("projects", { silent: true })
+                },
+                onToggleTaskStatus: async (item: AllTaskItem) => {
+                  await toggleTaskStatus(item)
+                },
+                onSetTaskStatus: async (item: AllTaskItem, status: string) => {
+                  await setTaskStatus(item, status)
+                },
+                onNavigateTask: (item: AllTaskItem) => {
+                  navigateToTask(item)
+                },
+                onToggleTaskStar: async (item: AllTaskItem) => {
+                  await toggleTaskStar(item)
+                },
+                onClearTimer: async (item: AllTaskItem) => {
+                  await clearTaskTimerForItem(item)
+                },
+                onMarkReviewed: async (item: AllTaskItem) => {
+                  await markTaskReviewed(item)
+                },
+                onAddSubtask: async (item: AllTaskItem) => {
+                  await addSubtask(item)
+                },
+                onDeleteTaskTag: async (item: AllTaskItem) => {
+                  await removeTaskTag(item)
+                },
+                onDeleteTaskBlock: async (item: AllTaskItem) => {
+                  await deleteTaskBlock(item)
+                },
+                onAddToMyDay: async (item: AllTaskItem) => {
+                  await addTaskToMyDay(item)
+                },
+                onRemoveFromMyDay: async (item: AllTaskItem) => {
+                  await removeTaskFromMyDay(item)
+                },
+                onOpenTask: (blockId: DbId) => {
+                  openTaskProperty(blockId)
+                },
+              }),
+            )
+          : null,
         !loading &&
+        !isProjectsTab &&
         !isDashboardTab &&
         (isAllTasksTab ? !hasAllTaskResults : visibleCount === 0)
           ? React.createElement(
@@ -4437,7 +4533,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
               }),
             )
           : null,
-        !loading && isMyDayTab && isMyDayScheduleMode && visibleCount > 0
+        !loading && !isProjectsTab && isMyDayTab && isMyDayScheduleMode && visibleCount > 0
           ? React.createElement(
               "div",
               {
@@ -4517,6 +4613,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
             )
           : null,
         !loading &&
+        !isProjectsTab &&
         !isDashboardTab &&
         (!isMyDayTab || !isMyDayScheduleMode) &&
         (isAllTasksTab ? hasAllTaskResults : visibleCount > 0)

@@ -2,6 +2,7 @@ export type BuiltinTaskViewsTab =
   | "dashboard"
   | "my-day"
   | "next-actions"
+  | "projects"
   | "all-tasks"
   | "starred-tasks"
   | "due-soon"
@@ -21,6 +22,7 @@ export function isTaskViewsTab(tab: unknown): tab is TaskViewsTab {
   return tab === "dashboard" ||
     tab === "my-day" ||
     tab === "next-actions" ||
+    tab === "projects" ||
     tab === "all-tasks" ||
     tab === "starred-tasks" ||
     tab === "due-soon" ||
