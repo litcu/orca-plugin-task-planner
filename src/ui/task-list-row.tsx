@@ -59,6 +59,7 @@ interface TaskListRowProps {
   showReviewSelection?: boolean
   reviewSelected?: boolean
   showSubtaskProgressBar?: boolean
+  denseInlineMeta?: boolean
   starUpdating: boolean
   timerEnabled: boolean
   timerMode: TaskTimerMode
@@ -122,12 +123,20 @@ export function TaskListRow(props: TaskListRowProps) {
   const hasParentContext = props.showParentTaskContext && parentTaskNames.length > 0
   const visibleParentTaskNames = hasParentContext ? parentTaskNames.slice(-3) : []
   const parentTaskChainLabel = parentTaskNames.join(" > ")
-  const visibleLabels = taskLabels.slice(0, hasParentContext ? 2 : 3)
+  const denseInlineMeta = props.denseInlineMeta === true
+  const visibleLabels = taskLabels.slice(
+    0,
+    denseInlineMeta ? (hasParentContext ? 1 : 2) : hasParentContext ? 2 : 3,
+  )
   const hiddenLabelCount = Math.max(0, taskLabels.length - visibleLabels.length)
   const subtaskProgress = props.showSubtaskProgressBar === true
     ? props.item.subtaskProgress ?? null
     : null
   const hasSubtaskProgress = subtaskProgress != null && subtaskProgress.total > 0
+  const showSecondaryMetaRow = !denseInlineMeta && (hasParentContext || hasSubtaskProgress)
+  const denseInlineParentName = denseInlineMeta && hasParentContext
+    ? visibleParentTaskNames[visibleParentTaskNames.length - 1] ?? ""
+    : ""
   const subtaskProgressRatio = hasSubtaskProgress
     ? Math.max(0, Math.min(1, subtaskProgress.closed / subtaskProgress.total))
     : 0
@@ -227,7 +236,7 @@ export function TaskListRow(props: TaskListRowProps) {
         display: "flex",
         alignItems: "center",
         gap: "6px",
-        padding: "6px 9px",
+        padding: denseInlineMeta ? "4px 9px" : "6px 9px",
         paddingLeft: `${9 + props.depth * 16}px`,
         border: "1px solid var(--orca-color-border)",
         borderRadius: "9px",
@@ -392,38 +401,39 @@ export function TaskListRow(props: TaskListRowProps) {
       {
         type: "button",
         onClick: () => props.onOpen(),
-        style: {
-          border: "none",
-          background: "transparent",
-          color: props.contextOnly
-            ? "var(--orca-color-text-2)"
+          style: {
+            border: "none",
+            background: "transparent",
+            color: props.contextOnly
+              ? "var(--orca-color-text-2)"
             : isClosed
               ? "var(--orca-color-text-2)"
               : "var(--orca-color-text)",
-          textAlign: "left",
-          cursor: "pointer",
-          padding: 0,
-          flex: 1,
-          minWidth: 0,
-          fontSize: "12.5px",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "flex-start",
-          gap: "2px",
-        },
-      },
-      React.createElement(
-        "div",
-        {
-          style: {
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "4px",
+            textAlign: "left",
+            cursor: "pointer",
+            padding: 0,
+            flex: 1,
             minWidth: 0,
-            maxWidth: "100%",
-            flexWrap: "nowrap",
+            fontSize: "12.5px",
+            display: "flex",
+            flexDirection: denseInlineMeta ? "row" : "column",
+            alignItems: denseInlineMeta ? "center" : "flex-start",
+            gap: denseInlineMeta ? "6px" : "2px",
           },
         },
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              minWidth: 0,
+              maxWidth: "100%",
+              flexWrap: "nowrap",
+              flexShrink: 1,
+            },
+          },
         React.createElement(
           "span",
           {
@@ -502,8 +512,117 @@ export function TaskListRow(props: TaskListRowProps) {
               `+${hiddenLabelCount}`,
             )
           : null,
+        denseInlineMeta && hasParentContext
+          ? React.createElement(
+              "span",
+              {
+                key: `${props.item.blockId}-dense-parent`,
+                title: t("Parent: ${name}", { name: parentTaskChainLabel }),
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "3px",
+                  minWidth: 0,
+                  maxWidth: "140px",
+                  padding: "0 6px",
+                  height: "16px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(148, 163, 184, 0.3)",
+                  background: "rgba(148, 163, 184, 0.08)",
+                  color: "var(--orca-color-text-2)",
+                  fontSize: "10px",
+                  lineHeight: 1,
+                  flexShrink: 0,
+                },
+              },
+              React.createElement(
+                "span",
+                {
+                  style: {
+                    fontSize: "9px",
+                    opacity: 0.75,
+                    lineHeight: 1,
+                    flexShrink: 0,
+                  },
+                },
+                "\u21B3",
+              ),
+              React.createElement(
+                "span",
+                {
+                  style: {
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  },
+                },
+                denseInlineParentName,
+              ),
+            )
+          : null,
+        denseInlineMeta && hasSubtaskProgress
+          ? React.createElement(
+              "span",
+              {
+                key: `${props.item.blockId}-dense-progress`,
+                title: subtaskProgressTitle,
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  minWidth: 0,
+                  maxWidth: "130px",
+                  padding: "0 6px",
+                  height: "16px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(15, 118, 110, 0.22)",
+                  background: "rgba(15, 118, 110, 0.06)",
+                  flexShrink: 0,
+                },
+              },
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    flex: 1,
+                    minWidth: "40px",
+                    height: "4px",
+                    borderRadius: "999px",
+                    background: "rgba(15, 118, 110, 0.12)",
+                    overflow: "hidden",
+                  },
+                },
+                React.createElement("div", {
+                  style: {
+                    width: `${subtaskProgressRatio * 100}%`,
+                    height: "100%",
+                    borderRadius: "inherit",
+                    background: subtaskProgressRatio >= 1
+                      ? "linear-gradient(90deg, #15803d, #22c55e)"
+                      : "linear-gradient(90deg, #0f766e, #0ea5a5)",
+                    transition: "width 220ms ease",
+                  },
+                }),
+              ),
+              React.createElement(
+                "span",
+                {
+                  style: {
+                    flexShrink: 0,
+                    color: "var(--orca-color-text-teal, #0f766e)",
+                    fontSize: "10px",
+                    fontWeight: 600,
+                    lineHeight: 1,
+                    fontVariantNumeric: "tabular-nums",
+                  },
+                },
+                subtaskProgressLabel,
+              ),
+            )
+          : null,
       ),
-      hasParentContext || hasSubtaskProgress
+      showSecondaryMetaRow
         ? React.createElement(
             "div",
             {

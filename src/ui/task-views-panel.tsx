@@ -2010,6 +2010,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const isAllTasksTab = tab === "all-tasks"
   const isCustomViewTab = isCustomTaskViewsTab(tab)
   const showParentTaskContext = tab === "next-actions"
+  const showSubtaskProgressBar = tab !== "next-actions" && panelSettings.showSubtaskProgressBar
   const subtaskProgressByTaskId = React.useMemo(() => {
     return buildSubtaskProgressMap(allTaskItems, props.schema)
   }, [allTaskItems, props.schema])
@@ -2559,12 +2560,12 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         label: t("Active Tasks"),
       },
       {
-        value: "projects",
-        label: t("Projects"),
-      },
-      {
         value: "all-tasks",
         label: t("All Tasks"),
+      },
+      {
+        value: "projects",
+        label: t("Projects"),
       },
       {
         value: "starred-tasks",
@@ -3393,7 +3394,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         showReviewAction: false,
         showReviewSelection: false,
         reviewSelected: false,
-        showSubtaskProgressBar: panelSettings.showSubtaskProgressBar,
+        showSubtaskProgressBar,
+        denseInlineMeta: true,
         starUpdating: starringIds.has(row.node.item.blockId),
         timerEnabled: panelSettings.taskTimerEnabled,
         timerMode: panelSettings.taskTimerMode,
@@ -4657,7 +4659,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                       showReviewAction: reviewSelectionEnabled,
                       showReviewSelection: reviewSelectionEnabled,
                       reviewSelected: reviewSelectionEnabled && selectedReviewIds.has(item.blockId),
-                      showSubtaskProgressBar: panelSettings.showSubtaskProgressBar,
+                      showSubtaskProgressBar,
+                      denseInlineMeta: true,
                       starUpdating: starringIds.has(item.blockId),
                       timerEnabled: panelSettings.taskTimerEnabled,
                       timerMode: panelSettings.taskTimerMode,

@@ -91,12 +91,12 @@ export async function ensurePluginSettingsSchema(
           value: "next-actions",
         },
         {
-          label: t("Projects"),
-          value: "projects",
-        },
-        {
           label: t("All Tasks"),
           value: "all-tasks",
+        },
+        {
+          label: t("Projects"),
+          value: "projects",
         },
         {
           label: t("Starred Tasks"),
