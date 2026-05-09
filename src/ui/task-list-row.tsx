@@ -447,8 +447,8 @@ export function TaskListRow(props: TaskListRowProps) {
               fontStyle: isCanceled ? "italic" : "normal",
             },
           },
-          props.item.text,
-        ),
+            props.item.text,
+          ),
         ...visibleLabels.map((label: string) =>
           React.createElement(
             "span",

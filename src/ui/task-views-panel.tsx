@@ -459,7 +459,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
           setAllTaskItems(allTasks)
           setAllTaskItemsLoaded(true)
         } else if (targetTab === "projects") {
-          const snapshot = await collectProjectDatasetSnapshot(props.schema)
+          const snapshot = await collectProjectDatasetSnapshot(props.schema, props.projectSchema)
           const allTasks = snapshot.allTasks
           loadedAllTasks = allTasks
           setAllTaskItems(allTasks)
@@ -4443,6 +4443,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
               React.createElement(ProjectViewsPanel, {
                 pluginName: props.pluginName,
                 schema: props.schema,
+                projectSchema: props.projectSchema,
                 projectItems,
                 allTaskItems,
                 taskItemById,
@@ -4487,6 +4488,9 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                 },
                 onOpenTask: (blockId: DbId) => {
                   openTaskProperty(blockId)
+                },
+                onNavigateProject: (project: ProjectItem) => {
+                  orca.nav.openInLastPanel("block", { blockId: project.blockId })
                 },
               }),
             )

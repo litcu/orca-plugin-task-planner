@@ -8,6 +8,7 @@ import {
 } from "./core/task-schema"
 import { setupTaskQuickActions } from "./core/task-service"
 import { setupTaskPopupEntry } from "./core/task-popup-entry"
+import { setupProjectPopupEntry } from "./core/project-popup-entry"
 import { setupTaskTimerRuntime, type TaskTimerRuntimeHandle } from "./core/task-timer-runtime"
 import { setupNextActionsEntry } from "./core/next-actions-entry"
 import { ensureProjectTagSchema, PROJECT_TAG_ALIAS, type ProjectSchemaDefinition } from "./core/project-schema"
@@ -26,6 +27,7 @@ let pluginName: string
 let taskQuickActionsDisposer: (() => Promise<void>) | null = null
 let taskBlockMenuDisposer: (() => void) | null = null
 let taskPopupEntryDisposer: (() => void) | null = null
+let projectPopupEntryDisposer: (() => void) | null = null
 let taskTimerRuntimeHandle: TaskTimerRuntimeHandle | null = null
 let nextActionsEntryDisposer: (() => void) | null = null
 let settingsUnsubscribe: (() => void) | null = null
@@ -342,12 +344,14 @@ async function setupRuntimeWithSchema(
   const taskQuickActions = await setupTaskQuickActions(pluginName, schema)
   const taskBlockMenu = setupTaskBlockMenu(pluginName, schema)
   const taskPopupEntry = setupTaskPopupEntry(pluginName, schema)
+  const projectPopupEntry = setupProjectPopupEntry(pluginName, schema, projectSchema)
   const nextActionsEntry = setupNextActionsEntry(pluginName, schema, projectSchema)
   const taskTimerRuntime = setupTaskTimerRuntime(pluginName, schema)
 
   taskQuickActionsDisposer = taskQuickActions.dispose
   taskBlockMenuDisposer = taskBlockMenu.dispose
   taskPopupEntryDisposer = taskPopupEntry.dispose
+  projectPopupEntryDisposer = projectPopupEntry.dispose
   taskTimerRuntimeHandle = taskTimerRuntime
   nextActionsEntryDisposer = nextActionsEntry.dispose
   setActiveTaskRuntimeSchema(schema)
@@ -416,6 +420,11 @@ async function disposeRuntime(): Promise<void> {
   if (taskPopupEntryDisposer != null) {
     taskPopupEntryDisposer()
     taskPopupEntryDisposer = null
+  }
+
+  if (projectPopupEntryDisposer != null) {
+    projectPopupEntryDisposer()
+    projectPopupEntryDisposer = null
   }
 
   if (nextActionsEntryDisposer != null) {

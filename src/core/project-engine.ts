@@ -1,12 +1,20 @@
-import type { Block, DbId } from "../orca.d.ts"
+import type { Block, BlockProperty, DbId } from "../orca.d.ts"
 import { getMirrorId, getMirrorIdFromBlock, isValidDbId } from "./block-utils"
 import { collectAllTasks, type AllTaskItem } from "./all-tasks-engine"
-import { hasProjectTagRef } from "./project-schema"
+import { hasProjectTagRef, type ProjectSchemaDefinition } from "./project-schema"
+import {
+  getProjectPropertiesFromRef,
+  mergeProjectLabelValues,
+  readProjectLabelChoiceValues,
+  toProjectRefDataForSave,
+  type ProjectPropertyValues,
+} from "./project-properties"
 import { getTaskPropertiesFromRef, toRefDataForSave, type TaskPropertyValues } from "./task-properties"
 import { isTaskCanceledStatus, isTaskDoneStatus, type TaskSchemaDefinition } from "./task-schema"
 
 const TAG_REF_TYPE = 2
 const REF_DATA_TYPE = 3
+const TEXT_CHOICES_PROP_TYPE = 6
 
 export interface ProjectStructureNode {
   kind: "project" | "task"
@@ -21,7 +29,9 @@ export interface ProjectItem {
   blockId: DbId
   sourceBlockId: DbId
   text: string
+  properties: ProjectPropertyValues
   structuralTree: ProjectStructureNode[]
+  taskIds: DbId[]
   structuralTaskIds: DbId[]
   manualRootTaskIds: DbId[]
   manualTaskIds: DbId[]
@@ -41,12 +51,13 @@ export interface ProjectDatasetSnapshot {
 
 export async function collectProjectDatasetSnapshot(
   schema: TaskSchemaDefinition,
+  projectSchema: ProjectSchemaDefinition,
 ): Promise<ProjectDatasetSnapshot> {
   const rawProjectBlocks = (await orca.invokeBackend("get-blocks-with-tags", [
-    schema.projectTagAlias,
+    projectSchema.tagAlias,
   ])) as Block[]
   const projectBlocks = rawProjectBlocks.filter((block) => {
-    return hasProjectTagRef(block, schema.projectTagAlias)
+    return hasProjectTagRef(block, projectSchema.tagAlias)
   })
   const allTasks = await collectAllTasks(schema)
   const taskById = new Map<DbId, AllTaskItem>()
@@ -73,6 +84,7 @@ export async function collectProjectDatasetSnapshot(
   for (const projectBlock of sortedProjectBlocks) {
     cacheBlockByKnownIds(projectBlock, blockCacheById)
     const projectId = getMirrorIdFromBlock(projectBlock)
+    const projectRef = findProjectTagRef(projectBlock, projectSchema.tagAlias)
     const structuralTaskIds = new Set<DbId>()
     const childProjectIds = new Set<DbId>()
     const structuralTree = await collectProjectStructureNodes({
@@ -92,7 +104,7 @@ export async function collectProjectDatasetSnapshot(
       blockCacheById,
     )
     const manualRootTaskIds = directManualTaskIds.filter((taskId) => !structuralTaskIds.has(taskId))
-    const manualTaskIds = collectTaskClosure(manualRootTaskIds, taskChildrenById)
+    const manualTaskIds = collectTaskDescendants(manualRootTaskIds, taskChildrenById)
     const totalTaskIds = dedupeDbIdSet([
       ...structuralTaskIds,
       ...manualTaskIds,
@@ -109,8 +121,10 @@ export async function collectProjectDatasetSnapshot(
     projectItems.push({
       blockId: projectId,
       sourceBlockId: projectBlock.id,
-      text: resolveProjectText(projectBlock, schema.projectTagAlias),
+      text: resolveProjectText(projectBlock, projectSchema.tagAlias),
+      properties: getProjectPropertiesFromRef(projectRef?.data, projectSchema),
       structuralTree,
+      taskIds: totalTaskIds,
       structuralTaskIds: [...structuralTaskIds].sort((left, right) => left - right),
       manualRootTaskIds,
       manualTaskIds,
@@ -177,11 +191,66 @@ export async function addTaskToProjectInView(options: {
   )
 }
 
+export async function saveProjectPropertiesInView(options: {
+  blockId: DbId
+  sourceBlockId?: DbId | null
+  projectSchema: ProjectSchemaDefinition
+  values: ProjectPropertyValues
+}): Promise<void> {
+  const target = await resolveProjectBlockForProperties(
+    options.blockId,
+    options.sourceBlockId,
+    options.projectSchema,
+  )
+  const normalizedLabels = mergeProjectLabelValues(
+    options.values.labels,
+    collectProjectLabelValuesFromBlockTags(target.liveBlock, options.projectSchema.tagAlias),
+  )
+  await ensureProjectLabelChoices(options.projectSchema, normalizedLabels)
+  const payload = toProjectRefDataForSave(
+    {
+      ...options.values,
+      labels: normalizedLabels,
+    },
+    options.projectSchema,
+    target.projectRef?.data,
+  )
+
+  if (target.projectRef != null) {
+    try {
+      await orca.commands.invokeEditorCommand(
+        "core.editor.setRefData",
+        null,
+        target.projectRef,
+        payload,
+      )
+      return
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  await orca.commands.invokeEditorCommand(
+    "core.editor.insertTag",
+    null,
+    target.writableBlockId,
+    options.projectSchema.tagAlias,
+    payload,
+  )
+}
+
 interface ResolvedTaskAssignmentTarget {
   writableBlockId: DbId
   sourceBlock: Block
   liveBlock: Block
   taskRef: ReturnType<typeof findTaskTagRef>
+}
+
+interface ResolvedProjectPropertiesTarget {
+  writableBlockId: DbId
+  sourceBlock: Block
+  liveBlock: Block
+  projectRef: ReturnType<typeof findProjectTagRef>
 }
 
 async function collectProjectStructureNodes(options: {
@@ -402,6 +471,42 @@ async function resolveTaskBlockForProjectAssignment(
   throw new Error("Current block is not a task")
 }
 
+async function resolveProjectBlockForProperties(
+  blockId: DbId,
+  sourceBlockId: DbId | null | undefined,
+  projectSchema: ProjectSchemaDefinition,
+): Promise<ResolvedProjectPropertiesTarget> {
+  const candidates = dedupeDbIdSet([
+    sourceBlockId,
+    sourceBlockId == null ? null : getMirrorId(sourceBlockId),
+    getMirrorId(blockId),
+    blockId,
+  ])
+
+  for (const candidateId of candidates) {
+    const sourceBlock = await getBlockByIdWithCache(candidateId, new Map<DbId, Block | null>())
+    if (sourceBlock == null) {
+      continue
+    }
+
+    const liveBlock = orca.state.blocks[getMirrorId(sourceBlock.id)] ?? sourceBlock
+    const projectRef = findProjectTagRef(liveBlock, projectSchema.tagAlias) ??
+      findProjectTagRef(sourceBlock, projectSchema.tagAlias)
+    if (projectRef == null) {
+      continue
+    }
+
+    return {
+      writableBlockId: getMirrorIdFromBlock(liveBlock),
+      sourceBlock,
+      liveBlock,
+      projectRef,
+    }
+  }
+
+  throw new Error("Current block is not a project")
+}
+
 async function getBlockByIdWithCache(
   blockId: DbId,
   blockCacheById: Map<DbId, Block | null>,
@@ -470,7 +575,7 @@ function stripTagFromText(text: string, tagAlias: string): string {
     .trim()
 }
 
-function collectTaskClosure(
+function collectTaskDescendants(
   rootTaskIds: DbId[],
   childrenByTaskId: Map<DbId, DbId[]>,
 ): DbId[] {
@@ -515,4 +620,104 @@ function dedupeDbIdSet(values: Array<DbId | null | undefined>): DbId[] {
 
 function findTaskTagRef(block: Block, tagAlias: string) {
   return block.refs.find((ref) => ref.type === TAG_REF_TYPE && ref.alias === tagAlias) ?? null
+}
+
+function findProjectTagRef(block: Block, tagAlias: string) {
+  return block.refs.find((ref) => ref.type === TAG_REF_TYPE && ref.alias === tagAlias) ?? null
+}
+
+function collectProjectLabelValuesFromBlockTags(
+  block: Block | null | undefined,
+  projectTagAlias: string,
+): string[] {
+  if (block == null) {
+    return []
+  }
+
+  const projectTagAliasLower = projectTagAlias.toLowerCase()
+  const labels = block.refs
+    .filter((ref) => ref.type === TAG_REF_TYPE)
+    .map((ref) => (typeof ref.alias === "string" ? ref.alias : ""))
+    .filter((alias) => alias.trim() !== "")
+    .filter((alias) => alias.toLowerCase() !== projectTagAliasLower)
+
+  return mergeProjectLabelValues(labels)
+}
+
+async function ensureProjectLabelChoices(
+  projectSchema: ProjectSchemaDefinition,
+  labels: string[],
+): Promise<void> {
+  const requiredChoices = mergeProjectLabelValues(labels)
+  if (requiredChoices.length === 0) {
+    return
+  }
+
+  const projectTagBlock = await getProjectTagBlockFromSchema(projectSchema)
+  if (projectTagBlock == null) {
+    return
+  }
+
+  const properties = projectTagBlock.properties ?? []
+  const labelsProperty = properties.find((item) => {
+    return item.name === projectSchema.propertyNames.labels
+  })
+  const existingChoices = readProjectLabelChoiceValues(labelsProperty)
+  const mergedChoices = mergeProjectLabelValues(existingChoices, requiredChoices)
+  if (mergedChoices.length === existingChoices.length) {
+    return
+  }
+
+  const nextProperties: BlockProperty[] = properties.map((property) => {
+    if (property.name !== projectSchema.propertyNames.labels) {
+      return property
+    }
+
+    const baseTypeArgs = isRecord(property.typeArgs) ? property.typeArgs : {}
+    return {
+      ...property,
+      type: TEXT_CHOICES_PROP_TYPE,
+      typeArgs: {
+        ...baseTypeArgs,
+        subType: "multi",
+        choices: mergedChoices,
+      },
+    }
+  })
+
+  if (labelsProperty == null) {
+    nextProperties.push({
+      name: projectSchema.propertyNames.labels,
+      type: TEXT_CHOICES_PROP_TYPE,
+      typeArgs: {
+        subType: "multi",
+        choices: mergedChoices,
+      },
+    })
+  }
+
+  await orca.commands.invokeEditorCommand(
+    "core.editor.setProperties",
+    null,
+    [projectTagBlock.id],
+    nextProperties,
+  )
+}
+
+async function getProjectTagBlockFromSchema(
+  projectSchema: ProjectSchemaDefinition,
+): Promise<Block | null> {
+  try {
+    return (await orca.invokeBackend(
+      "get-block-by-alias",
+      projectSchema.tagAlias,
+    )) as Block | null
+  } catch (error) {
+    console.error(error)
+    return null
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return value != null && typeof value === "object" && !Array.isArray(value)
 }
