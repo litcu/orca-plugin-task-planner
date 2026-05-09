@@ -1,39 +1,37 @@
 import type { Block, DbId, TagMenuCommand } from "../orca.d.ts"
 import { t } from "../libs/l10n"
-import type { TaskSchemaDefinition } from "./task-schema"
-import { getTaskStatusValues, isTaskDoneStatus } from "./task-schema"
 import { getMirrorId, isValidDbId } from "./block-utils"
-import { getTaskPropertiesFromRef } from "./task-properties"
+import type { ProjectSchemaDefinition } from "./project-schema"
 import { hasProjectTagRef } from "./project-schema"
-import { setTaskTagStatus } from "./task-service"
+import type { TaskSchemaDefinition } from "./task-schema"
 import {
-  closeTaskPropertyPopup,
-  disposeTaskPropertyPopup,
-  openTaskPropertyPopup,
-} from "../ui/task-property-panel"
+  closeProjectPropertyPopup,
+  disposeProjectPropertyPopup,
+  openProjectPropertyPopup,
+} from "../ui/project-property-popup"
 
-const TAG_REF_TYPE = 2
 const COMMAND_PREFIX = "task-planner"
 
-export interface TaskPopupEntryHandle {
+export interface ProjectPopupEntryHandle {
   dispose: () => void
 }
 
-export function setupTaskPopupEntry(
+export function setupProjectPopupEntry(
   pluginName: string,
   schema: TaskSchemaDefinition,
-): TaskPopupEntryHandle {
-  const tagAlias = schema.tagAlias
+  projectSchema: ProjectSchemaDefinition,
+): ProjectPopupEntryHandle {
+  const tagAlias = projectSchema.tagAlias
   const tagName = tagAlias.toLowerCase()
-  const menuCommandId = `${COMMAND_PREFIX}.openTaskPropertyPopupFromTagMenu`
-  const openCommandId = `${COMMAND_PREFIX}.openTaskPropertyPopup`
+  const menuCommandId = `${COMMAND_PREFIX}.openProjectPropertyPopupFromTagMenu`
+  const openCommandId = `${COMMAND_PREFIX}.openProjectPropertyPopup`
   const legacyMenuCommandIds = [
-    `${pluginName}.openTaskPropertyPopupFromTagMenu`,
-    "orca-task-planner.openTaskPropertyPopupFromTagMenu",
+    `${pluginName}.openProjectPropertyPopupFromTagMenu`,
+    "orca-task-planner.openProjectPropertyPopupFromTagMenu",
   ].filter((id, index, list) => id !== menuCommandId && list.indexOf(id) === index)
   const legacyOpenCommandIds = [
-    `${pluginName}.openTaskPropertyPopup`,
-    "orca-task-planner.openTaskPropertyPopup",
+    `${pluginName}.openProjectPropertyPopup`,
+    "orca-task-planner.openProjectPropertyPopup",
   ].filter((id, index, list) => id !== openCommandId && list.indexOf(id) === index)
 
   const clickListener = (event: MouseEvent) => {
@@ -53,23 +51,17 @@ export function setupTaskPopupEntry(
     }
 
     const blockId = Number(blockEl.dataset.id)
-    if (!isValidDbId(blockId)) {
-      return
-    }
-
-    // Only intercept task tag click, do not affect other tags.
-    if (!hasTaskTagRef(blockId, tagAlias, schema.projectTagAlias)) {
+    if (!isValidDbId(blockId) || !hasProjectTagRefById(blockId, tagAlias)) {
       return
     }
 
     event.preventDefault()
     event.stopPropagation()
 
-    openTaskPropertyPopup({
-      pluginName,
+    openProjectPropertyPopup({
       blockId,
       schema,
-      triggerSource: "tag-click",
+      projectSchema,
     })
   }
 
@@ -89,72 +81,41 @@ export function setupTaskPopupEntry(
     async (blockId?: DbId) => {
       const targetBlockId = resolveCommandTargetBlockId(blockId)
       if (targetBlockId == null) {
-        orca.notify("warn", t("No task block found. Put cursor inside a task block first"))
+        orca.notify("warn", t("No project block found. Put cursor inside a project block first"))
         return
       }
 
-      if (!hasTaskTagRef(targetBlockId, tagAlias, schema.projectTagAlias)) {
-        orca.notify("warn", t("Current block is not a task"))
+      if (!hasProjectTagRefById(targetBlockId, tagAlias)) {
+        orca.notify("warn", t("Current block is not a project"))
         return
       }
 
-      openTaskPropertyPopup({
-        pluginName,
+      openProjectPropertyPopup({
         blockId: targetBlockId,
         schema,
-        triggerSource: "tag-menu",
+        projectSchema,
       })
     },
-    t("Open task property popup"),
+    t("Open project property popup"),
   )
 
   const MenuText = orca.components.MenuText
   const menuCommand: TagMenuCommand = {
     render: (tagBlock: Block, close, tagRef) => {
-      const matchedTaskTag = tagBlock.aliases.includes(tagAlias)
-      if (!matchedTaskTag || tagRef?.from == null) {
+      const matchedProjectTag = tagBlock.aliases.includes(tagAlias)
+      if (!matchedProjectTag || tagRef?.from == null) {
         return window.React.createElement(window.React.Fragment)
       }
-
-      const sourceBlock = orca.state.blocks[getMirrorId(tagRef.from)] ?? orca.state.blocks[tagRef.from] ?? null
-      const currentValues =
-        sourceBlock != null
-          ? getTaskPropertiesFromRef(tagRef.data, schema, sourceBlock)
-          : null
-      const doneStatus = getTaskStatusValues(schema).done
 
       return window.React.createElement(
         window.React.Fragment,
         null,
         window.React.createElement(MenuText, {
-          preIcon: "ti ti-edit",
-          title: t("Open task property popup"),
+          preIcon: "ti ti-folder-cog",
+          title: t("Open project property popup"),
           onClick: () => {
             close()
             void orca.commands.invokeCommand(openCommandId, tagRef.from)
-          },
-        }),
-        window.React.createElement(MenuText, {
-          preIcon: "ti ti-circle-check",
-          title: t("Set as completed"),
-          disabled: sourceBlock == null || (currentValues != null && isTaskDoneStatus(currentValues.status, schema)),
-          onClick: () => {
-            close()
-            if (sourceBlock == null) {
-              return
-            }
-            void setTaskTagStatus(
-              getMirrorId(tagRef.from),
-              null,
-              sourceBlock,
-              tagRef,
-              schema,
-              pluginName,
-              doneStatus,
-            ).catch((error) => {
-              console.error(error)
-              orca.notify("error", t("Failed to set task status"))
-            })
           },
         }),
       )
@@ -193,8 +154,8 @@ export function setupTaskPopupEntry(
         }
       }
 
-      closeTaskPropertyPopup()
-      disposeTaskPropertyPopup()
+      closeProjectPropertyPopup()
+      disposeProjectPropertyPopup()
     },
   }
 }
@@ -205,7 +166,6 @@ function resolveCommandTargetBlockId(explicitBlockId?: DbId): DbId | null {
     return isValidDbId(normalized) ? normalized : null
   }
 
-  // If triggered from command panel without args, fallback to current cursor block.
   const cursor = orca.utils.getCursorDataFromSelection(window.getSelection())
   if (cursor == null) {
     return null
@@ -215,16 +175,11 @@ function resolveCommandTargetBlockId(explicitBlockId?: DbId): DbId | null {
   return isValidDbId(normalized) ? normalized : null
 }
 
-function hasTaskTagRef(
-  blockId: DbId,
-  tagAlias: string,
-  projectTagAlias: string,
-): boolean {
+function hasProjectTagRefById(blockId: DbId, tagAlias: string): boolean {
   const block = orca.state.blocks[blockId]
   if (block == null) {
     return false
   }
 
-  return block.refs.some((ref) => ref.type === TAG_REF_TYPE && ref.alias === tagAlias) &&
-    !hasProjectTagRef(block, projectTagAlias)
+  return hasProjectTagRef(block, tagAlias)
 }

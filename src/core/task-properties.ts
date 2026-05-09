@@ -47,6 +47,9 @@ const TASK_RESERVED_CUSTOM_PROPERTY_NAMES = [
   "工作量",
   "repeat rule",
   "重复规则",
+  "projects",
+  "Projects",
+  "项目",
 ] as const
 
 export type TaskCustomPropertyValue =
@@ -90,6 +93,7 @@ export interface TaskPropertyValues {
   status: string
   startTime: Date | null
   endTime: Date | null
+  projects: DbId[]
   reviewEnabled: boolean
   reviewType: TaskReviewType
   nextReview: Date | null
@@ -130,6 +134,7 @@ export interface TaskFieldLabels {
   status: string
   startTime: string
   endTime: string
+  projects: string
   review: string
   reviewEnabled: string
   reviewType: string
@@ -159,6 +164,7 @@ export function buildTaskFieldLabels(_locale: string): TaskFieldLabels {
     status: t("Status"),
     startTime: t("Start time"),
     endTime: t("End time"),
+    projects: t("Projects"),
     review: t("Review"),
     reviewEnabled: t("Enable review"),
     reviewType: t("Review type"),
@@ -196,6 +202,7 @@ export function getTaskPropertiesFromRef(
     status: getString(refData, names.status) ?? getDefaultTaskStatus(schema),
     startTime: getDate(refData, names.startTime),
     endTime: getDate(refData, names.endTime),
+    projects: getDbIdArray(refData, names.projects),
     reviewEnabled: meta.review.enabled,
     reviewType: meta.review.type,
     nextReview: toDate(meta.review.nextReviewAt),
@@ -235,6 +242,11 @@ export function buildTaskCoreRefData(
       name: names.endTime,
       type: TASK_PROP_TYPE.DATE_TIME,
       value: values.endTime,
+    },
+    {
+      name: names.projects,
+      type: TASK_PROP_TYPE.BLOCK_REFS,
+      value: values.projects,
     },
     {
       name: names.star,

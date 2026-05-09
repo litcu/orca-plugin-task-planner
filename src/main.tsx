@@ -1,11 +1,17 @@
 import type { Block } from "./orca.d.ts"
 import { invalidateNextActionEvaluationCache } from "./core/dependency-engine"
 import { setupTaskBlockMenu } from "./core/task-block-menu"
-import { ensureTaskTagSchema, TASK_TAG_ALIAS, type TaskSchemaDefinition } from "./core/task-schema"
+import {
+  ensureTaskTagSchema,
+  TASK_TAG_ALIAS,
+  type TaskSchemaDefinition,
+} from "./core/task-schema"
 import { setupTaskQuickActions } from "./core/task-service"
 import { setupTaskPopupEntry } from "./core/task-popup-entry"
+import { setupProjectPopupEntry } from "./core/project-popup-entry"
 import { setupTaskTimerRuntime, type TaskTimerRuntimeHandle } from "./core/task-timer-runtime"
 import { setupNextActionsEntry } from "./core/next-actions-entry"
+import { ensureProjectTagSchema, PROJECT_TAG_ALIAS, type ProjectSchemaDefinition } from "./core/project-schema"
 import { setActiveTaskRuntimeSchema } from "./core/task-runtime-schema"
 import {
   ensurePluginSettingsSchema,
@@ -21,11 +27,13 @@ let pluginName: string
 let taskQuickActionsDisposer: (() => Promise<void>) | null = null
 let taskBlockMenuDisposer: (() => void) | null = null
 let taskPopupEntryDisposer: (() => void) | null = null
+let projectPopupEntryDisposer: (() => void) | null = null
 let taskTimerRuntimeHandle: TaskTimerRuntimeHandle | null = null
 let nextActionsEntryDisposer: (() => void) | null = null
 let settingsUnsubscribe: (() => void) | null = null
 let settingsUpdateChain: Promise<void> = Promise.resolve()
 let appliedTaskTagName = TASK_TAG_ALIAS
+let appliedProjectTagName = PROJECT_TAG_ALIAS
 let appliedSettingsVisibilityKey = ""
 let unloaded = false
 
@@ -38,9 +46,15 @@ export async function load(_name: string) {
   setupL10N(orca.state.locale, { "zh-CN": zhCN })
   const settings = getPluginSettings(pluginName)
   await syncSettingsSchemaVisibility(settings)
-  const schemaResult = await ensureTaskTagSchema(orca.state.locale, settings.taskTagName)
+  const projectSchemaResult = await ensureProjectTagSchema(orca.state.locale, settings.projectTagName)
+  appliedProjectTagName = projectSchemaResult.schema.tagAlias
+  const schemaResult = await ensureTaskTagSchema(
+    orca.state.locale,
+    settings.taskTagName,
+    projectSchemaResult.schema.tagAlias,
+  )
   appliedTaskTagName = schemaResult.schema.tagAlias
-  await setupRuntimeWithSchema(schemaResult.schema)
+  await setupRuntimeWithSchema(schemaResult.schema, projectSchemaResult.schema)
 
   if (settingsUnsubscribe != null) {
     settingsUnsubscribe()
@@ -94,11 +108,14 @@ function subscribeSettingsChanges() {
         const settings = getPluginSettings(pluginName)
         await syncSettingsSchemaVisibility(settings)
 
-        if (areTaskTagNamesEquivalent(settings.taskTagName, appliedTaskTagName)) {
+        if (
+          areTaskTagNamesEquivalent(settings.taskTagName, appliedTaskTagName) &&
+          areTaskTagNamesEquivalent(settings.projectTagName, appliedProjectTagName)
+        ) {
           return
         }
 
-        await applyTaskTagNameChange(settings.taskTagName)
+        await applyTaskTagNameChanges(settings.taskTagName, settings.projectTagName)
       })
       .catch((error: unknown) => {
         if (unloaded) {
@@ -130,24 +147,47 @@ function resolveSettingsVisibilityKey(settings: TaskPlannerSettings): string {
   return `${settings.myDayEnabled ? "1" : "0"}|${settings.taskTimerEnabled ? "1" : "0"}`
 }
 
-async function applyTaskTagNameChange(nextTaskTagName: string): Promise<void> {
+async function applyTaskTagNameChanges(
+  nextTaskTagName: string,
+  nextProjectTagName: string,
+): Promise<void> {
   const previousTaskTagName = appliedTaskTagName
-  if (areTaskTagNamesEquivalent(nextTaskTagName, previousTaskTagName)) {
+  const previousProjectTagName = appliedProjectTagName
+  const taskTagChanged = !areTaskTagNamesEquivalent(nextTaskTagName, previousTaskTagName)
+  const projectTagChanged = !areTaskTagNamesEquivalent(nextProjectTagName, previousProjectTagName)
+
+  if (!taskTagChanged && !projectTagChanged) {
     return
   }
 
+  let projectTagRenamed = false
   let tagRenamed = false
   try {
-    await renameTaskTagAlias(previousTaskTagName, nextTaskTagName)
-    tagRenamed = true
+    if (projectTagChanged) {
+      await renameProjectTagAlias(previousProjectTagName, nextProjectTagName)
+      projectTagRenamed = true
+    }
+    if (taskTagChanged) {
+      await renameTaskTagAlias(previousTaskTagName, nextTaskTagName)
+      tagRenamed = true
+    }
 
-    const schemaResult = await ensureTaskTagSchema(orca.state.locale, nextTaskTagName)
-    await setupRuntimeWithSchema(schemaResult.schema)
+    const projectSchemaResult = await ensureProjectTagSchema(orca.state.locale, nextProjectTagName)
+    const schemaResult = await ensureTaskTagSchema(
+      orca.state.locale,
+      nextTaskTagName,
+      projectSchemaResult.schema.tagAlias,
+    )
+    await setupRuntimeWithSchema(schemaResult.schema, projectSchemaResult.schema)
+    appliedProjectTagName = projectSchemaResult.schema.tagAlias
     appliedTaskTagName = schemaResult.schema.tagAlias
     invalidateNextActionEvaluationCache()
   } catch (error) {
     if (!tagRenamed) {
       await restoreTaskTagNameSetting(previousTaskTagName)
+    }
+    if (!projectTagRenamed) {
+      await restoreProjectTagNameSetting(previousProjectTagName)
     }
     throw error
   }
@@ -220,6 +260,73 @@ async function restoreTaskTagNameSetting(taskTagName: string): Promise<void> {
   }
 }
 
+async function renameProjectTagAlias(
+  oldProjectTagName: string,
+  newProjectTagName: string,
+): Promise<void> {
+  if (areTaskTagNamesEquivalent(oldProjectTagName, newProjectTagName)) {
+    return
+  }
+
+  const oldProjectTag = await getProjectTagByAlias(oldProjectTagName)
+  if (oldProjectTag == null) {
+    return
+  }
+
+  const newProjectTag = await getProjectTagByAlias(newProjectTagName)
+
+  if (newProjectTag != null && newProjectTag.id !== oldProjectTag.id) {
+    throw new Error(
+      t("Project tag name already exists: ${name}", { name: newProjectTagName }),
+    )
+  }
+
+  await orca.commands.invokeEditorCommand(
+    "core.editor.renameAlias",
+    null,
+    oldProjectTagName,
+    newProjectTagName,
+  )
+}
+
+async function getProjectTagByAlias(projectTagName: string): Promise<Block | null> {
+  return (await orca.invokeBackend(
+    "get-block-by-alias",
+    projectTagName,
+  )) as Block | null
+}
+
+async function restoreProjectTagNameSetting(projectTagName: string): Promise<void> {
+  const pluginState = orca.state.plugins[pluginName]
+  if (pluginState == null) {
+    return
+  }
+
+  const currentSettings =
+    pluginState.settings != null && typeof pluginState.settings === "object"
+      ? pluginState.settings
+      : {}
+  const currentProjectTagName =
+    typeof currentSettings.projectTagName === "string"
+      ? currentSettings.projectTagName
+      : PROJECT_TAG_ALIAS
+  if (areTaskTagNamesEquivalent(currentProjectTagName, projectTagName)) {
+    return
+  }
+
+  const nextSettings = {
+    ...currentSettings,
+    projectTagName,
+  }
+
+  try {
+    await orca.plugins.setSettings("repo", pluginName, nextSettings)
+  } catch (error) {
+    console.error(error)
+    pluginState.settings = nextSettings
+  }
+}
+
 function areTaskTagNamesEquivalent(left: string, right: string): boolean {
   return toTaskTagNameKey(left) === toTaskTagNameKey(right)
 }
@@ -228,18 +335,23 @@ function toTaskTagNameKey(value: string): string {
   return value.trim().replace(/^#+/, "").toLowerCase()
 }
 
-async function setupRuntimeWithSchema(schema: TaskSchemaDefinition): Promise<void> {
+async function setupRuntimeWithSchema(
+  schema: TaskSchemaDefinition,
+  projectSchema: ProjectSchemaDefinition,
+): Promise<void> {
   await disposeRuntime()
 
   const taskQuickActions = await setupTaskQuickActions(pluginName, schema)
   const taskBlockMenu = setupTaskBlockMenu(pluginName, schema)
   const taskPopupEntry = setupTaskPopupEntry(pluginName, schema)
-  const nextActionsEntry = setupNextActionsEntry(pluginName, schema)
+  const projectPopupEntry = setupProjectPopupEntry(pluginName, schema, projectSchema)
+  const nextActionsEntry = setupNextActionsEntry(pluginName, schema, projectSchema)
   const taskTimerRuntime = setupTaskTimerRuntime(pluginName, schema)
 
   taskQuickActionsDisposer = taskQuickActions.dispose
   taskBlockMenuDisposer = taskBlockMenu.dispose
   taskPopupEntryDisposer = taskPopupEntry.dispose
+  projectPopupEntryDisposer = projectPopupEntry.dispose
   taskTimerRuntimeHandle = taskTimerRuntime
   nextActionsEntryDisposer = nextActionsEntry.dispose
   setActiveTaskRuntimeSchema(schema)
@@ -308,6 +420,11 @@ async function disposeRuntime(): Promise<void> {
   if (taskPopupEntryDisposer != null) {
     taskPopupEntryDisposer()
     taskPopupEntryDisposer = null
+  }
+
+  if (projectPopupEntryDisposer != null) {
+    projectPopupEntryDisposer()
+    projectPopupEntryDisposer = null
   }
 
   if (nextActionsEntryDisposer != null) {

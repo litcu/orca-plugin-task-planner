@@ -18,6 +18,7 @@ import {
 } from "./score-engine"
 import { resolveEffectiveNextReview, type TaskReviewType } from "./task-review"
 import { readTaskMetaFromBlock } from "./task-meta"
+import { hasProjectTagRef } from "./project-schema"
 
 const TAG_REF_TYPE = 2
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -120,13 +121,13 @@ export async function collectNextActionEvaluations(
   const includeCompleted = options.includeCompleted === true
   const useCache = options.useCache !== false
   const nowMs = now.getTime()
-  const cacheKey = buildNextActionCacheKey(schema.tagAlias, nowMs, includeCompleted)
+  const cacheKey = buildNextActionCacheKey(schema.tagAlias, schema.projectTagAlias, nowMs, includeCompleted)
   const cached = useCache ? readNextActionEvaluationCache(cacheKey, nowMs) : null
   if (cached != null) {
     return cached
   }
 
-  const taskBlocks = await queryTaskBlocks(schema.tagAlias)
+  const taskBlocks = await queryTaskBlocks(schema)
   return buildNextActionEvaluationsFromTaskBlocks(taskBlocks, schema, now, options, cacheKey, nowMs)
 }
 
@@ -139,7 +140,7 @@ export async function collectNextActionEvaluationsFromTaskBlocks(
   const includeCompleted = options.includeCompleted === true
   const useCache = options.useCache !== false
   const nowMs = now.getTime()
-  const cacheKey = buildNextActionCacheKey(schema.tagAlias, nowMs, includeCompleted)
+  const cacheKey = buildNextActionCacheKey(schema.tagAlias, schema.projectTagAlias, nowMs, includeCompleted)
   const cached = useCache ? readNextActionEvaluationCache(cacheKey, nowMs) : null
   if (cached != null) {
     return cached
@@ -165,7 +166,10 @@ async function buildNextActionEvaluationsFromTaskBlocks(
 ): Promise<NextActionEvaluation[]> {
   const includeCompleted = options.includeCompleted === true
   const useCache = options.useCache !== false
-  const taskBlocks = sourceTaskBlocks.filter((block) => findTaskTagRef(block, schema.tagAlias) != null)
+  const taskBlocks = sourceTaskBlocks.filter((block) => {
+    return findTaskTagRef(block, schema.tagAlias) != null &&
+      !isProjectTaggedTaskBlock(block, schema)
+  })
   const taskMap = buildTaskMap(taskBlocks)
   const cycleContext = buildDependencyCycleContext(taskBlocks, taskMap, schema)
   const subtaskContext = await buildSubtaskContext(taskBlocks, schema)
@@ -339,12 +343,24 @@ function isTaskStartDateInFuture(startTime: Date | null, now: Date): boolean {
   return startDate.getTime() > todayDate.getTime()
 }
 
-async function queryTaskBlocks(tagAlias: string): Promise<Block[]> {
+async function queryTaskBlocks(schema: TaskSchemaDefinition): Promise<Block[]> {
   const raw = (await orca.invokeBackend("get-blocks-with-tags", [
-    tagAlias,
+    schema.tagAlias,
   ])) as Block[]
 
-  return raw.filter((block) => findTaskTagRef(block, tagAlias) != null)
+  return raw.filter((block) => {
+    return findTaskTagRef(block, schema.tagAlias) != null &&
+      !isProjectTaggedTaskBlock(block, schema)
+  })
+}
+
+function isProjectTaggedTaskBlock(
+  block: Block,
+  schema: TaskSchemaDefinition,
+): boolean {
+  const liveBlock = getLiveTaskBlock(block)
+  return hasProjectTagRef(liveBlock, schema.projectTagAlias) ||
+    hasProjectTagRef(block, schema.projectTagAlias)
 }
 
 function isCompletedTaskBlock(
@@ -1374,11 +1390,12 @@ function compareNextActionItems(left: NextActionItem, right: NextActionItem): nu
 
 function buildNextActionCacheKey(
   tagAlias: string,
+  projectTagAlias: string,
   nowMs: number,
   includeCompleted: boolean,
 ): string {
   const nowBucket = Math.floor(nowMs / NEXT_ACTION_CACHE_TTL_MS)
-  return `${tagAlias}|${includeCompleted ? 1 : 0}|${nowBucket}`
+  return `${tagAlias}|${projectTagAlias}|${includeCompleted ? 1 : 0}|${nowBucket}`
 }
 
 function readNextActionEvaluationCache(

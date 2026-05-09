@@ -1,6 +1,7 @@
 import type { ColumnPanel, PanelProps, RowPanel, ViewPanel } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import type { TaskSchemaDefinition } from "./task-schema"
+import type { ProjectSchemaDefinition } from "./project-schema"
 import { TaskViewsPanel } from "../ui/task-views-panel"
 import { getPluginSettings } from "./plugin-settings"
 import { initializePreferredTaskViewsTab } from "./task-views-state"
@@ -16,6 +17,7 @@ export interface NextActionsEntryHandle {
 export function setupNextActionsEntry(
   pluginName: string,
   schema: TaskSchemaDefinition,
+  projectSchema: ProjectSchemaDefinition,
 ): NextActionsEntryHandle {
   const initialSettings = getPluginSettings(pluginName)
   const panelType = `${pluginName}.taskViewsPanel`
@@ -46,6 +48,7 @@ export function setupNextActionsEntry(
     return React.createElement(TaskViewsPanel, {
       ...panelProps,
       schema,
+      projectSchema,
       pluginName,
     })
   }

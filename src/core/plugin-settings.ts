@@ -1,11 +1,13 @@
 import { t } from "../libs/l10n"
 import type { PluginSettingsSchema } from "../orca.d.ts"
+import { PROJECT_TAG_ALIAS } from "./project-schema"
 import { TASK_TAG_ALIAS } from "./task-schema"
 import type { TaskTimerMode } from "./task-timer"
 import type { BuiltinTaskViewsTab } from "./task-views-state"
 
 export interface TaskPlannerSettings {
   taskTagName: string
+  projectTagName: string
   myDayEnabled: boolean
   myDayResetHour: number
   dueSoonDays: number
@@ -20,6 +22,7 @@ export interface TaskPlannerSettings {
 }
 
 const TASK_TAG_NAME_SETTING = "taskTagName"
+const PROJECT_TAG_NAME_SETTING = "projectTagName"
 const MY_DAY_ENABLED_SETTING = "myDayEnabled"
 const MY_DAY_RESET_HOUR_SETTING = "myDayResetHour"
 const DUE_SOON_DAYS_SETTING = "dueSoonDays"
@@ -52,6 +55,12 @@ export async function ensurePluginSettingsSchema(
       type: "string",
       defaultValue: TASK_TAG_ALIAS,
     },
+    [PROJECT_TAG_NAME_SETTING]: {
+      label: t("Project tag name"),
+      description: t("Name of the tag used to identify projects. Changes apply immediately."),
+      type: "string",
+      defaultValue: PROJECT_TAG_ALIAS,
+    },
     [SHOW_TASK_PANEL_ICON_SETTING]: {
       label: t("Show task panel icon"),
       description: t("Show task panel icon in the top bar."),
@@ -80,6 +89,10 @@ export async function ensurePluginSettingsSchema(
         {
           label: t("Active Tasks"),
           value: "next-actions",
+        },
+        {
+          label: t("Projects"),
+          value: "projects",
         },
         {
           label: t("All Tasks"),
@@ -169,6 +182,9 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
   const taskTagName = normalizeTaskTagName(
     pluginSettings?.[TASK_TAG_NAME_SETTING],
   )
+  const projectTagName = normalizeProjectTagName(
+    pluginSettings?.[PROJECT_TAG_NAME_SETTING],
+  )
   const myDayEnabled = normalizeMyDayEnabled(
     pluginSettings?.[MY_DAY_ENABLED_SETTING],
   )
@@ -203,6 +219,7 @@ export function getPluginSettings(pluginName: string): TaskPlannerSettings {
 
   return {
     taskTagName,
+    projectTagName,
     myDayEnabled,
     myDayResetHour,
     dueSoonDays,
@@ -224,6 +241,15 @@ function normalizeTaskTagName(rawValue: unknown): string {
 
   const normalized = rawValue.trim().replace(/^#+/, "")
   return normalized === "" ? TASK_TAG_ALIAS : normalized
+}
+
+function normalizeProjectTagName(rawValue: unknown): string {
+  if (typeof rawValue !== "string") {
+    return PROJECT_TAG_ALIAS
+  }
+
+  const normalized = rawValue.trim().replace(/^#+/, "")
+  return normalized === "" ? PROJECT_TAG_ALIAS : normalized
 }
 
 function normalizeShowSubtaskProgressBar(rawValue: unknown): boolean {
@@ -277,6 +303,7 @@ function normalizeDefaultTaskViewsTab(rawValue: unknown): BuiltinTaskViewsTab {
     case "dashboard":
     case "my-day":
     case "next-actions":
+    case "projects":
     case "all-tasks":
     case "starred-tasks":
     case "due-soon":

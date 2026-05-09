@@ -2,6 +2,7 @@ import type { Block, DbId } from "../orca.d.ts"
 import { t } from "../libs/l10n"
 import { getMirrorId, isValidDbId } from "./block-utils"
 import { getPluginSettings } from "./plugin-settings"
+import { hasProjectTagRef } from "./project-schema"
 import {
   type TaskSchemaDefinition,
 } from "./task-schema"
@@ -570,7 +571,7 @@ export function setupTaskTimerRuntime(
   }
 
   function hasTaskTimerSignal(block: Block): boolean {
-    if (!hasTaskTagRef(block)) {
+    if (!hasTaskTagRef(block) || hasProjectTagRef(block, schema.projectTagAlias)) {
       return false
     }
     const timer = readTaskTimerFromBlock(block)
@@ -608,7 +609,9 @@ export function setupTaskTimerRuntime(
 
   function hasTaskTagRef(block: Block): boolean {
     const liveBlock = orca.state.blocks[getMirrorId(block.id)] ?? block
-    return liveBlock.refs.some((ref) => ref.type === TAG_REF_TYPE && ref.alias === schema.tagAlias)
+    return liveBlock.refs.some((ref) => ref.type === TAG_REF_TYPE && ref.alias === schema.tagAlias) &&
+      !hasProjectTagRef(liveBlock, schema.projectTagAlias) &&
+      !hasProjectTagRef(block, schema.projectTagAlias)
   }
 
   function enqueueMutation(action: () => Promise<void>) {
