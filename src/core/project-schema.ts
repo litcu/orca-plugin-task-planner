@@ -39,8 +39,8 @@ const PROJECT_SCHEMA_BY_LOCALE: Record<ProjectSchemaLocale, ProjectSchemaDefinit
     tagAlias: PROJECT_TAG_ALIAS,
     propertyNames: {
       status: "Project status",
-      startTime: "Project start time",
-      dueTime: "Project due time",
+      startTime: "Project start date",
+      dueTime: "Project due date",
       labels: "Project labels",
       note: "Project note",
     },
@@ -51,8 +51,8 @@ const PROJECT_SCHEMA_BY_LOCALE: Record<ProjectSchemaLocale, ProjectSchemaDefinit
     tagAlias: PROJECT_TAG_ALIAS,
     propertyNames: {
       status: "\u9879\u76ee\u72b6\u6001",
-      startTime: "\u9879\u76ee\u5f00\u59cb\u65f6\u95f4",
-      dueTime: "\u9879\u76ee\u622a\u6b62\u65f6\u95f4",
+      startTime: "\u9879\u76ee\u5f00\u59cb\u65e5\u671f",
+      dueTime: "\u9879\u76ee\u622a\u6b62\u65e5\u671f",
       labels: "\u9879\u76ee\u6807\u7b7e",
       note: "\u9879\u76ee\u5907\u6ce8",
     },

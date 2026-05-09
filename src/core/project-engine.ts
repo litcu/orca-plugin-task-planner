@@ -221,8 +221,8 @@ export async function saveProjectPropertiesInView(options: {
       await orca.commands.invokeEditorCommand(
         "core.editor.setRefData",
         null,
-        target.projectRef,
-        payload,
+        cloneProjectRefForCommand(target.projectRef),
+        toProjectRefDataCommandPayload(payload),
       )
       return
     } catch (error) {
@@ -235,7 +235,7 @@ export async function saveProjectPropertiesInView(options: {
     null,
     target.writableBlockId,
     options.projectSchema.tagAlias,
-    payload,
+    toProjectRefDataCommandPayload(payload),
   )
 }
 
@@ -720,4 +720,66 @@ async function getProjectTagBlockFromSchema(
 
 function isRecord(value: unknown): value is Record<string, any> {
   return value != null && typeof value === "object" && !Array.isArray(value)
+}
+
+function cloneProjectRefForCommand(ref: NonNullable<ResolvedProjectPropertiesTarget["projectRef"]>) {
+  return {
+    id: ref.id,
+    from: ref.from,
+    to: ref.to,
+    type: ref.type,
+    alias: ref.alias,
+    data: cloneProjectRefDataForCommand(ref.data),
+  }
+}
+
+function cloneProjectRefDataForCommand(data: BlockProperty[] | undefined): BlockProperty[] | undefined {
+  if (!Array.isArray(data)) {
+    return data
+  }
+
+  return data.map((property) => ({
+    ...property,
+    typeArgs: cloneCloneableValue(property.typeArgs),
+    value: cloneCloneableValue(property.value),
+  }))
+}
+
+function toProjectRefDataCommandPayload(
+  data: BlockProperty[] | undefined,
+): Array<{ name: string; type: number; value: unknown }> | undefined {
+  const normalized = cloneProjectRefDataForCommand(data)
+  if (!Array.isArray(normalized)) {
+    return normalized
+  }
+
+  return normalized.map((property) => ({
+    name: property.name,
+    type: property.type,
+    value: property.value,
+  }))
+}
+
+function cloneCloneableValue(value: unknown): unknown {
+  if (value == null) {
+    return value
+  }
+
+  if (value instanceof Date) {
+    return new Date(value.getTime())
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneCloneableValue(item))
+  }
+
+  if (typeof value === "object") {
+    try {
+      return structuredClone(value)
+    } catch {
+      return { ...(value as Record<string, unknown>) }
+    }
+  }
+
+  return value
 }

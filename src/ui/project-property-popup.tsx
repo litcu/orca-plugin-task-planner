@@ -24,6 +24,7 @@ interface ProjectPopupState {
   containerEl: HTMLDivElement | null
   options: OpenProjectPropertyPopupOptions | null
   visible: boolean
+  reloadToken: number
 }
 
 export interface OpenProjectPropertyPopupOptions {
@@ -38,12 +39,14 @@ const popupState: ProjectPopupState = {
   containerEl: null,
   options: null,
   visible: false,
+  reloadToken: 0,
 }
 
 export function openProjectPropertyPopup(options: OpenProjectPropertyPopupOptions) {
   ensureRoot()
   popupState.options = options
   popupState.visible = true
+  popupState.reloadToken += 1
   renderCurrent()
 }
 
@@ -89,6 +92,7 @@ function renderCurrent() {
     React.createElement(ProjectPropertyPopupView, {
       ...popupState.options,
       visible: popupState.visible,
+      reloadToken: popupState.reloadToken,
       onClose: () => closeProjectPropertyPopup(),
     }),
   )
@@ -96,6 +100,7 @@ function renderCurrent() {
 
 function ProjectPropertyPopupView(props: OpenProjectPropertyPopupOptions & {
   visible: boolean
+  reloadToken: number
   onClose: () => void
 }) {
   const React = window.React
@@ -147,7 +152,7 @@ function ProjectPropertyPopupView(props: OpenProjectPropertyPopupOptions & {
     return () => {
       disposed = true
     }
-  }, [normalizedBlockId, props.blockId, props.projectSchema, props.schema])
+  }, [normalizedBlockId, props.blockId, props.projectSchema, props.reloadToken, props.schema, props.visible])
 
   React.useEffect(() => {
     let disposed = false

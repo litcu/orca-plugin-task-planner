@@ -917,7 +917,7 @@ export function ProjectPropertyEditorDialog(props: {
           },
         },
         React.createElement(Input, {
-          value: hasValue ? formatProjectDateTime(value) : "",
+          value: hasValue ? formatProjectDateInput(value) : "",
           placeholder: t("Not set"),
           readOnly: true,
           onClick: (event: Event) => {
@@ -1139,7 +1139,6 @@ export function ProjectPropertyEditorDialog(props: {
           },
         },
         React.createElement("span", null, t("Total ${count} tasks", { count: String(props.project.totalTaskCount) })),
-        React.createElement("span", null, t("Manual ${count}", { count: String(props.project.externalManualTaskIds.length) })),
       ),
     ),
     renderProjectFormRow(
@@ -1154,8 +1153,8 @@ export function ProjectPropertyEditorDialog(props: {
         width: "100%",
       }),
     ),
-    renderDateField("start", t("Project start time"), startTime, setStartTime),
-    renderDateField("due", t("Project due time"), dueTime, setDueTime),
+    renderDateField("start", t("Project start date"), startTime, setStartTime),
+    renderDateField("due", t("Project due date"), dueTime, setDueTime),
     renderProjectFormRow(
       t("Project labels"),
       React.createElement(Select, {
@@ -1204,16 +1203,16 @@ export function ProjectPropertyEditorDialog(props: {
     editingDateField == null
       ? null
       : React.createElement(DatePicker, {
-          mode: "datetime",
+          mode: "date",
           visible: true,
-          value: (editingDateField === "start" ? startTime : dueTime) ?? normalizeProjectDateToMinute(new Date()) ?? new Date(),
+          value: (editingDateField === "start" ? startTime : dueTime) ?? normalizeProjectDateOnly(new Date()) ?? new Date(),
           refElement: dateAnchorRef,
           menuContainer: popupMenuContainerRef,
           onChange: (next: Date | [Date, Date]) => {
             if (!(next instanceof Date)) {
               return
             }
-            const normalizedNext = normalizeProjectDateToMinute(next) ?? next
+            const normalizedNext = normalizeProjectDateOnly(next) ?? next
             if (editingDateField === "start") {
               setStartTime(normalizedNext)
             } else {
@@ -1335,24 +1334,6 @@ function renderProjectPropertySummary(
       },
       ...chips,
     ),
-    !options?.compact && properties.note.trim() !== ""
-      ? React.createElement(
-          "div",
-          {
-            style: {
-              maxWidth: "min(520px, 100%)",
-              color: "var(--orca-color-text-2)",
-              fontSize: "12px",
-              lineHeight: 1.45,
-              overflow: "hidden",
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-            },
-          },
-          properties.note,
-        )
-      : null,
   )
 }
 
@@ -1842,6 +1823,16 @@ function normalizeProjectDateToMinute(value: Date | null): Date | null {
   return normalized
 }
 
+function normalizeProjectDateOnly(value: Date | null): Date | null {
+  if (value == null || Number.isNaN(value.getTime())) {
+    return value
+  }
+
+  const normalized = new Date(value.getTime())
+  normalized.setHours(0, 0, 0, 0)
+  return normalized
+}
+
 function formatProjectDate(value: Date): string {
   const locale = orca.state.locale === "zh-CN" ? "zh-CN" : undefined
   return value.toLocaleDateString(locale, {
@@ -1874,6 +1865,10 @@ function formatProjectDateTime(value: Date): string {
     minute: "2-digit",
     hour12: false,
   })
+}
+
+function formatProjectDateInput(value: Date): string {
+  return formatProjectDate(value)
 }
 
 function AddExistingTasksDialog(props: {

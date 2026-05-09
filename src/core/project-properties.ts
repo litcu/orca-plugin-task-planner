@@ -18,6 +18,14 @@ export interface ProjectPropertyValues {
   note: string
 }
 
+export interface ProjectRefDataPayload {
+  name: string
+  type: number
+  value: unknown
+  typeArgs?: Record<string, unknown>
+  pos?: number
+}
+
 export function getProjectPropertiesFromRef(
   refData: BlockProperty[] | undefined,
   schema: ProjectSchemaDefinition,
@@ -35,7 +43,7 @@ export function getProjectPropertiesFromRef(
 export function buildProjectCoreRefData(
   values: ProjectPropertyValues,
   schema: ProjectSchemaDefinition,
-): BlockProperty[] {
+): ProjectRefDataPayload[] {
   const names = schema.propertyNames
   return [
     {
@@ -137,7 +145,7 @@ export function readProjectLabelChoiceValues(
 
 function mergeProjectRefData(
   existingRefData: BlockProperty[] | undefined,
-  payload: BlockProperty[],
+  payload: ProjectRefDataPayload[],
 ): BlockProperty[] {
   const result = normalizeRefDataProperties(existingRefData)
   const indexByName = new Map<string, number>()
