@@ -7,6 +7,11 @@ import { getTaskPropertiesFromRef } from "./task-properties"
 import { hasProjectTagRef } from "./project-schema"
 import { setTaskTagStatus } from "./task-service"
 import {
+  getMyDayMutationSuccessMessage,
+  peekMyDayTaskState,
+  toggleTaskInMyDay,
+} from "./my-day-actions"
+import {
   closeTaskPropertyPopup,
   disposeTaskPropertyPopup,
   openTaskPropertyPopup,
@@ -19,13 +24,21 @@ export interface TaskPopupEntryHandle {
   dispose: () => void
 }
 
+export interface TaskPopupActionContext {
+  pluginName: string
+  myDayEnabled: boolean
+  myDayResetHour: number
+}
+
 export function setupTaskPopupEntry(
   pluginName: string,
   schema: TaskSchemaDefinition,
+  actionContext?: TaskPopupActionContext,
 ): TaskPopupEntryHandle {
   const tagAlias = schema.tagAlias
   const tagName = tagAlias.toLowerCase()
   const menuCommandId = `${COMMAND_PREFIX}.openTaskPropertyPopupFromTagMenu`
+  const toggleMyDayCommandId = `${COMMAND_PREFIX}.toggleMyDay`
   const openCommandId = `${COMMAND_PREFIX}.openTaskPropertyPopup`
   const legacyMenuCommandIds = [
     `${pluginName}.openTaskPropertyPopupFromTagMenu`,
@@ -70,6 +83,8 @@ export function setupTaskPopupEntry(
       blockId,
       schema,
       triggerSource: "tag-click",
+      myDayEnabled: actionContext?.myDayEnabled,
+      myDayResetHour: actionContext?.myDayResetHour,
     })
   }
 
@@ -83,6 +98,9 @@ export function setupTaskPopupEntry(
 
   if (orca.state.commands[openCommandId] != null) {
     orca.commands.unregisterCommand(openCommandId)
+  }
+  if (orca.state.commands[toggleMyDayCommandId] != null) {
+    orca.commands.unregisterCommand(toggleMyDayCommandId)
   }
   orca.commands.registerCommand(
     openCommandId,
@@ -103,10 +121,49 @@ export function setupTaskPopupEntry(
         blockId: targetBlockId,
         schema,
         triggerSource: "tag-menu",
+        myDayEnabled: actionContext?.myDayEnabled,
+        myDayResetHour: actionContext?.myDayResetHour,
       })
     },
     t("Open task property popup"),
   )
+
+  if (actionContext?.myDayEnabled === true) {
+    orca.commands.registerCommand(
+      toggleMyDayCommandId,
+      async (blockId?: DbId) => {
+        const targetBlockId = resolveCommandTargetBlockId(blockId)
+        if (targetBlockId == null) {
+          orca.notify("warn", t("No task block found. Put cursor inside a task block first"))
+          return
+        }
+
+        if (!hasTaskTagRef(targetBlockId, tagAlias, schema.projectTagAlias)) {
+          orca.notify("warn", t("Current block is not a task"))
+          return
+        }
+
+        const sourceBlock = orca.state.blocks[targetBlockId] ?? null
+        if (sourceBlock == null) {
+          orca.notify("warn", t("No task block found. Put cursor inside a task block first"))
+          return
+        }
+
+        const result = await toggleTaskInMyDay(actionContext.pluginName, actionContext.myDayResetHour, {
+          taskId: targetBlockId,
+          sourceBlockId: sourceBlock.id,
+        })
+
+        if (result.state == null || result.action == null) {
+          orca.notify("error", t("Failed to update My Day"))
+          return
+        }
+
+        orca.notify("success", getMyDayMutationSuccessMessage(result.action))
+      },
+      t("Toggle My Day"),
+    )
+  }
 
   const MenuText = orca.components.MenuText
   const menuCommand: TagMenuCommand = {
@@ -122,6 +179,9 @@ export function setupTaskPopupEntry(
           ? getTaskPropertiesFromRef(tagRef.data, schema, sourceBlock)
           : null
       const doneStatus = getTaskStatusValues(schema).done
+      const myDaySelected = actionContext?.myDayEnabled === true
+        ? peekMyDayTaskState(actionContext.pluginName, getMirrorId(tagRef.from)) === true
+        : false
 
       return window.React.createElement(
         window.React.Fragment,
@@ -157,6 +217,31 @@ export function setupTaskPopupEntry(
             })
           },
         }),
+        actionContext?.myDayEnabled === true
+          ? window.React.createElement(MenuText, {
+              preIcon: myDaySelected ? "ti ti-calendar-minus" : "ti ti-calendar-plus",
+              title: myDaySelected ? t("Remove from My Day") : t("Add to My Day"),
+              disabled: sourceBlock == null,
+              onClick: async () => {
+                close()
+                if (sourceBlock == null) {
+                  return
+                }
+
+                const result = await toggleTaskInMyDay(actionContext.pluginName, actionContext.myDayResetHour, {
+                  taskId: getMirrorId(tagRef.from),
+                  sourceBlockId: sourceBlock.id,
+                })
+
+                if (result.state == null || result.action == null) {
+                  orca.notify("error", t("Failed to update My Day"))
+                  return
+                }
+
+                orca.notify("success", getMyDayMutationSuccessMessage(result.action))
+              },
+            })
+          : null,
       )
     },
   }
@@ -181,6 +266,9 @@ export function setupTaskPopupEntry(
       }
       if (orca.state.commands[openCommandId] != null) {
         orca.commands.unregisterCommand(openCommandId)
+      }
+      if (orca.state.commands[toggleMyDayCommandId] != null) {
+        orca.commands.unregisterCommand(toggleMyDayCommandId)
       }
       for (const legacyOpenCommandId of legacyOpenCommandIds) {
         if (orca.state.commands[legacyOpenCommandId] != null) {

@@ -25,6 +25,12 @@ import { invalidateNextActionEvaluationCache } from "../core/dependency-engine"
 import { createRecurringTaskInTodayJournal } from "../core/task-recurrence"
 import { getPluginSettings } from "../core/plugin-settings"
 import { applyTaskTimerForStatusChange } from "../core/task-timer"
+import {
+  getMyDayMutationSuccessMessage,
+  peekMyDayTaskState,
+  primeMyDayStateCache,
+  toggleTaskInMyDay,
+} from "../core/my-day-actions"
 
 import { t } from "../libs/l10n"
 import {
@@ -69,6 +75,8 @@ interface OpenTaskPropertyPopupOptions {
   mode?: "edit" | "create"
   onTaskCreated?: (blockId: DbId) => void
   onTaskSaved?: (blockId: DbId) => void
+  myDayEnabled?: boolean
+  myDayResetHour?: number
 }
 
 type BuiltInDateFieldKey = "start" | "end" | "repeatEnd" | "nextReview"
@@ -193,6 +201,8 @@ function TaskPropertyPopupView(props: {
   mode?: "edit" | "create"
   onTaskCreated?: (blockId: DbId) => void
   onTaskSaved?: (blockId: DbId) => void
+  myDayEnabled?: boolean
+  myDayResetHour?: number
   visible: boolean
   onClose: () => void
   onDispose: () => void
@@ -238,6 +248,50 @@ function TaskPropertyPopupView(props: {
   const initialValues = React.useMemo(() => {
     return getTaskPropertiesFromRef(taskRef?.data, props.schema, block)
   }, [block, taskRef, props.schema])
+  const [myDaySelected, setMyDaySelected] = React.useState(false)
+  const [myDayUpdating, setMyDayUpdating] = React.useState(false)
+  const myDayBlockId = props.blockId == null ? null : getMirrorId(props.blockId)
+  const myDayPluginName = typeof props.pluginName === "string" ? props.pluginName : ""
+  const myDayResetHour = typeof props.myDayResetHour === "number" ? props.myDayResetHour : 5
+  React.useEffect(() => {
+    let cancelled = false
+    if (props.myDayEnabled !== true || myDayPluginName === "" || myDayBlockId == null) {
+      setMyDaySelected(false)
+      return
+    }
+
+    const cached = peekMyDayTaskState(myDayPluginName, myDayBlockId)
+    if (cached != null) {
+      setMyDaySelected(cached)
+      return
+    }
+
+    void (async () => {
+      try {
+        await primeMyDayStateCache(myDayPluginName, myDayResetHour)
+        if (cancelled) {
+          return
+        }
+        const nextCached = peekMyDayTaskState(myDayPluginName, myDayBlockId)
+        setMyDaySelected(nextCached === true)
+      } catch (error) {
+        console.error(error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [myDayBlockId, myDayPluginName, myDayResetHour, props.myDayEnabled])
+  React.useEffect(() => {
+    if (props.myDayEnabled !== true || myDayPluginName === "" || myDayBlockId == null) {
+      return
+    }
+
+    void primeMyDayStateCache(myDayPluginName, myDayResetHour).catch((error) => {
+      console.error(error)
+    })
+  }, [myDayBlockId, myDayPluginName, myDayResetHour, props.myDayEnabled])
   const editorInitialValues = React.useMemo(() => {
     if (!isCreateMode) {
       return initialValues
@@ -1172,6 +1226,38 @@ function TaskPropertyPopupView(props: {
     }
   }
 
+  const handleToggleMyDay = React.useCallback(async () => {
+    if (
+      myDayUpdating ||
+      myDayPluginName === "" ||
+      props.myDayEnabled !== true ||
+      myDayBlockId == null
+    ) {
+      return
+    }
+
+    setMyDayUpdating(true)
+    try {
+      const result = await toggleTaskInMyDay(myDayPluginName, myDayResetHour, {
+        taskId: myDayBlockId,
+        sourceBlockId: block?.id ?? myDayBlockId,
+      })
+
+      if (result.state == null || result.action == null) {
+        orca.notify("error", t("Failed to update My Day"))
+        return
+      }
+
+      setMyDaySelected(result.action === "added")
+      orca.notify("success", getMyDayMutationSuccessMessage(result.action))
+    } catch (error) {
+      console.error(error)
+      orca.notify("error", t("Failed to update My Day"))
+    } finally {
+      setMyDayUpdating(false)
+    }
+  }, [block?.id, myDayBlockId, myDayPluginName, myDayResetHour, myDayUpdating, props.myDayEnabled])
+
   React.useEffect(() => {
     if (isCreateMode || taskRef == null) {
       return
@@ -1947,9 +2033,32 @@ function TaskPropertyPopupView(props: {
                         ? "var(--orca-color-text-yellow, #d69e2e)"
                         : "var(--orca-color-text-2)",
                     },
-                  },
-                  React.createElement(StarIcon, { filled: starValue }),
-                ),
+                    },
+                    React.createElement(StarIcon, { filled: starValue }),
+                  ),
+                props.myDayEnabled === true
+                  ? React.createElement(
+                      Button,
+                      {
+                    variant: "soft",
+                    disabled: saving || myDayUpdating || props.blockId == null,
+                    onClick: handleToggleMyDay,
+                        title: myDaySelected ? t("Remove from My Day") : t("Add to My Day"),
+                        style: {
+                          ...titleActionButtonStyle,
+                          minWidth: "32px",
+                          padding: "0 8px",
+                          color: myDaySelected
+                            ? "var(--orca-color-text-blue, #2563eb)"
+                            : "var(--orca-color-text-2)",
+                        },
+                      },
+                      React.createElement("i", {
+                        className: myDaySelected ? "ti ti-calendar-minus" : "ti ti-calendar-plus",
+                        style: { fontSize: "14px", lineHeight: 1 },
+                      }),
+                    )
+                  : null,
               )
             : null,
           ),

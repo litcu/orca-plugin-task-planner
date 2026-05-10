@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   Block,
   BlockProperty,
   BlockRef,
@@ -58,20 +58,26 @@ import {
   type TaskPlannerSettings,
 } from "../core/plugin-settings"
 import {
-  addTaskToMyDayState,
   ensureMyDayMirrorInTodayJournal,
   loadMyDayState,
   pruneMissingMyDayTasks,
   removeMyDayMirrorBlock,
-  removeTaskFromMyDayState,
   resolveMyDayKey,
-  saveMyDayState,
   setMyDayJournalSectionBlockId,
   setMyDayTaskMirrorBlockId,
   updateMyDayTaskSchedule,
   type MyDayState,
   type MyDayTaskEntry,
 } from "../core/my-day-state"
+import {
+  addTaskToMyDayStateWithSync,
+  getMyDayMutationSuccessMessage,
+  getCachedMyDayState,
+  runMyDayStateMutation,
+  primeMyDayStateCache,
+  subscribeMyDayStateChange,
+  removeTaskFromMyDayStateWithSync,
+} from "../core/my-day-actions"
 import {
   cloneCustomTaskViewFilterGroup,
   createCustomTaskViewId,
@@ -337,7 +343,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   )
   const [myDayState, setMyDayState] = React.useState<MyDayState | null>(null)
   const [myDayLoaded, setMyDayLoaded] = React.useState(false)
-  const [myDaySaving, setMyDaySaving] = React.useState(false)
   const [myDayUpdatingIds, setMyDayUpdatingIds] = React.useState<Set<DbId>>(
     () => new Set(),
   )
@@ -353,7 +358,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   if (myDayStateRef.current !== myDayState) {
     myDayStateRef.current = myDayState
   }
-  const myDayMutationChainRef = React.useRef<Promise<void>>(Promise.resolve())
   const activeCustomViewId = React.useMemo(() => {
     return getCustomTaskViewIdFromTab(tab)
   }, [tab])
@@ -573,60 +577,13 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     })
   }, [props.pluginName])
 
-  const runMyDayStateMutation = React.useCallback(
-    async (
-      mutate: (baseState: MyDayState) => Promise<MyDayState | null> | MyDayState | null,
-      options?: {
-        silentError?: boolean
-      },
-    ): Promise<MyDayState | null> => {
-      let result: MyDayState | null = null
-
-      myDayMutationChainRef.current = myDayMutationChainRef.current.then(async () => {
-        setMyDaySaving(true)
-        try {
-          const baseState =
-            myDayStateRef.current ??
-            await loadMyDayState(props.pluginName, panelSettings.myDayResetHour)
-          if (myDayStateRef.current == null) {
-            setMyDayState(baseState)
-            myDayStateRef.current = baseState
-          }
-
-          const nextState = await mutate(baseState)
-          if (nextState == null || nextState === baseState) {
-            result = baseState
-            return
-          }
-
-          const savedState = await saveMyDayState(props.pluginName, nextState)
-          setMyDayState(savedState)
-          myDayStateRef.current = savedState
-          result = savedState
-        } catch (error) {
-          console.error(error)
-          if (options?.silentError !== true) {
-            setErrorText(t("Failed to update My Day"))
-          }
-          result = null
-        } finally {
-          setMyDaySaving(false)
-        }
-      })
-
-      await myDayMutationChainRef.current
-      return result
-    },
-    [panelSettings.myDayResetHour, props.pluginName],
-  )
-
   React.useEffect(() => {
     let cancelled = false
     setMyDayLoaded(false)
 
     const run = async () => {
       try {
-        const loadedState = await loadMyDayState(
+        const loadedState = await primeMyDayStateCache(
           props.pluginName,
           panelSettings.myDayResetHour,
         )
@@ -655,6 +612,17 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   }, [panelSettings.myDayResetHour, props.pluginName])
 
   React.useEffect(() => {
+    return subscribeMyDayStateChange((detail) => {
+      if (detail.pluginName !== props.pluginName) {
+        return
+      }
+
+      setMyDayState(detail.state)
+      myDayStateRef.current = detail.state
+    })
+  }, [props.pluginName])
+
+  React.useEffect(() => {
     const timerId = window.setInterval(() => {
       const currentState = myDayStateRef.current
       if (currentState == null) {
@@ -668,7 +636,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
 
       void (async () => {
         try {
-          const refreshedState = await loadMyDayState(
+          const refreshedState = await primeMyDayStateCache(
             props.pluginName,
             panelSettings.myDayResetHour,
           )
@@ -725,6 +693,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     const run = async () => {
       try {
         const savedState = await runMyDayStateMutation(
+          props.pluginName,
+          panelSettings.myDayResetHour,
           async (baseState: MyDayState) => {
             if (baseState.tasks.length === 0) {
               return baseState
@@ -773,7 +743,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
 
             return changed ? nextState : baseState
           },
-          { silentError: true },
         )
         if (savedState != null && !cancelled) {
           setErrorText("")
@@ -1366,42 +1335,27 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       })
 
       try {
-        const savedState = await runMyDayStateMutation(async (baseState: MyDayState) => {
-          let nextState = addTaskToMyDayState(baseState, {
-            taskId: item.blockId,
-            sourceBlockId: item.sourceBlockId,
-          }).state
-          const mirrorResult = await ensureMyDayMirrorInTodayJournal({
-            taskId: item.blockId,
-            dayKey: nextState.dayKey,
-            sectionTitle: t("My Day"),
-            existingSectionBlockId: nextState.journalSectionBlockId,
-          })
-
-          if (mirrorResult.journalSectionBlockId != null) {
-            nextState = setMyDayJournalSectionBlockId(
-              nextState,
-              mirrorResult.journalSectionBlockId,
-            )
-          }
-          if (mirrorResult.mirrorBlockId != null) {
-            nextState = setMyDayTaskMirrorBlockId(
-              nextState,
-              item.blockId,
-              mirrorResult.mirrorBlockId,
-            )
-          } else {
-            orca.notify("warn", t("Failed to sync My Day journal"))
-          }
-
-          return nextState
-        })
+        const savedState = await runMyDayStateMutation(
+          props.pluginName,
+          panelSettings.myDayResetHour,
+          async (baseState: MyDayState) => {
+            return await addTaskToMyDayStateWithSync(baseState, {
+              taskId: item.blockId,
+              sourceBlockId: item.sourceBlockId,
+            })
+          },
+        )
         if (savedState != null) {
           setErrorText("")
+          orca.notify("success", getMyDayMutationSuccessMessage("added"))
+        } else {
+          setErrorText(t("Failed to update My Day"))
+          orca.notify("error", t("Failed to update My Day"))
         }
       } catch (error) {
         console.error(error)
         setErrorText(t("Failed to update My Day"))
+        orca.notify("error", t("Failed to update My Day"))
       } finally {
         setMyDayUpdatingIds((prev: Set<DbId>) => {
           const next = new Set(prev)
@@ -1412,7 +1366,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     },
     [
       panelSettings.myDayEnabled,
-      runMyDayStateMutation,
+      panelSettings.myDayResetHour,
+      props.pluginName,
     ],
   )
 
@@ -1425,21 +1380,24 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       })
 
       try {
-        const savedState = await runMyDayStateMutation(async (baseState: MyDayState) => {
-          const removeResult = removeTaskFromMyDayState(baseState, item.blockId)
-          if (!removeResult.removed) {
-            return baseState
-          }
-
-          await removeMyDayMirrorBlock(removeResult.removedEntry?.mirrorBlockId)
-          return removeResult.state
-        })
+        const savedState = await runMyDayStateMutation(
+          props.pluginName,
+          panelSettings.myDayResetHour,
+          async (baseState: MyDayState) => {
+            return await removeTaskFromMyDayStateWithSync(baseState, item.blockId)
+          },
+        )
         if (savedState != null) {
           setErrorText("")
+          orca.notify("success", getMyDayMutationSuccessMessage("removed"))
+        } else {
+          setErrorText(t("Failed to update My Day"))
+          orca.notify("error", t("Failed to update My Day"))
         }
       } catch (error) {
         console.error(error)
         setErrorText(t("Failed to update My Day"))
+        orca.notify("error", t("Failed to update My Day"))
       } finally {
         setMyDayUpdatingIds((prev: Set<DbId>) => {
           const next = new Set(prev)
@@ -1448,7 +1406,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         })
       }
     },
-    [runMyDayStateMutation],
+    [panelSettings.myDayResetHour, props.pluginName],
   )
 
   const applyMyDaySchedule = React.useCallback(
@@ -1460,14 +1418,18 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       })
 
       try {
-        const savedState = await runMyDayStateMutation((baseState: MyDayState) => {
-          return updateMyDayTaskSchedule(
-            baseState,
-            taskId,
-            startMinute,
-            endMinute,
-          )
-        })
+        const savedState = await runMyDayStateMutation(
+          props.pluginName,
+          panelSettings.myDayResetHour,
+          (baseState: MyDayState) => {
+            return updateMyDayTaskSchedule(
+              baseState,
+              taskId,
+              startMinute,
+              endMinute,
+            )
+          },
+        )
         if (savedState != null) {
           setErrorText("")
         }
@@ -1482,7 +1444,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         })
       }
     },
-    [runMyDayStateMutation],
+    [panelSettings.myDayResetHour, props.pluginName],
   )
 
   const clearMyDaySchedule = React.useCallback(
@@ -1494,9 +1456,13 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       })
 
       try {
-        const savedState = await runMyDayStateMutation((baseState: MyDayState) => {
-          return updateMyDayTaskSchedule(baseState, taskId, null, null)
-        })
+        const savedState = await runMyDayStateMutation(
+          props.pluginName,
+          panelSettings.myDayResetHour,
+          (baseState: MyDayState) => {
+            return updateMyDayTaskSchedule(baseState, taskId, null, null)
+          },
+        )
         if (savedState != null) {
           setErrorText("")
         }
@@ -1511,7 +1477,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         })
       }
     },
-    [runMyDayStateMutation],
+    [panelSettings.myDayResetHour, props.pluginName],
   )
 
   const addTask = React.useCallback(() => {
@@ -2362,6 +2328,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     const run = async () => {
       const validTaskIds = new Set<DbId>(allTaskItems.map((item: AllTaskItem) => item.blockId))
       const savedState = await runMyDayStateMutation(
+        props.pluginName,
+        panelSettings.myDayResetHour,
         async (baseState: MyDayState) => {
           const pruneResult = pruneMissingMyDayTasks(baseState, validTaskIds)
           if (pruneResult.removedEntries.length === 0) {
@@ -2373,7 +2341,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
           }
           return pruneResult.state
         },
-        { silentError: true },
       )
       if (cancelled || savedState == null) {
         return
@@ -2386,7 +2353,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     return () => {
       cancelled = true
     }
-  }, [allTaskItems, allTaskItemsLoaded, myDayLoaded, myDayState, runMyDayStateMutation])
+  }, [allTaskItems, allTaskItemsLoaded, myDayLoaded, myDayState, panelSettings.myDayResetHour, props.pluginName])
 
   const isDescendantTask = React.useCallback(
     (taskId: DbId, ancestorTaskId: DbId): boolean => {
@@ -4782,7 +4749,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                 items: myDayScheduleItems,
                 dayStartHour: panelSettings.myDayResetHour,
                 doneStatus,
-                disabled: loading || myDaySaving,
+                disabled: loading,
                 updatingTaskIds: myDayUpdatingIds,
                 onOpenTask: (blockId: DbId) => {
                   openTaskProperty(blockId)
@@ -7538,3 +7505,4 @@ function stableStringifyTaskSignature(value: unknown): string {
     return rawValue
   })
 }
+

@@ -343,7 +343,12 @@ async function setupRuntimeWithSchema(
 
   const taskQuickActions = await setupTaskQuickActions(pluginName, schema)
   const taskBlockMenu = setupTaskBlockMenu(pluginName, schema)
-  const taskPopupEntry = setupTaskPopupEntry(pluginName, schema)
+  const settings = getPluginSettings(pluginName)
+  const taskPopupEntry = setupTaskPopupEntry(pluginName, schema, {
+    pluginName,
+    myDayEnabled: settings.myDayEnabled,
+    myDayResetHour: settings.myDayResetHour,
+  })
   const projectPopupEntry = setupProjectPopupEntry(pluginName, schema, projectSchema)
   const nextActionsEntry = setupNextActionsEntry(pluginName, schema, projectSchema)
   const taskTimerRuntime = setupTaskTimerRuntime(pluginName, schema)
