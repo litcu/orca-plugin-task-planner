@@ -71,6 +71,7 @@
   "Review every": "回顾周期",
   "Last reviewed": "上次回顾",
   "Review": "回顾",
+  "More": "更多",
   "Enable review": "启用回顾",
   "Review type": "回顾类型",
   "Single review": "单次回顾",

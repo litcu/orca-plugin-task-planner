@@ -200,6 +200,14 @@ const BLOCK_CHANGE_REFRESH_DEBOUNCE_MS = 900
 const TASK_BLOCK_SIGNATURE_SCHEMA_VERSION = 1
 const TASK_TAG_REF_TYPE = 2
 const TIMER_DISPLAY_TICK_MS = 500
+const TASK_VIEW_SWITCHER_ITEM_GAP = 6
+const TASK_VIEW_SWITCHER_SECTION_GAP = 8
+const TASK_VIEW_MORE_BUTTON_SIZE = 32
+
+type TaskViewSwitcherOption = {
+  value: TaskViewsTab
+  label: string
+}
 
 type BlockedReasonCountMap = Partial<Record<NextActionBlockedReason, number>>
 type AllTasksQuickFilter = TaskDashboardQuickFilter | "doing" | null
@@ -226,6 +234,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const ConfirmBox = orca.components.ConfirmBox
   const DatePicker = orca.components.DatePicker
   const Input = orca.components.Input
+  const Menu = orca.components.Menu
+  const MenuText = orca.components.MenuText
   const ModalOverlay = orca.components.ModalOverlay
   const Popup = orca.components.Popup
   const Select = orca.components.Select
@@ -247,6 +257,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     return getPreferredTaskViewsTab()
   })
   const customViewsButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
+  const moreTabsButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
   const filterButtonAnchorRef = React.useRef<HTMLDivElement | null>(null)
   const viewSwitcherContainerRef = React.useRef<HTMLDivElement | null>(null)
   const panelRootRef = React.useRef<HTMLDivElement | null>(null)
@@ -333,6 +344,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
   const [myDayCompletedTaskIds, setMyDayCompletedTaskIds] = React.useState<Set<DbId>>(
     () => new Set(),
   )
+  const [customViewsButtonWidth, setCustomViewsButtonWidth] = React.useState(0)
+  const [moreTabsPopupVisible, setMoreTabsPopupVisible] = React.useState(false)
   const myDayStateRef = React.useRef<MyDayState | null>(null)
   const myDayCompletionSnapshotRef = React.useRef<Map<DbId, MyDayTaskCompletionSnapshot>>(
     new Map(),
@@ -403,6 +416,40 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       updateWidth()
     })
     observer.observe(container)
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
+
+  React.useEffect(() => {
+    const anchor = customViewsButtonAnchorRef.current
+    if (anchor == null) {
+      return
+    }
+
+    const updateWidth = () => {
+      const nextWidth = anchor.getBoundingClientRect().width
+      setCustomViewsButtonWidth((prev: number) => {
+        if (Math.abs(prev - nextWidth) < 1) {
+          return prev
+        }
+        return nextWidth
+      })
+    }
+
+    updateWidth()
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWidth)
+      return () => {
+        window.removeEventListener("resize", updateWidth)
+      }
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateWidth()
+    })
+    observer.observe(anchor)
     return () => {
       observer.disconnect()
     }
@@ -2541,8 +2588,8 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
     nextActionItems,
     props.schema,
   ])
-  const taskViewSegmentedOptions = React.useMemo(() => {
-    const baseOptions: Array<{ value: TaskViewsTab; label: string }> = [
+  const taskViewSegmentedOptions = React.useMemo<TaskViewSwitcherOption[]>(() => {
+    const baseOptions: TaskViewSwitcherOption[] = [
       {
         value: "dashboard",
         label: t("Dashboard"),
@@ -2581,25 +2628,113 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       },
     )
 
-    const customOptions = customViews.map((view: CustomTaskView) => ({
+    const customOptions: TaskViewSwitcherOption[] = customViews.map((view: CustomTaskView) => ({
       value: toCustomTaskViewsTab(view.id),
       label: view.name,
     }))
     return [...baseOptions, ...customOptions]
   }, [customViews, panelSettings.myDayEnabled])
-  const estimatedSegmentedWidth = React.useMemo(() => {
-    return taskViewSegmentedOptions.reduce((total: number, option: { value: string; label: string }) => {
-      const baseLabelWidth = isChinese
-        ? option.label.length * 18
-        : option.label.length * 10
-      const optionWidth = Math.max(82, baseLabelWidth + 32)
-      return total + optionWidth
-    }, 0)
-  }, [isChinese, taskViewSegmentedOptions])
-  const useCompactViewSwitcher =
-    viewSwitcherWidth > 0 &&
-    estimatedSegmentedWidth > Math.max(180, viewSwitcherWidth - 12)
-  const useCompactSingleSwitcherLayout = useCompactViewSwitcher && isDashboardTab
+  const estimateTaskViewButtonWidth = React.useCallback((option: { label: string }) => {
+    const baseLabelWidth = isChinese
+      ? option.label.length * 18
+      : option.label.length * 10
+    return Math.max(84, baseLabelWidth + 28)
+  }, [isChinese])
+  const measureTaskViewButtonGroupWidth = React.useCallback(
+    (options: Array<{ label: string }>) => {
+      return options.reduce((total: number, option: { label: string }, index: number) => {
+        const optionWidth = estimateTaskViewButtonWidth(option)
+        return total + optionWidth + (index > 0 ? TASK_VIEW_SWITCHER_ITEM_GAP : 0)
+      }, 0)
+    },
+    [estimateTaskViewButtonWidth],
+  )
+  const estimatedCustomViewsButtonWidth = customViewsButtonWidth > 0
+    ? customViewsButtonWidth
+    : (isChinese ? 124 : 136)
+  const availableTabsWidth = React.useMemo(() => {
+    if (viewSwitcherWidth <= 0) {
+      return 0
+    }
+
+    return Math.max(0, viewSwitcherWidth - estimatedCustomViewsButtonWidth - TASK_VIEW_SWITCHER_SECTION_GAP)
+  }, [estimatedCustomViewsButtonWidth, viewSwitcherWidth])
+  const estimatedTaskViewButtonGroupWidth = React.useMemo(() => {
+    return measureTaskViewButtonGroupWidth(taskViewSegmentedOptions)
+  }, [measureTaskViewButtonGroupWidth, taskViewSegmentedOptions])
+  const visibleTaskViewOptions = React.useMemo(() => {
+    if (availableTabsWidth <= 0 || taskViewSegmentedOptions.length === 0) {
+      return []
+    }
+
+    const selectedOptionIndex = taskViewSegmentedOptions.findIndex(
+      (option: TaskViewSwitcherOption) => option.value === tab,
+    )
+    const selectedOption = selectedOptionIndex >= 0 ? taskViewSegmentedOptions[selectedOptionIndex] ?? null : null
+
+    if (estimatedTaskViewButtonGroupWidth <= availableTabsWidth) {
+      return taskViewSegmentedOptions
+    }
+
+    const visibleWidthLimit = Math.max(
+      0,
+      availableTabsWidth - TASK_VIEW_MORE_BUTTON_SIZE - TASK_VIEW_SWITCHER_SECTION_GAP,
+    )
+    const visibleOptions: TaskViewSwitcherOption[] = []
+    let usedWidth = 0
+
+    for (const option of taskViewSegmentedOptions) {
+      const optionWidth = estimateTaskViewButtonWidth(option)
+      const nextWidth = visibleOptions.length === 0
+        ? optionWidth
+        : usedWidth + TASK_VIEW_SWITCHER_ITEM_GAP + optionWidth
+      if (visibleOptions.length === 0 || nextWidth <= visibleWidthLimit) {
+        visibleOptions.push(option)
+        usedWidth = nextWidth
+        continue
+      }
+      break
+    }
+
+    if (visibleOptions.length === 0) {
+      return [selectedOption ?? taskViewSegmentedOptions[0]]
+    }
+
+    if (selectedOption == null) {
+      return visibleOptions
+    }
+
+    if (visibleOptions.some((option) => option.value === selectedOption.value)) {
+      return visibleOptions
+    }
+
+    const selectedPrefix = taskViewSegmentedOptions.slice(0, selectedOptionIndex + 1)
+    let candidateOptions = selectedPrefix.slice()
+    while (candidateOptions.length > 0) {
+      const candidateWidth = measureTaskViewButtonGroupWidth(candidateOptions)
+      if (candidateWidth <= visibleWidthLimit) {
+        return candidateOptions
+      }
+      candidateOptions = candidateOptions.slice(0, -1)
+    }
+
+    return [selectedOption]
+  }, [
+    availableTabsWidth,
+    estimatedTaskViewButtonGroupWidth,
+    estimateTaskViewButtonWidth,
+    measureTaskViewButtonGroupWidth,
+    tab,
+    taskViewSegmentedOptions,
+  ])
+  const overflowTaskViewOptions = React.useMemo(() => {
+    const visibleValueSet = new Set(visibleTaskViewOptions.map((option: TaskViewSwitcherOption) => option.value))
+    return taskViewSegmentedOptions.filter((option: TaskViewSwitcherOption) => {
+      return !visibleValueSet.has(option.value)
+    })
+  }, [taskViewSegmentedOptions, visibleTaskViewOptions])
+  const activeTabVisibleInSwitcher = visibleTaskViewOptions.some((option: TaskViewSwitcherOption) => option.value === tab)
+  const shouldShowMoreTabsButton = overflowTaskViewOptions.length > 0
 
   const viewName = tab === "dashboard"
     ? t("Dashboard")
@@ -3502,29 +3637,29 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
           boxShadow: "0 10px 24px rgba(15, 23, 42, 0.1)",
         },
       },
-      React.createElement(
-        "div",
-        {
-          style: {
-            width: "100%",
-            display: useCompactSingleSwitcherLayout ? "grid" : "flex",
-            gridTemplateColumns: useCompactSingleSwitcherLayout
-              ? "minmax(0, 1fr) minmax(160px, 220px)"
-              : undefined,
-            alignItems: "center",
-            justifyContent: useCompactSingleSwitcherLayout ? undefined : "space-between",
-            gap: "10px",
-            flexWrap: useCompactSingleSwitcherLayout ? undefined : "wrap",
-          },
-        },
         React.createElement(
           "div",
           {
             style: {
-              minWidth: 0,
+              width: "100%",
               display: "flex",
-              alignItems: "baseline",
-              gap: "8px",
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "10px",
+              flexWrap: "nowrap",
+              minWidth: 0,
+            },
+          },
+        React.createElement(
+          "div",
+          {
+              style: {
+                minWidth: 0,
+                flex: "0 1 auto",
+                display: "flex",
+                alignItems: "baseline",
+                gap: "8px",
               flexWrap: "wrap",
             },
           },
@@ -3558,63 +3693,156 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
             style: {
               display: "flex",
               alignItems: "center",
-              justifyContent: useCompactSingleSwitcherLayout ? "stretch" : "flex-end",
+              justifyContent: "flex-end",
               gap: "8px",
               flexWrap: "nowrap",
-              flex: useCompactSingleSwitcherLayout ? undefined : "1 1 320px",
-              width: useCompactSingleSwitcherLayout ? "100%" : undefined,
+              flex: "1 1 320px",
               minWidth: 0,
+              overflow: "hidden",
             },
           },
-          useCompactViewSwitcher
-            ? React.createElement(
-                "div",
-                {
-                  style: {
-                    flex: useCompactSingleSwitcherLayout ? "1 1 auto" : "1 1 220px",
-                    minWidth: 0,
-                    maxWidth: useCompactSingleSwitcherLayout ? "100%" : "340px",
-                  },
+          React.createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-end",
+                gap: "6px",
+                flex: "0 1 auto",
+                minWidth: 0,
+                width: "fit-content",
+                marginLeft: "auto",
+              },
+            },
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "2px",
+                  minWidth: 0,
+                  flex: "0 1 auto",
+                  overflow: "hidden",
+                  padding: "4px",
+                  borderRadius: "8px",
+                  background: "rgba(15, 23, 42, 0.16)",
                 },
-                React.createElement(Select, {
-                  selected: [tab],
-                  options: taskViewSegmentedOptions,
-                  onChange: (selected: string[]) => {
-                    const value = selected[0]
-                    if (value != null && isTaskViewsTab(value)) {
-                      setPreferredTaskViewsTab(value)
-                    }
+              },
+              ...visibleTaskViewOptions.map((option: TaskViewSwitcherOption) =>
+                React.createElement(
+                  "button",
+                  {
+                    key: option.value,
+                    type: "button",
+                    onClick: () => {
+                      setPreferredTaskViewsTab(option.value)
+                    },
+                    style: {
+                      appearance: "none",
+                      border: "none",
+                      outline: "none",
+                      minWidth: `${estimateTaskViewButtonWidth(option)}px`,
+                      height: "34px",
+                      padding: "0 14px",
+                      borderRadius: "6px",
+                      background: option.value === tab
+                        ? "rgba(15, 23, 42, 0.62)"
+                        : "transparent",
+                      color: option.value === tab
+                        ? "#fff"
+                        : "var(--orca-color-text-2)",
+                      font: "inherit",
+                      fontSize: "14px",
+                      fontWeight: option.value === tab ? 700 : 500,
+                      lineHeight: 1,
+                      whiteSpace: "nowrap",
+                      cursor: "pointer",
+                      boxShadow: option.value === tab
+                        ? "0 1px 4px rgba(0, 0, 0, 0.18)"
+                        : "none",
+                    },
                   },
-                  width: "100%",
-                  filter: taskViewSegmentedOptions.length > 8,
-                  menuContainer: filterMenuContainerRef,
-                }),
-              )
-            : React.createElement(
-                "div",
-                {
-                  style: {
-                    flex: "1 1 320px",
-                    minWidth: 0,
-                    maxWidth: "620px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                  },
-                },
-                React.createElement(Segmented, {
-                  selected: tab,
-                  options: taskViewSegmentedOptions,
-                  onChange: (value: string) => {
-                    if (isTaskViewsTab(value)) {
-                      setPreferredTaskViewsTab(value)
-                    }
-                  },
-                  style: {
-                    width: "100%",
-                  },
-                }),
+                  option.label,
+                ),
               ),
+            ),
+            shouldShowMoreTabsButton
+              ? React.createElement(
+                  "div",
+                  {
+                    ref: moreTabsButtonAnchorRef,
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      flex: "0 0 auto",
+                    },
+                  },
+                  React.createElement(
+                    Button,
+                    {
+                      variant: activeTabVisibleInSwitcher ? "outline" : "soft",
+                      onClick: () => {
+                        setMoreTabsPopupVisible((prev: boolean) => !prev)
+                      },
+                      title: t("More"),
+                      style: {
+                        width: `${TASK_VIEW_MORE_BUTTON_SIZE}px`,
+                        minWidth: `${TASK_VIEW_MORE_BUTTON_SIZE}px`,
+                        height: `${TASK_VIEW_MORE_BUTTON_SIZE}px`,
+                        padding: 0,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: "8px",
+                      },
+                    },
+                    React.createElement("i", {
+                      className: "ti ti-dots",
+                      style: {
+                        fontSize: "16px",
+                        lineHeight: 1,
+                      },
+                    }),
+                  ),
+                )
+              : null,
+            shouldShowMoreTabsButton
+              ? React.createElement(
+                  Popup,
+                  {
+                    refElement: moreTabsButtonAnchorRef,
+                    visible: moreTabsPopupVisible,
+                    onClose: () => setMoreTabsPopupVisible(false),
+                    onClosed: () => setMoreTabsPopupVisible(false),
+                    defaultPlacement: "bottom",
+                    alignment: "left",
+                    offset: 6,
+                    allowBeyondContainer: true,
+                    escapeToClose: true,
+                  },
+                  React.createElement(
+                    Menu,
+                    {
+                      keyboardNav: true,
+                    },
+                    ...overflowTaskViewOptions.map((option: TaskViewSwitcherOption) =>
+                      React.createElement(MenuText, {
+                        key: option.value,
+                        title: option.label,
+                        preIcon: option.value === tab ? "ti ti-check" : undefined,
+                        onClick: (event: MouseEvent) => {
+                          event.stopPropagation()
+                          setMoreTabsPopupVisible(false)
+                          setPreferredTaskViewsTab(option.value)
+                        },
+                      }),
+                    ),
+                  ),
+                )
+              : null,
+          ),
           React.createElement(
             "div",
             {

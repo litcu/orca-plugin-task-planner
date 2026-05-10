@@ -1078,7 +1078,7 @@ function injectTaskStatusStyles(pluginName: string, schema: TaskSchemaDefinition
     .orca-repr-main-content:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])${projectFilter}::before,
     .orca-repr:has(>.orca-repr-card-title>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])${cardProjectFilter} > .orca-repr-main>.orca-repr-main-content::before,
     .orca-query-card-title:has(>.orca-tags>.orca-tag[data-name="${taskTagName}"][data-${statusPropertyDataName}="${waitingStatus}"])${projectFilter} ~ .orca-block>.orca-repr>.orca-repr-main>.orca-repr-main-content::before {
-      content: "\\ea6b";
+      content: "\\f319";
       color: var(--orca-color-text-blue, #2563eb);
     }
 
