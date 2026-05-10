@@ -147,23 +147,6 @@ export function ProjectViewsPanel(props: ProjectViewsPanelProps) {
     return () => observer.disconnect()
   }, [])
 
-  if (props.projectItems.length === 0) {
-    return React.createElement(
-      "div",
-      {
-        style: {
-          padding: "12px",
-          borderRadius: "12px",
-          border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
-          background: "var(--orca-color-bg-2)",
-          color: "var(--orca-color-text-2)",
-          fontSize: "13px",
-        },
-      },
-      t("No projects yet"),
-    )
-  }
-
   const selectedProjectTitle = selectedProject?.text ?? t("Project")
   const selectedProjectProperties = selectedProject?.properties ?? null
   const projectTaskIds: DbId[] = selectedProject?.taskIds ?? []
@@ -196,6 +179,23 @@ export function ProjectViewsPanel(props: ProjectViewsPanelProps) {
     ? 0
     : Math.round(selectedProject.progress * 100)
   const useProjectSelectLayout = panelWidth > 0 && panelWidth < 760
+
+  if (props.projectItems.length === 0) {
+    return React.createElement(
+      "div",
+      {
+        style: {
+          padding: "12px",
+          borderRadius: "12px",
+          border: "1px solid var(--orca-color-border-1, var(--orca-color-border))",
+          background: "var(--orca-color-bg-2)",
+          color: "var(--orca-color-text-2)",
+          fontSize: "13px",
+        },
+      },
+      t("No projects yet"),
+    )
+  }
 
   return React.createElement(
     "div",
