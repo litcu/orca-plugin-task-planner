@@ -397,8 +397,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       return
     }
 
-    const updateWidth = () => {
-      const nextWidth = container.getBoundingClientRect().width
+    const updateWidth = (nextWidth: number) => {
       setViewSwitcherWidth((prev: number) => {
         if (Math.abs(prev - nextWidth) < 1) {
           return prev
@@ -407,17 +406,21 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       })
     }
 
-    updateWidth()
-
     if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", updateWidth)
+      updateWidth(window.innerWidth)
+      const handleResize = () => {
+        updateWidth(window.innerWidth)
+      }
+      window.addEventListener("resize", handleResize)
       return () => {
-        window.removeEventListener("resize", updateWidth)
+        window.removeEventListener("resize", handleResize)
       }
     }
 
-    const observer = new ResizeObserver(() => {
-      updateWidth()
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      const nextWidth = entry?.contentRect.width ?? 0
+      updateWidth(nextWidth)
     })
     observer.observe(container)
     return () => {
@@ -431,8 +434,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       return
     }
 
-    const updateWidth = () => {
-      const nextWidth = anchor.getBoundingClientRect().width
+    const updateWidth = (nextWidth: number) => {
       setCustomViewsButtonWidth((prev: number) => {
         if (Math.abs(prev - nextWidth) < 1) {
           return prev
@@ -441,17 +443,21 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       })
     }
 
-    updateWidth()
-
     if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", updateWidth)
+      updateWidth(window.innerWidth)
+      const handleResize = () => {
+        updateWidth(window.innerWidth)
+      }
+      window.addEventListener("resize", handleResize)
       return () => {
-        window.removeEventListener("resize", updateWidth)
+        window.removeEventListener("resize", handleResize)
       }
     }
 
-    const observer = new ResizeObserver(() => {
-      updateWidth()
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      const nextWidth = entry?.contentRect.width ?? 0
+      updateWidth(nextWidth)
     })
     observer.observe(anchor)
     return () => {

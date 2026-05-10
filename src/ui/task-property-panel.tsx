@@ -113,7 +113,7 @@ const TEXT_CHOICES_PROP_TYPE = 6
 export type { OpenTaskPropertyPopupOptions }
 
 export function openTaskPropertyPopup(options: OpenTaskPropertyPopupOptions) {
-  ensureRoot(options)
+  ensureRoot()
   popupState.options = options
   popupState.visible = true
   renderCurrent()
@@ -139,8 +139,8 @@ export function disposeTaskPropertyPopup() {
   popupState.visible = false
 }
 
-function ensureRoot(options?: OpenTaskPropertyPopupOptions) {
-  const mountContainer = resolvePopupMountContainer(options)
+function ensureRoot() {
+  const mountContainer = resolvePopupMountContainer()
   if (popupState.root != null && popupState.mountContainer === mountContainer) {
     return
   }
@@ -163,21 +163,7 @@ function ensureRoot(options?: OpenTaskPropertyPopupOptions) {
   popupState.root = window.createRoot(containerEl) as ReactRootLike
 }
 
-function resolvePopupMountContainer(
-  options?: OpenTaskPropertyPopupOptions,
-): HTMLElement {
-  if (options?.triggerSource === "panel-view") {
-    if (options.mountContainer != null && options.mountContainer.isConnected) {
-      return options.mountContainer
-    }
-
-    const fallbackPanelContainer = document.querySelector(
-      "[data-role='mlo-task-views-panel-root']",
-    )
-    if (fallbackPanelContainer instanceof HTMLElement && fallbackPanelContainer.isConnected) {
-      return fallbackPanelContainer
-    }
-  }
+function resolvePopupMountContainer(): HTMLElement {
   return document.body
 }
 
@@ -467,44 +453,52 @@ function TaskPropertyPopupView(props: {
 
   const dateAnchorRef = React.useRef<HTMLElement | null>(null)
   const popupPanelRef = React.useRef<HTMLDivElement | null>(null)
-  // Mount dropdown and date picker overlays inside the panel sidebar when possible.
-  const popupMenuContainerRef = React.useRef<HTMLElement | null>(null)
-  popupMenuContainerRef.current = isPanelSidebarMode
-    ? effectivePanelMountContainer ?? document.body
-    : document.body
-  const [mountContainerWidth, setMountContainerWidth] = React.useState(() => {
-    if (isPanelSidebarMode && effectivePanelMountContainer != null) {
-      return effectivePanelMountContainer.clientWidth || window.innerWidth
-    }
-    return window.innerWidth
-  })
+  const popupMenuContainerRef = React.useRef<HTMLElement | null>(document.body)
+  const [mountContainerWidth, setMountContainerWidth] = React.useState(() => window.innerWidth)
 
   React.useEffect(() => {
+    if (!props.visible) {
+      return
+    }
+
     if (!isPanelSidebarMode || effectivePanelMountContainer == null) {
       setMountContainerWidth(window.innerWidth)
       return
     }
 
     const mountContainer = effectivePanelMountContainer
-    const syncWidth = () => {
-      const nextWidth = mountContainer.clientWidth
-      if (nextWidth > 0) {
-        setMountContainerWidth(nextWidth)
+    const syncWidth = (nextWidth: number) => {
+      if (nextWidth <= 0) {
+        return
+      }
+
+      setMountContainerWidth((prev: number) => {
+        return prev === nextWidth ? prev : nextWidth
+      })
+    }
+
+    if (typeof ResizeObserver !== "function") {
+      const handleResize = () => {
+        syncWidth(window.innerWidth)
+      }
+      handleResize()
+      window.addEventListener("resize", handleResize)
+
+      return () => {
+        window.removeEventListener("resize", handleResize)
       }
     }
 
-    syncWidth()
-    const resizeObserver = typeof ResizeObserver === "function"
-      ? new ResizeObserver(() => syncWidth())
-      : null
-    resizeObserver?.observe(mountContainer)
-    window.addEventListener("resize", syncWidth)
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      syncWidth(Math.round(entry?.contentRect.width ?? 0))
+    })
+    resizeObserver.observe(mountContainer)
 
     return () => {
       resizeObserver?.disconnect()
-      window.removeEventListener("resize", syncWidth)
     }
-  }, [effectivePanelMountContainer, isPanelSidebarMode])
+  }, [effectivePanelMountContainer, isPanelSidebarMode, props.visible])
   const estimatedPanelWidth = isPanelSidebarMode
     ? Math.min(Math.max(mountContainerWidth * 0.46, 300), mountContainerWidth)
     : isCreateMode

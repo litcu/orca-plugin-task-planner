@@ -62,7 +62,7 @@ export function ProjectViewsPanel(props: ProjectViewsPanelProps) {
   const Select = orca.components.Select
   const isChinese = orca.state.locale === "zh-CN"
   const panelRef = React.useRef<HTMLDivElement | null>(null)
-  const projectSelectMenuContainerRef = React.useRef<HTMLElement | null>(props.mountContainer ?? document.body)
+  const projectSelectMenuContainerRef = React.useRef<HTMLElement | null>(document.body)
   const [panelWidth, setPanelWidth] = React.useState(0)
   const projectItemById = React.useMemo(() => {
     const map = new Map<DbId, ProjectItem>()
@@ -133,16 +133,28 @@ export function ProjectViewsPanel(props: ProjectViewsPanelProps) {
       return
     }
 
-    const updateWidth = () => {
-      setPanelWidth(Math.round(element.getBoundingClientRect().width))
+    const updateWidth = (nextWidth: number) => {
+      const roundedWidth = Math.round(nextWidth)
+      setPanelWidth((prev: number) => {
+        return prev === roundedWidth ? prev : roundedWidth
+      })
     }
 
-    updateWidth()
     if (typeof ResizeObserver === "undefined") {
-      return
+      updateWidth(window.innerWidth)
+      const handleResize = () => {
+        updateWidth(window.innerWidth)
+      }
+      window.addEventListener("resize", handleResize)
+      return () => {
+        window.removeEventListener("resize", handleResize)
+      }
     }
 
-    const observer = new ResizeObserver(() => updateWidth())
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      updateWidth(entry?.contentRect.width ?? 0)
+    })
     observer.observe(element)
     return () => observer.disconnect()
   }, [])

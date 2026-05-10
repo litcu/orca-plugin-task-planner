@@ -164,24 +164,27 @@ export function MyDayScheduleBoard(props: MyDayScheduleBoardProps) {
       return
     }
 
-    const updateCompactLayout = () => {
-      const nextCompact = boardElement.getBoundingClientRect().width <= COMPACT_LAYOUT_BREAKPOINT_PX
+    const updateCompactLayout = (width: number) => {
+      const nextCompact = width <= COMPACT_LAYOUT_BREAKPOINT_PX
       setCompactLayout((prev: boolean) => {
         return prev === nextCompact ? prev : nextCompact
       })
     }
 
-    updateCompactLayout()
-
     if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", updateCompactLayout)
+      updateCompactLayout(window.innerWidth)
+      const handleResize = () => {
+        updateCompactLayout(window.innerWidth)
+      }
+      window.addEventListener("resize", handleResize)
       return () => {
-        window.removeEventListener("resize", updateCompactLayout)
+        window.removeEventListener("resize", handleResize)
       }
     }
 
-    const observer = new ResizeObserver(() => {
-      updateCompactLayout()
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      updateCompactLayout(entry?.contentRect.width ?? 0)
     })
     observer.observe(boardElement)
     return () => {
@@ -1102,6 +1105,14 @@ function useOverflowTitle<T extends HTMLElement>(text: string): OverflowTitleBin
 
   const refresh = React.useCallback(() => {
     const element = titleRef.current
+    if (element == null) {
+      return
+    }
+
+    if (!canMeasureElementTextOverflow(element)) {
+      return
+    }
+
     const nextOverflowed = element != null && isElementTextOverflowing(element)
     setOverflowed((prev: boolean) => {
       return prev === nextOverflowed ? prev : nextOverflowed
@@ -1119,13 +1130,21 @@ function useOverflowTitle<T extends HTMLElement>(text: string): OverflowTitleBin
     }
 
     if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", refresh)
+      const handleResize = () => {
+        refresh()
+      }
+      window.addEventListener("resize", handleResize)
       return () => {
-        window.removeEventListener("resize", refresh)
+        window.removeEventListener("resize", handleResize)
       }
     }
 
-    const observer = new ResizeObserver(() => {
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry == null || (entry.contentRect.width <= 0 && entry.contentRect.height <= 0)) {
+        return
+      }
+
       refresh()
     })
     observer.observe(element)
@@ -1142,6 +1161,29 @@ function useOverflowTitle<T extends HTMLElement>(text: string): OverflowTitleBin
     ref: titleRef,
     overflowed,
     refresh,
+  }
+}
+
+function canMeasureElementTextOverflow(element: HTMLElement): boolean {
+  const checkVisibility = (element as HTMLElement & {
+    checkVisibility?: (options?: {
+      contentVisibilityAuto?: boolean
+      opacityProperty?: boolean
+      visibilityProperty?: boolean
+    }) => boolean
+  }).checkVisibility
+  if (typeof checkVisibility !== "function") {
+    return true
+  }
+
+  try {
+    return checkVisibility.call(element, {
+      contentVisibilityAuto: true,
+      opacityProperty: false,
+      visibilityProperty: false,
+    })
+  } catch {
+    return true
   }
 }
 
