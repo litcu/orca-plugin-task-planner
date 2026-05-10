@@ -5,11 +5,11 @@ import {
   addTaskToMyDayState,
   ensureMyDayMirrorInTodayJournal,
   loadMyDayState,
-  removeMyDayMirrorBlock,
   removeTaskFromMyDayState,
   saveMyDayState,
   setMyDayJournalSectionBlockId,
   setMyDayTaskMirrorBlockId,
+  syncMyDayJournalEntrySchedule,
   type MyDayState,
 } from "./my-day-state"
 
@@ -120,6 +120,15 @@ export async function addTaskToMyDayStateWithSync(
       options.taskId,
       mirrorResult.mirrorBlockId,
     )
+    const entry = nextState.tasks.find((item) => item.taskId === getMirrorId(options.taskId))
+    if (entry != null) {
+      await syncMyDayJournalEntrySchedule({
+        taskId: entry.taskId,
+        mirrorBlockId: mirrorResult.mirrorBlockId,
+        scheduleStartMinute: entry.scheduleStartMinute,
+        scheduleEndMinute: entry.scheduleEndMinute,
+      })
+    }
   } else {
     orca.notify("warn", t("Failed to sync My Day journal"))
   }
@@ -136,7 +145,6 @@ export async function removeTaskFromMyDayStateWithSync(
     return baseState
   }
 
-  await removeMyDayMirrorBlock(removeResult.removedEntry?.mirrorBlockId)
   return removeResult.state
 }
 

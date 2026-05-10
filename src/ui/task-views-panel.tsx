@@ -61,10 +61,10 @@ import {
   ensureMyDayMirrorInTodayJournal,
   loadMyDayState,
   pruneMissingMyDayTasks,
-  removeMyDayMirrorBlock,
   resolveMyDayKey,
   setMyDayJournalSectionBlockId,
   setMyDayTaskMirrorBlockId,
+  syncMyDayJournalEntrySchedule,
   updateMyDayTaskSchedule,
   type MyDayState,
   type MyDayTaskEntry,
@@ -738,6 +738,18 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
                   mirrorResult.mirrorBlockId,
                 )
                 changed = true
+              }
+
+              const syncedEntry = nextState.tasks.find((item: MyDayTaskEntry) => {
+                return item.taskId === getMirrorId(entry.taskId)
+              }) ?? currentEntry
+              if (syncedEntry != null) {
+                await syncMyDayJournalEntrySchedule({
+                  taskId: syncedEntry.taskId,
+                  mirrorBlockId: syncedEntry.mirrorBlockId,
+                  scheduleStartMinute: syncedEntry.scheduleStartMinute,
+                  scheduleEndMinute: syncedEntry.scheduleEndMinute,
+                })
               }
             }
 
@@ -1421,13 +1433,23 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         const savedState = await runMyDayStateMutation(
           props.pluginName,
           panelSettings.myDayResetHour,
-          (baseState: MyDayState) => {
-            return updateMyDayTaskSchedule(
+          async (baseState: MyDayState) => {
+            const nextState = updateMyDayTaskSchedule(
               baseState,
               taskId,
               startMinute,
               endMinute,
             )
+            const entry = nextState.tasks.find((item) => item.taskId === getMirrorId(taskId))
+            if (entry != null) {
+              await syncMyDayJournalEntrySchedule({
+                taskId: entry.taskId,
+                mirrorBlockId: entry.mirrorBlockId,
+                scheduleStartMinute: entry.scheduleStartMinute,
+                scheduleEndMinute: entry.scheduleEndMinute,
+              })
+            }
+            return nextState
           },
         )
         if (savedState != null) {
@@ -1459,8 +1481,18 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         const savedState = await runMyDayStateMutation(
           props.pluginName,
           panelSettings.myDayResetHour,
-          (baseState: MyDayState) => {
-            return updateMyDayTaskSchedule(baseState, taskId, null, null)
+          async (baseState: MyDayState) => {
+            const nextState = updateMyDayTaskSchedule(baseState, taskId, null, null)
+            const entry = nextState.tasks.find((item) => item.taskId === getMirrorId(taskId))
+            if (entry != null) {
+              await syncMyDayJournalEntrySchedule({
+                taskId: entry.taskId,
+                mirrorBlockId: entry.mirrorBlockId,
+                scheduleStartMinute: entry.scheduleStartMinute,
+                scheduleEndMinute: entry.scheduleEndMinute,
+              })
+            }
+            return nextState
           },
         )
         if (savedState != null) {
@@ -2336,9 +2368,6 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
             return baseState
           }
 
-          for (const removedEntry of pruneResult.removedEntries) {
-            await removeMyDayMirrorBlock(removedEntry.mirrorBlockId)
-          }
           return pruneResult.state
         },
       )

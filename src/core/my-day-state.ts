@@ -8,6 +8,7 @@ const PROP_TYPE_NUMBER = 3
 const PROP_TYPE_BOOLEAN = 4
 const INLINE_REF_TYPE = 1
 const TAG_REF_TYPE = 2
+const CONTENT_TYPE_TEXT = "t"
 const CONTENT_TYPE_REFERENCE = "r"
 const MINUTE_PER_DAY = 24 * 60
 const DEFAULT_SCHEDULE_DURATION_MINUTES = 60
@@ -568,6 +569,46 @@ export async function removeMyDayMirrorBlock(
   } catch (error) {
     console.error(error)
   }
+}
+
+export async function syncMyDayJournalEntrySchedule(options: {
+  taskId: DbId
+  mirrorBlockId: DbId | null | undefined
+  scheduleStartMinute: number | null
+  scheduleEndMinute: number | null
+}): Promise<boolean> {
+  const taskId = normalizeTaskDbId(options.taskId)
+  if (taskId == null) {
+    return false
+  }
+
+  const mirrorBlockId = normalizeRawDbId(options.mirrorBlockId)
+  if (mirrorBlockId == null) {
+    return false
+  }
+
+  const existingId = await resolveExistingBlockId([mirrorBlockId])
+  if (existingId == null) {
+    return false
+  }
+
+  const block = await getBlockById(existingId)
+  if (block == null || !hasMyDayEntryMarker(block)) {
+    return false
+  }
+
+  if (!blockContainsInlineTaskReference(block, taskId) && !isMirrorBlockForTask(block, taskId)) {
+    return false
+  }
+
+  const taskLabel = await resolveTaskReferenceLabel(taskId)
+  return await setBlockTaskReferenceContent(
+    existingId,
+    taskId,
+    taskLabel,
+    options.scheduleStartMinute,
+    options.scheduleEndMinute,
+  )
 }
 
 function normalizeMyDayState(raw: unknown, currentDayKey: string): NormalizeResult {
@@ -1463,6 +1504,8 @@ async function setBlockTaskReferenceContent(
   blockId: DbId,
   taskId: DbId,
   taskLabel: string,
+  scheduleStartMinute: number | null = null,
+  scheduleEndMinute: number | null = null,
 ): Promise<boolean> {
   const taskBlock = await getBlockById(taskId)
   const taskTagAliases = collectTagAliases(taskBlock)
@@ -1478,7 +1521,11 @@ async function setBlockTaskReferenceContent(
       [
         {
           id: blockId,
-          content: [{ t: CONTENT_TYPE_REFERENCE, v: refId }],
+          content: buildMyDayReferenceContent(
+            refId,
+            scheduleStartMinute,
+            scheduleEndMinute,
+          ),
         },
       ],
       false,
@@ -1490,6 +1537,45 @@ async function setBlockTaskReferenceContent(
 
   await removeReferenceBlockTagArtifacts(blockId, taskTagAliases)
   return true
+}
+
+function buildMyDayReferenceContent(
+  refId: DbId,
+  scheduleStartMinute: number | null,
+  scheduleEndMinute: number | null,
+): Array<{ t: string; v: string | DbId }> {
+  const scheduleText = formatMyDayScheduleTimeRange(
+    scheduleStartMinute,
+    scheduleEndMinute,
+  )
+  if (scheduleText === "") {
+    return [{ t: CONTENT_TYPE_REFERENCE, v: refId }]
+  }
+
+  return [
+    { t: CONTENT_TYPE_TEXT, v: `${scheduleText} ` },
+    { t: CONTENT_TYPE_REFERENCE, v: refId },
+  ]
+}
+
+function formatMyDayScheduleTimeRange(
+  startMinute: number | null,
+  endMinute: number | null,
+): string {
+  const [normalizedStart, normalizedEnd] = normalizeScheduleRange(startMinute, endMinute)
+  if (normalizedStart == null || normalizedEnd == null) {
+    return ""
+  }
+
+  return `${formatMyDayScheduleMinute(normalizedStart)}-${formatMyDayScheduleMinute(normalizedEnd)}`
+}
+
+function formatMyDayScheduleMinute(minute: number): string {
+  const normalizedMinute = clampNumber(Math.round(minute), 0, MINUTE_PER_DAY)
+  const minuteInDay = normalizedMinute === MINUTE_PER_DAY ? 0 : normalizedMinute
+  const hour = Math.floor(minuteInDay / 60)
+  const minutePart = minuteInDay % 60
+  return `${String(hour).padStart(2, "0")}:${String(minutePart).padStart(2, "0")}`
 }
 
 async function setInlineRefAlias(ref: BlockRef, alias: string): Promise<void> {

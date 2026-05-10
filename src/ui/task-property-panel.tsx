@@ -27,10 +27,17 @@ import { getPluginSettings } from "../core/plugin-settings"
 import { applyTaskTimerForStatusChange } from "../core/task-timer"
 import {
   getMyDayMutationSuccessMessage,
+  isTaskInMyDay,
   peekMyDayTaskState,
   primeMyDayStateCache,
+  runMyDayStateMutation,
   toggleTaskInMyDay,
 } from "../core/my-day-actions"
+import {
+  syncMyDayJournalEntrySchedule,
+  updateMyDayTaskSchedule,
+  type MyDayState,
+} from "../core/my-day-state"
 
 import { t } from "../libs/l10n"
 import {
@@ -839,6 +846,70 @@ function TaskPropertyPopupView(props: {
     void refreshActivationInfo()
   }, [refreshActivationInfo])
 
+  const syncTaskScheduleToMyDay = React.useCallback(async (
+    previousStartTime: Date | null,
+    previousEndTime: Date | null,
+    startTime: Date | null,
+    endTime: Date | null,
+  ) => {
+    if (
+      props.myDayEnabled !== true ||
+      myDayPluginName === "" ||
+      myDayBlockId == null
+    ) {
+      return
+    }
+
+    if (
+      areDatesEqualToMinute(previousStartTime, startTime) &&
+      areDatesEqualToMinute(previousEndTime, endTime)
+    ) {
+      return
+    }
+
+    await runMyDayStateMutation(
+      myDayPluginName,
+      myDayResetHour,
+      async (baseState: MyDayState) => {
+        if (!isTaskInMyDay(baseState, myDayBlockId)) {
+          return baseState
+        }
+
+        const scheduleRange = resolveMyDayScheduleRangeFromDates(
+          startTime,
+          endTime,
+          baseState.dayKey,
+        )
+        if (scheduleRange === "unchanged") {
+          return baseState
+        }
+
+        const nextState = updateMyDayTaskSchedule(
+          baseState,
+          myDayBlockId,
+          scheduleRange.startMinute,
+          scheduleRange.endMinute,
+        )
+        const entry = nextState.tasks.find((item) => item.taskId === getMirrorId(myDayBlockId))
+        if (entry != null) {
+          await syncMyDayJournalEntrySchedule({
+            taskId: entry.taskId,
+            mirrorBlockId: entry.mirrorBlockId,
+            scheduleStartMinute: entry.scheduleStartMinute,
+            scheduleEndMinute: entry.scheduleEndMinute,
+          })
+        }
+
+        return nextState
+      },
+    )
+  }, [
+    myDayBlockId,
+    myDayPluginName,
+    myDayResetHour,
+    props.myDayEnabled,
+  ])
+
   React.useEffect(() => {
     let disposed = false
 
@@ -1191,6 +1262,12 @@ function TaskPropertyPopupView(props: {
         valuesToSave,
         sourceBlockId,
         props.schema,
+      )
+      await syncTaskScheduleToMyDay(
+        previousValuesWithMeta.startTime,
+        previousValuesWithMeta.endTime,
+        valuesToSave.startTime,
+        valuesToSave.endTime,
       )
       try {
         await applyTaskTimerForStatusChange({
@@ -3353,6 +3430,59 @@ function formatDateTimeToMinute(value: Date): string {
     minute: "2-digit",
     hour12: false,
   })
+}
+
+function resolveMyDayScheduleRangeFromDates(
+  startTime: Date | null,
+  endTime: Date | null,
+  dayKey: string,
+): "unchanged" | {
+  startMinute: number | null
+  endMinute: number | null
+} {
+  if (startTime == null && endTime == null) {
+    return {
+      startMinute: null,
+      endMinute: null,
+    }
+  }
+
+  if (startTime == null || endTime == null) {
+    return "unchanged"
+  }
+
+  if (
+    formatLocalDayKey(startTime) !== dayKey ||
+    formatLocalDayKey(endTime) !== dayKey
+  ) {
+    return "unchanged"
+  }
+
+  return {
+    startMinute: dateToMinuteOfDay(startTime),
+    endMinute: dateToMinuteOfDay(endTime),
+  }
+}
+
+function formatLocalDayKey(value: Date): string {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, "0")
+  const day = String(value.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function dateToMinuteOfDay(value: Date): number {
+  return value.getHours() * 60 + value.getMinutes()
+}
+
+function areDatesEqualToMinute(left: Date | null, right: Date | null): boolean {
+  const normalizedLeft = normalizeDateToMinute(left)
+  const normalizedRight = normalizeDateToMinute(right)
+  if (normalizedLeft == null || normalizedRight == null) {
+    return normalizedLeft == null && normalizedRight == null
+  }
+
+  return normalizedLeft.getTime() === normalizedRight.getTime()
 }
 
 function isRecord(value: unknown): value is Record<string, any> {
