@@ -1,4 +1,11 @@
-import type { Block, BlockProperty, DbId } from "../orca.d.ts"
+import type {
+  Block,
+  BlockProperty,
+  ColumnPanel,
+  DbId,
+  RowPanel,
+  ViewPanel,
+} from "../orca.d.ts"
 import {
   DEFAULT_TASK_DEPENDENCY_DELAY,
   DEFAULT_TASK_SCORE,
@@ -78,6 +85,7 @@ interface OpenTaskPropertyPopupOptions {
   parentSourceBlockId?: DbId
   schema: TaskSchemaDefinition
   triggerSource: PopupTriggerSource
+  panelId?: string
   mountContainer?: HTMLElement | null
   mode?: "edit" | "create"
   onTaskCreated?: (blockId: DbId) => void
@@ -190,6 +198,7 @@ function TaskPropertyPopupView(props: {
   parentSourceBlockId?: DbId
   schema: TaskSchemaDefinition
   triggerSource: PopupTriggerSource
+  panelId?: string
   mountContainer?: HTMLElement | null
   mode?: "edit" | "create"
   onTaskCreated?: (blockId: DbId) => void
@@ -1018,125 +1027,113 @@ function TaskPropertyPopupView(props: {
           parentSourceBlockId: props.parentSourceBlockId,
         })
         if (insertParentBlockId == null) {
-          throw new Error(t("Failed to add task"))
+          throw new Error(t("Failed to resolve task insert target"))
         }
 
         let createdTaskId: DbId | null = null
         let createdTaskStatus: string | null = null
-        await orca.commands.invokeGroup(async () => {
-          const insertedTaskId = (await orca.commands.invokeEditorCommand(
-            "core.editor.insertBlock",
-            null,
-            null,
-            null,
-            [{ t: "t", v: contentText }],
-          )) as DbId
-          createdTaskId = insertedTaskId
+        const insertParentBlock = await getBlockById(insertParentBlockId)
+        if (insertParentBlock == null) {
+          throw new Error(t("Failed to resolve task insert target"))
+        }
+        await withEditorContextForTaskInsert(
+          insertParentBlockId,
+          props.panelId,
+          async () => {
+            const insertedTaskId = await insertTaskBlockAsLastChild(
+              insertParentBlockId,
+              insertParentBlock,
+              contentText,
+            )
+            if (insertedTaskId == null) {
+              throw new Error(t("Failed to create task block"))
+            }
+            createdTaskId = insertedTaskId
 
-          try {
+            const dependencyRefIds = await ensureDependencyRefIds(
+              insertedTaskId,
+              dependsOnValues,
+            )
+            const projectRefIds = await ensureProjectRefIds(
+              insertedTaskId,
+              projectsValues,
+            )
+            const insertedTaskBlock =
+              orca.state.blocks[getMirrorId(insertedTaskId)] ??
+              orca.state.blocks[insertedTaskId] ??
+              null
+            const normalizedTaskLabels = mergeTaskLabelValues(
+              baseTaskLabels,
+              collectTaskLabelValuesFromBlockTags(
+                insertedTaskBlock,
+                props.schema.tagAlias,
+              ),
+            )
+            await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
+            const valuesToSave = normalizeTaskValuesForStatus({
+              status: statusValue,
+              startTime: startTimeValue,
+              endTime: endTimeValue,
+              reviewEnabled: reviewEnabledValue,
+              reviewType: reviewTypeValue,
+              nextReview:
+                reviewEnabledValue && reviewTypeValue === "single"
+                  ? nextReviewValue
+                  : null,
+              reviewEvery,
+              lastReviewed: reviewEnabledValue ? lastReviewedValue : null,
+              importance: importanceInRange,
+              urgency: urgencyInRange,
+              effort: effortInRange,
+              star: starValue,
+              repeatRule: repeatRuleText,
+              labels: normalizedTaskLabels,
+              remark: remarkText,
+              dependsOn: dependencyRefIds,
+              projects: projectRefIds,
+              dependsMode: hasDependencies ? dependsModeValue : "ALL",
+              dependencyDelay: hasDependencies ? dependencyDelay.value : null,
+            }, props.schema)
+            createdTaskStatus = valuesToSave.status
+            const customRefData = buildTaskCustomRefData(
+              customPropertyDescriptors,
+              customPropertyStates,
+            )
+            const payload = toRefDataForSave(valuesToSave, props.schema, {
+              customProperties: customRefData,
+            })
             await orca.commands.invokeEditorCommand(
-              "core.editor.moveBlocks",
+              "core.editor.insertTag",
+              null,
+              insertedTaskId,
+              props.schema.tagAlias,
+              payload,
+            )
+            await orca.commands.invokeEditorCommand(
+              "core.editor.setProperties",
               null,
               [insertedTaskId],
-              insertParentBlockId,
-              "lastChild",
+              [toTaskMetaPropertyForSave(valuesToSave, insertedTaskBlock)],
             )
-          } catch (moveError) {
-            try {
-              await orca.commands.invokeEditorCommand(
-                "core.editor.deleteBlocks",
-                null,
-                [insertedTaskId],
-              )
-            } catch (cleanupError) {
-              console.error(cleanupError)
-            }
-            throw moveError
-          }
 
-          const dependencyRefIds = await ensureDependencyRefIds(
-            insertedTaskId,
-            dependsOnValues,
-          )
-          const projectRefIds = await ensureProjectRefIds(
-            insertedTaskId,
-            projectsValues,
-          )
-          const insertedTaskBlock =
-            orca.state.blocks[getMirrorId(insertedTaskId)] ??
-            orca.state.blocks[insertedTaskId] ??
-            null
-          const normalizedTaskLabels = mergeTaskLabelValues(
-            baseTaskLabels,
-            collectTaskLabelValuesFromBlockTags(
-              insertedTaskBlock,
-              props.schema.tagAlias,
-            ),
-          )
-          await ensureTaskLabelChoices(props.schema, normalizedTaskLabels)
-          const valuesToSave = normalizeTaskValuesForStatus({
-            status: statusValue,
-            startTime: startTimeValue,
-            endTime: endTimeValue,
-            reviewEnabled: reviewEnabledValue,
-            reviewType: reviewTypeValue,
-            nextReview:
-              reviewEnabledValue && reviewTypeValue === "single"
-                ? nextReviewValue
-                : null,
-            reviewEvery,
-            lastReviewed: reviewEnabledValue ? lastReviewedValue : null,
-            importance: importanceInRange,
-            urgency: urgencyInRange,
-            effort: effortInRange,
-            star: starValue,
-            repeatRule: repeatRuleText,
-            labels: normalizedTaskLabels,
-            remark: remarkText,
-            dependsOn: dependencyRefIds,
-            projects: projectRefIds,
-            dependsMode: hasDependencies ? dependsModeValue : "ALL",
-            dependencyDelay: hasDependencies ? dependencyDelay.value : null,
-          }, props.schema)
-          createdTaskStatus = valuesToSave.status
-          const customRefData = buildTaskCustomRefData(
-            customPropertyDescriptors,
-            customPropertyStates,
-          )
-          const payload = toRefDataForSave(valuesToSave, props.schema, {
-            customProperties: customRefData,
-          })
-          await orca.commands.invokeEditorCommand(
-            "core.editor.insertTag",
-            null,
-            insertedTaskId,
-            props.schema.tagAlias,
-            payload,
-          )
-          await orca.commands.invokeEditorCommand(
-            "core.editor.setProperties",
-            null,
-            [insertedTaskId],
-            [toTaskMetaPropertyForSave(valuesToSave, insertedTaskBlock)],
-          )
-        })
+            if (createdTaskStatus != null) {
+              try {
+                await applyTaskTimerForStatusChange({
+                  blockId: insertedTaskId,
+                  schema: props.schema,
+                  previousStatus: getDefaultTaskStatus(props.schema),
+                  nextStatus: createdTaskStatus,
+                  autoStartOnDoing: timerAutoStartOnDoing,
+                })
+              } catch (error) {
+                console.error(error)
+              }
+            }
+          },
+        )
 
         if (createdTaskId == null) {
           throw new Error(t("Failed to add task"))
-        }
-
-        if (createdTaskStatus != null) {
-          try {
-            await applyTaskTimerForStatusChange({
-              blockId: createdTaskId,
-              schema: props.schema,
-              previousStatus: getDefaultTaskStatus(props.schema),
-              nextStatus: createdTaskStatus,
-              autoStartOnDoing: timerAutoStartOnDoing,
-            })
-          } catch (error) {
-            console.error(error)
-          }
         }
 
         invalidateNextActionEvaluationCache()
@@ -2802,6 +2799,303 @@ async function resolveExistingBlockId(
   }
 
   return fallback
+}
+
+async function getBlockById(blockId: DbId): Promise<Block | null> {
+  const stateBlock = orca.state.blocks[blockId] ?? null
+  if (stateBlock != null) {
+    return stateBlock
+  }
+
+  try {
+    return (await orca.invokeBackend("get-block", blockId)) as Block | null
+  } catch (error) {
+    console.error(error)
+    return null
+  }
+}
+
+async function withEditorContextForTaskInsert<T>(
+  targetBlockId: DbId,
+  sourcePanelId: string | undefined,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const activePanelId = orca.state.activePanel
+  const temporaryPanelId = await prepareEditorContextForTaskInsert(
+    targetBlockId,
+    sourcePanelId,
+  )
+
+  try {
+    return await callback()
+  } finally {
+    if (temporaryPanelId != null) {
+      try {
+        orca.nav.close(temporaryPanelId)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+    if (activePanelId !== "") {
+      try {
+        orca.nav.switchFocusTo(activePanelId)
+      } catch (error) {
+        console.error(error)
+      }
+    }
+  }
+}
+
+async function prepareEditorContextForTaskInsert(
+  targetBlockId: DbId,
+  sourcePanelId?: string,
+): Promise<string | null> {
+  const existingPanel = findReusableEditorPanel(sourcePanelId)
+  if (existingPanel != null) {
+    orca.nav.switchFocusTo(existingPanel.id)
+    await waitForEditorBlockDom(existingPanel)
+    return null
+  }
+
+  const createdPanelId = createTemporaryEditorPanel(targetBlockId, sourcePanelId)
+  if (createdPanelId == null) {
+    return null
+  }
+
+  orca.nav.switchFocusTo(createdPanelId)
+  await waitForBlockDom(targetBlockId)
+  return createdPanelId
+}
+
+function findReusableEditorPanel(sourcePanelId?: string): ViewPanel | null {
+  const sourceId = normalizePanelId(sourcePanelId)
+  const activePanelId = normalizePanelId(orca.state.activePanel)
+  const panels = collectViewPanels(orca.state.panels)
+  const reusablePanels = panels.filter((panel) => {
+    if (panel.id === sourceId) {
+      return false
+    }
+    return isEditorPanel(panel)
+  })
+
+  return reusablePanels.find((panel) => panel.id === activePanelId) ??
+    reusablePanels.find((panel) => panel.view === "journal") ??
+    reusablePanels.find((panel) => panel.view === "block") ??
+    null
+}
+
+function createTemporaryEditorPanel(
+  targetBlockId: DbId,
+  sourcePanelId?: string,
+): string | null {
+  const sourceId = normalizePanelId(sourcePanelId)
+  const anchorPanelId = sourceId === null
+    ? normalizePanelId(orca.state.activePanel)
+    : sourceId
+
+  if (anchorPanelId != null) {
+    const createdPanelId = orca.nav.addTo(anchorPanelId, "right", {
+      view: "block",
+      viewArgs: { blockId: targetBlockId },
+      viewState: {},
+    })
+    if (createdPanelId != null) {
+      return createdPanelId
+    }
+  }
+
+  return null
+}
+
+function collectViewPanels(panel: RowPanel | ColumnPanel | ViewPanel): ViewPanel[] {
+  if (isViewPanel(panel)) {
+    return [panel]
+  }
+
+  return panel.children.flatMap((child) => collectViewPanels(child))
+}
+
+function isViewPanel(
+  panel: RowPanel | ColumnPanel | ViewPanel,
+): panel is ViewPanel {
+  return "view" in panel
+}
+
+function isEditorPanel(panel: ViewPanel): boolean {
+  return panel.view === "block" || panel.view === "journal"
+}
+
+function normalizePanelId(panelId: string | undefined): string | null {
+  const normalized = panelId?.trim() ?? ""
+  return normalized === "" ? null : normalized
+}
+
+async function waitForEditorBlockDom(panel: ViewPanel): Promise<void> {
+  const candidateBlockId = getPanelRootBlockId(panel)
+  if (candidateBlockId == null) {
+    await delayMs(60)
+    return
+  }
+
+  await waitForBlockDom(candidateBlockId)
+}
+
+function getPanelRootBlockId(panel: ViewPanel): DbId | null {
+  const blockId = panel.viewArgs?.blockId
+  if (isValidDbId(blockId)) {
+    return blockId
+  }
+
+  return null
+}
+
+async function waitForBlockDom(blockId: DbId): Promise<void> {
+  const candidateIds = dedupeBlockIds([blockId, getMirrorId(blockId)])
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (
+      candidateIds.some((candidateId) => {
+        return document.querySelector(`.orca-block[data-id="${candidateId}"]`) != null
+      })
+    ) {
+      return
+    }
+
+    await delayMs(60)
+  }
+}
+
+async function insertTaskBlockAsLastChild(
+  parentBlockId: DbId,
+  parentBlock: Block,
+  text: string,
+): Promise<DbId | null> {
+  const parentCandidates: Array<Block | DbId> = [parentBlock, parentBlockId]
+
+  for (const parent of parentCandidates) {
+    const childIdsBeforeInsert = await readChildBlockIdSet(parentBlockId)
+    let insertedResult: unknown = null
+    try {
+      insertedResult = await orca.commands.invokeTopEditorCommand(
+        "core.editor.insertBlock",
+        null,
+        parent,
+        "lastChild",
+        [{ t: "t", v: text }],
+      )
+    } catch (error) {
+      console.error(error)
+    }
+
+    const insertedId = await resolveInsertedChildBlockId(
+      parentBlockId,
+      childIdsBeforeInsert,
+      pickDbIdFromResult(insertedResult),
+    )
+    if (insertedId != null) {
+      return insertedId
+    }
+  }
+
+  for (const parent of parentCandidates) {
+    const childIdsBeforeInsert = await readChildBlockIdSet(parentBlockId)
+    let insertedResult: unknown = null
+    try {
+      insertedResult = await orca.commands.invokeTopEditorCommand(
+        "core.editor.batchInsertText",
+        null,
+        parent,
+        "lastChild",
+        text,
+        false,
+        true,
+      )
+    } catch (error) {
+      console.error(error)
+    }
+
+    const insertedId = await resolveInsertedChildBlockId(
+      parentBlockId,
+      childIdsBeforeInsert,
+      pickDbIdFromResult(insertedResult),
+    )
+    if (insertedId != null) {
+      return insertedId
+    }
+  }
+
+  return null
+}
+
+async function readChildBlockIdSet(blockId: DbId): Promise<Set<DbId>> {
+  const block = await getBlockById(blockId)
+  if (block == null) {
+    return new Set<DbId>()
+  }
+
+  return new Set<DbId>(dedupeDbIds(block.children))
+}
+
+async function resolveInsertedChildBlockId(
+  parentBlockId: DbId,
+  childIdsBeforeInsert: Set<DbId>,
+  insertedCandidateId: DbId | null,
+): Promise<DbId | null> {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const parentBlock = await getBlockById(parentBlockId)
+    if (parentBlock != null) {
+      const childIdsAfterInsert = dedupeDbIds(parentBlock.children)
+      if (
+        insertedCandidateId != null &&
+        !childIdsBeforeInsert.has(insertedCandidateId) &&
+        childIdsAfterInsert.includes(insertedCandidateId)
+      ) {
+        return insertedCandidateId
+      }
+
+      for (let index = childIdsAfterInsert.length - 1; index >= 0; index -= 1) {
+        const childId = childIdsAfterInsert[index]
+        if (!childIdsBeforeInsert.has(childId)) {
+          return childId
+        }
+      }
+    }
+
+    await delayMs(40)
+  }
+
+  return null
+}
+
+function pickDbIdFromResult(result: unknown): DbId | null {
+  if (isValidDbId(result)) {
+    return result
+  }
+
+  if (isRecord(result)) {
+    const idValue = (result as { id?: unknown }).id
+    if (isValidDbId(idValue)) {
+      return idValue
+    }
+  }
+
+  if (!Array.isArray(result)) {
+    return null
+  }
+
+  for (const value of result) {
+    const nested = pickDbIdFromResult(value)
+    if (nested != null) {
+      return nested
+    }
+  }
+
+  return null
+}
+
+function delayMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
 }
 
 function dedupeBlockIds(

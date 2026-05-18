@@ -1167,6 +1167,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
         pluginName: props.pluginName,
         schema: props.schema,
         triggerSource: "panel-view",
+        panelId: props.panelId,
         mountContainer: panelRootRef.current,
         mode: "create",
         parentBlockId: item.blockId,
@@ -1523,6 +1524,7 @@ export function TaskViewsPanel(baseProps: TaskViewsPanelProps) {
       pluginName: props.pluginName,
       schema: props.schema,
       triggerSource: "panel-view",
+      panelId: props.panelId,
       mountContainer: panelRootRef.current,
       mode: "create",
       onTaskCreated: () => {
